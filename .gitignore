@@ -1,0 +1,16 @@
+# 定番のファイル
+*.bak*
+*.old*
+*.swp
+*~
+.DS_Store
+
+# mdファイルの整形でnodeライブラリを利用するため
+**/node_modules
+__pycache__/
+*.py[cod]
+
+# Orchestrator レビュー inbox（依頼・結果はローカル）
+.review-inbox/review-request.md
+.review-inbox/review-response.md
+.review-inbox/INDEX.md

@@ -1,0 +1,4 @@
+prefix_rule(pattern=["herdr-orchestrator", ["task-status", "task-result", "doctor", "result-submit"]], decision="allow", justification="Orchestrator CLI on PATH (~/.local/bin -> ~/.agents/skills/...)")
+prefix_rule(pattern=["GLOBAL_INSTALL_ABS/scripts/herdr-orchestrator", ["task-status", "task-result", "doctor", "result-submit"]], decision="allow", justification="Orchestrator CLI absolute path fallback (replace GLOBAL_INSTALL_ABS)")
+prefix_rule(pattern=["npm", "run", "test:orchestrator"], decision="allow", justification="Orchestrator unit tests (repo root)")
+prefix_rule(pattern=["npm", "run", "verify:orchestrator"], decision="allow", justification="Orchestrator pre-adoption verify (repo root)")
