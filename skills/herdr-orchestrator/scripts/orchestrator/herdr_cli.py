@@ -43,6 +43,8 @@ def run_herdr(args: list[str], *, timeout_sec: float | None = None) -> dict[str,
     Any error raised after the external process is launched must maintain process
     execution evidence in exc.payload (exit_code, stderr, or herdr), enabling
     classify_prompt_error() to reliably distinguish it from pre-execution internal errors.
+    Note: 'herdr' in payload includes synthetic objects generated on timeout
+    (e.g. herdr_cli_timeout) as well as parsed stderr JSON.
     """
     binary = herdr_binary()
     if timeout_sec is not None:
@@ -97,9 +99,10 @@ def classify_prompt_error(exc: HerdrCliError) -> tuple[str, str]:
 
     Maintains the Payload Contract:
     Distinguishes external CLI execution errors (identified by herdr, stderr, or
-    exit_code in payload) from internal pre-execution errors (identified by error
-    in payload alone without external keys).
+    exit_code in payload, including synthetic timeout payloads) from internal
+    pre-execution errors (identified by error in payload alone without external keys).
     """
+
 
     payload = exc.payload or {}
 
