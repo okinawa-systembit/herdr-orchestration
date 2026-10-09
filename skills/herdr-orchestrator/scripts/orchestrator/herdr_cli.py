@@ -37,7 +37,13 @@ def herdr_binary() -> str:
 
 
 def run_herdr(args: list[str], *, timeout_sec: float | None = None) -> dict[str, Any]:
-    """Run herdr with JSON on stdout. Caller must have verified HERDR_ENV when required."""
+    """Run herdr with JSON on stdout. Caller must have verified HERDR_ENV when required.
+
+    Payload Contract:
+    Any error raised after the external process is launched must maintain process
+    execution evidence in exc.payload (exit_code, stderr, or herdr), enabling
+    classify_prompt_error() to reliably distinguish it from pre-execution internal errors.
+    """
     binary = herdr_binary()
     if timeout_sec is not None:
         validate_timeout(timeout_sec)
@@ -89,9 +95,12 @@ def run_herdr(args: list[str], *, timeout_sec: float | None = None) -> dict[str,
 def classify_prompt_error(exc: HerdrCliError) -> tuple[str, str]:
     """Classify a Herdr prompt error into (outcome, reason).
 
-    Distinguishes external CLI errors (from payload['herdr'] or process execution)
-    and internal pre-execution errors (from payload['error']).
+    Maintains the Payload Contract:
+    Distinguishes external CLI execution errors (identified by herdr, stderr, or
+    exit_code in payload) from internal pre-execution errors (identified by error
+    in payload alone without external keys).
     """
+
     payload = exc.payload or {}
 
     # External Herdr CLI error (reported via CLI execution / JSON payload)
