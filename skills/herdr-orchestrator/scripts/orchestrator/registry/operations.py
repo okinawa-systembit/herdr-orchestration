@@ -33,7 +33,7 @@ def _task_eligible_for_cleanup(doc: dict[str, Any], cutoff: datetime) -> bool:
     completion_status = doc["completion"]["status"]
     if task_status not in ("succeeded", "failed", "cancelled"):
         return False
-    if completion_status not in ("not_applicable", "sent", "failed", "uncertain", "skipped"):
+    if completion_status not in ("not_applicable", "sent", "failed", "skipped"):
         return False
     created = doc["timestamps"].get("created_at")
     if not isinstance(created, str):

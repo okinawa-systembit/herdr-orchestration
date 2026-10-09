@@ -336,6 +336,22 @@ class RegistryStage2Tests(unittest.TestCase):
         self.assertTrue(path.exists())
         self.assertNotIn(task_id, info["deleted"])
 
+    def test_cleanup_keeps_uncertain_completion(self) -> None:
+        with _env_patch(self.env):
+            payload = _sample_create_payload(mode="async")
+            doc = registry_ops.create_task(payload)
+            task_id = doc["task"]["id"]
+            path = self.tasks_dir() / f"{task_id}.json"
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            old = (datetime.now(timezone.utc) - timedelta(days=40)).replace(microsecond=0)
+            raw["timestamps"]["created_at"] = old.isoformat()
+            raw["task"]["status"] = "succeeded"
+            raw["completion"]["status"] = "uncertain"
+            path.write_text(json.dumps(raw, indent=2) + "\n", encoding="utf-8")
+            info = registry_ops.cleanup_tasks(now=datetime.now(timezone.utc))
+        self.assertTrue(path.exists())
+        self.assertNotIn(task_id, info["deleted"])
+
     def test_cleanup_deletes_eligible_task(self) -> None:
         with _env_patch(self.env):
             doc = registry_ops.create_task(_sample_create_payload())

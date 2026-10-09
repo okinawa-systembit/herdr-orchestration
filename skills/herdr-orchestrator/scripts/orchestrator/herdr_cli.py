@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import math
+import os
 import shutil
 import subprocess
 from typing import Any
@@ -11,6 +13,17 @@ class HerdrCliError(Exception):
         super().__init__(message)
         self.exit_code = exit_code
         self.payload = payload or {}
+
+
+def validate_timeout(val: float | None, label: str = "timeout_sec") -> float | None:
+    if val is None:
+        return None
+    if not math.isfinite(val) or val <= 0:
+        raise HerdrCliError(
+            f"invalid {label} {val!r}: must be a positive finite number",
+            payload={"error": "invalid_timeout_setting"},
+        )
+    return val
 
 
 def herdr_binary() -> str:
@@ -24,15 +37,43 @@ def herdr_binary() -> str:
 
 
 def run_herdr(args: list[str], *, timeout_sec: float | None = None) -> dict[str, Any]:
-    """Run herdr with JSON on stdout. Caller must have verified HERDR_ENV when required."""
+    """Run herdr with JSON on stdout. Caller must have verified HERDR_ENV when required.
+
+    Payload Contract:
+    Any error raised after the external process is launched must maintain process
+    execution evidence in exc.payload (exit_code, stderr, or herdr), enabling
+    classify_prompt_error() to reliably distinguish it from pre-execution internal errors.
+    Note: 'herdr' in payload includes synthetic objects generated on timeout
+    (e.g. herdr_cli_timeout) as well as parsed stderr JSON.
+    """
     binary = herdr_binary()
-    proc = subprocess.run(
-        [binary, *args],
-        capture_output=True,
-        text=True,
-        timeout=timeout_sec,
-        check=False,
-    )
+    if timeout_sec is not None:
+        validate_timeout(timeout_sec)
+    else:
+        raw = os.environ.get("HERDR_CLI_TIMEOUT_SEC")
+        if raw is not None and raw.strip():
+            try:
+                parsed = float(raw)
+            except ValueError as exc:
+                raise HerdrCliError(
+                    f"invalid HERDR_CLI_TIMEOUT_SEC {raw!r}: must be a positive finite number",
+                    payload={"error": "invalid_timeout_setting"},
+                ) from exc
+            validate_timeout(parsed, label="HERDR_CLI_TIMEOUT_SEC")
+            timeout_sec = parsed
+    try:
+        proc = subprocess.run(
+            [binary, *args],
+            capture_output=True,
+            text=True,
+            timeout=timeout_sec,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise HerdrCliError(
+            f"herdr command timed out after {exc.timeout} seconds",
+            payload={"herdr": {"error": {"code": "herdr_cli_timeout"}}},
+        ) from exc
     if proc.returncode == 0:
         text = proc.stdout.strip()
         if not text:
@@ -51,3 +92,36 @@ def run_herdr(args: list[str], *, timeout_sec: float | None = None) -> dict[str,
     except json.JSONDecodeError:
         payload["stderr"] = stderr
     raise HerdrCliError(message, exit_code=proc.returncode, payload=payload)
+
+
+def classify_prompt_error(exc: HerdrCliError) -> tuple[str, str]:
+    """Classify a Herdr prompt error into (outcome, reason).
+
+    Maintains the Payload Contract:
+    Distinguishes external CLI execution errors (identified by herdr, stderr, or
+    exit_code in payload, including synthetic timeout payloads) from internal
+    pre-execution errors (identified by error in payload alone without external keys).
+    """
+
+
+    payload = exc.payload or {}
+
+    # External Herdr CLI error (reported via CLI execution / JSON payload)
+    if "herdr" in payload or "stderr" in payload or "exit_code" in payload:
+        herdr_err = payload.get("herdr") if isinstance(payload.get("herdr"), dict) else {}
+        inner = herdr_err.get("error") if isinstance(herdr_err.get("error"), dict) else {}
+        cli_code = inner.get("code") if isinstance(inner.get("code"), str) else "herdr_prompt_failed"
+        if cli_code in ("agent_not_found", "agent_not_ready", "agent_blocked"):
+            return "failed", cli_code
+        return "uncertain", cli_code
+
+    # Internal Orchestrator pre-execution error (CLI not run or config invalid)
+    internal_error = payload.get("error")
+    if isinstance(internal_error, str):
+        if internal_error in ("herdr_cli_missing", "invalid_timeout_setting"):
+            return "failed", internal_error
+        return "uncertain", internal_error
+
+    return "uncertain", "herdr_prompt_failed"
+
+

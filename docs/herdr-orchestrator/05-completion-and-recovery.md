@@ -229,7 +229,7 @@ durable result
 6. `resume-task` 相当の claim/finalize（[§9.13](#sec-9-13) eligibility を満たす場合のみ）
 ```
 
-`recover-completion` は 1〜4 の診断のうえ、**5 と 6 を分離**する。5 は eligibility 不要（reset 受理条件のみ）。6 は reset 後に `completion.status=pending` となり、§9.13 eligibility を満たす場合のみ実行する。eligibility 未達なら reset だけ成功して停止してよい。
+`recover-completion` は 1〜4 の診断のうえ、**5 と 6 を分離**する。5 は eligibility 不要（reset 受理条件のみ）。ただし、二重配送を防止するため `completion.status ∈ {uncertain, processing}` の場合は自動的な `reset-completion` と再実行（6）を行わず、人間による確認と明示的な `reset-completion`（単体操作）を要求する。6 は reset 後に `completion.status=pending` となり、§9.13 eligibility を満たす場合のみ実行する。eligibility 未達なら reset だけ成功して停止してよい。
 
 復旧時には履歴を残す。
 
@@ -309,6 +309,8 @@ result.status = unavailable
 §9.4 の requester 状態による `skipped`（通常 `dispatch.status=sent` かつ `result.status` terminal）とは区別する。
 
 `sent` / `not_applicable` / 既に `pending` の task へ reset は不要（拒否または no-op）。reset 後は `completion.status=pending` となり、claim には §9.13 を適用する。
+
+`processing` または `uncertain` の task を手動で `reset-completion` する場合、requester が既に prompt を受信している可能性があるため、Orchestrator CLI は二重配送リスクの警告（`warning`）を出力する。操作者は requester の実機状態（作業中か等）を確認した上で後続の `resume-task` を判断すること。
 
 ---
 
@@ -441,6 +443,29 @@ requester Agentがチャットで配送結果不明を報告
 二重配送防止のため自動再送していません。
 Herdr 上で対象 Agent の状態を確認してください。
 ```
+
+#### 配送エラー分類と発生元による安全制御
+
+handoff および completion の配送試行時に発生したエラーは、二重配送リスクを最小化するため、エラーペイロードの発生元（外部 Herdr CLI の実行結果 vs Orchestrator 内部の事前検証）に基づいて以下の方針で決定論的に分類する。
+
+1. **未配送確定（`failed`）**:
+   - 外部 Herdr CLI 起因（`payload.herdr.error.code`）: `agent_not_found`、`agent_not_ready`、`agent_blocked`（公式 Herdr CLI 仕様に基づき送信前に拒否されたことが確定しているもの）
+   - Orchestrator 内部起因（`payload.error`）: `herdr_cli_missing`（CLI 実行バイナリ不在）、`invalid_timeout_setting`（CLI 起動前の timeout 設定値検証失敗）
+2. **配送結果不明（`uncertain`）**:
+   - 外部 Herdr CLI 起因: `herdr_cli_timeout`、`agent_prompt_stalled`、コード不在・解析不能な不完全な JSON や未知の CLI エラー、および内部エラーと同名のコード（外部 CLI 由来である限り未配送確定と保証できないため安全側へ倒す）
+   - Orchestrator 内部起因（`payload.error`）: 上記以外の予期しない内部エラー
+
+**エラーコード発生元区別の設計方針**:
+クラス階層の肥大化や独自フラグの追加を避け、既存の `HerdrCliError.payload` 構造（外部 CLI プロセス実行由来である `herdr` / `stderr` / `exit_code` の有無）を利用して発生元を識別する。外部 CLI の実行形跡が存在する場合は外部起因を最優先で判定し、コードが取得できない不完全な JSON やエラーであっても内部エラー判定へ流さず即座に `uncertain` とする。
+外部 CLI から将来的に内部エラーと同名のエラーコードが返された場合や未知のエラーコードが返された場合でも、公式仕様で送信前拒否が明確に確認されている特定コード（`agent_not_*`、`agent_blocked`）以外はすべて保守的に `uncertain`（配送結果不明）へ倒すことで、Herdr のバージョン更新やコード衝突に対しても二重配送防止の安全原則を堅牢に担保する。
+
+**外部 CLI 実行結果ペイロードの Contract（保守性の担保）**:
+外部 CLI の起動後に発生したエラーを確実に識別し、分類の前提を将来にわたって維持するため、Orchestrator の CLI 実行層（`run_herdr`）と分類層（`classify_prompt_error`）は以下の Contract を厳格に保つものとする。
+
+1. **プロセス実行痕跡の保持**: 外部 CLI プロセスが起動された後のエラー（非ゼロ終了・タイムアウト・stderr 解析失敗）では、例外ペイロード（`HerdrCliError.payload`）に必ずプロセス実行を示すキー（`exit_code`、`stderr`、または `herdr`）を保持しなければならない。なお、`herdr` キーは外部 CLI 自身が出力した JSON だけでなく、Orchestrator がプロセス実行エラー（`herdr_cli_timeout` 等）を表現するために生成する場合もある。これらはいずれも「外部プロセス実行に関連するエラー」を識別するための Contract 上の識別子である。
+2. **事前検証エラーとの分離**: CLI 起動前の内部エラー（設定値不正・バイナリ不在等）にはこれら外部実行キーを含めてはならず、内部エラーキー（`error`）のみを保持する。
+
+これにより、将来のエラーハンドリング変更やリファクタリング時にも発生元の誤判定（外部 CLI エラーを内部事前検証エラーと誤認して `failed` 判定してしまうこと）を恒久的に防止する。
 
 正常完了時の proactive user notification は中央 Orchestrator の責務としない。
 

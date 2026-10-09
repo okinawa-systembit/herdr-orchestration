@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from orchestrator.handoff_commands import build_task_envelope
-from orchestrator.herdr_cli import HerdrCliError, run_herdr
+from orchestrator.herdr_cli import HerdrCliError, classify_prompt_error, run_herdr
 from orchestrator.live_agent import LiveAgentError, verify_live_agent_context
 from orchestrator.registry.errors import RegistryError
 from orchestrator.registry import operations as registry_ops
@@ -39,27 +39,8 @@ def _registry_to_completion(exc: RegistryError) -> CompletionCommandError:
     )
 
 
-def _herdr_error_code(exc: HerdrCliError) -> str:
-    payload = exc.payload or {}
-    herdr_err = payload.get("herdr") if isinstance(payload.get("herdr"), dict) else {}
-    inner = herdr_err.get("error") if isinstance(herdr_err.get("error"), dict) else {}
-    if isinstance(inner.get("code"), str):
-        return inner["code"]
-    return "herdr_prompt_failed"
-
-
 def _completion_outcome_from_prompt_error(exc: HerdrCliError) -> tuple[str, str | None]:
-    code = _herdr_error_code(exc)
-    if code in ("agent_prompt_stalled",):
-        return "uncertain", code
-    if code in (
-        "agent_not_found",
-        "agent_not_ready",
-        "agent_blocked",
-        "herdr_prompt_failed",
-    ):
-        return "failed", code
-    return "uncertain", code
+    return classify_prompt_error(exc)
 
 
 def _require_live_pane_id(snap: Any, *, task_id: str) -> str:
@@ -183,14 +164,22 @@ def run_resume_task(task_id: str) -> dict[str, Any]:
 
 def run_reset_completion(task_id: str) -> dict[str, Any]:
     try:
+        before_doc = registry_ops.get_task(task_id)
+        prev_status = before_doc.get("completion", {}).get("status")
         doc = registry_ops.reset_completion(task_id)
     except RegistryError as exc:
         raise _registry_to_completion(exc) from exc
-    return {
+    payload: dict[str, Any] = {
         "command": "reset-completion",
         "task_id": task_id,
         "completion": copy.deepcopy(doc["completion"]),
     }
+    if prev_status in ("processing", "uncertain"):
+        payload["warning"] = (
+            f"completion was previously {prev_status!r}; prompt may have already been dispatched. "
+            "Verify requester live state before resuming to avoid duplicate task processing."
+        )
+    return payload
 
 
 def run_recover_completion(task_id: str) -> dict[str, Any]:
@@ -201,17 +190,17 @@ def run_recover_completion(task_id: str) -> dict[str, Any]:
 
     reset_applied = False
     status = completion["status"]
-    if status in ("processing", "failed", "uncertain", "skipped"):
+    if status in ("failed", "skipped"):
         try:
             doc = registry_ops.reset_completion(task_id)
             reset_applied = True
         except RegistryError as exc:
             raise _registry_to_completion(exc) from exc
-    elif status == "sent":
+    elif status in ("sent", "uncertain", "processing"):
         raise CompletionCommandError(
             "registry_conflict",
             task_id=task_id,
-            message="completion already sent",
+            message=f"completion is {status}; cannot automatically recover to prevent double dispatch",
         )
     elif status not in ("pending",):
         raise CompletionCommandError("registry_conflict", task_id=task_id)

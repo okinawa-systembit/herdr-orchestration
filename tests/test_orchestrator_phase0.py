@@ -153,5 +153,112 @@ class TaskRegistryCliSmokeTests(unittest.TestCase):
         self.assertEqual(err["error"], "task_not_found")
 
 
+class HerdrCliTimeoutValidationTests(unittest.TestCase):
+    def test_validate_timeout_rejects_non_positive_and_non_finite(self) -> None:
+        from orchestrator.herdr_cli import HerdrCliError, validate_timeout
+
+        for bad in (0, -1, -0.5, float("nan"), float("inf"), float("-inf")):
+            with self.assertRaises(HerdrCliError) as ctx:
+                validate_timeout(bad)
+            self.assertEqual(ctx.exception.payload.get("error"), "invalid_timeout_setting")
+
+    def test_validate_timeout_accepts_positive_finite(self) -> None:
+        from orchestrator.herdr_cli import validate_timeout
+
+        self.assertEqual(validate_timeout(0.1), 0.1)
+        self.assertEqual(validate_timeout(30.0), 30.0)
+        self.assertIsNone(validate_timeout(None))
+
+    def test_run_herdr_rejects_invalid_timeout_env(self) -> None:
+        from unittest.mock import patch
+        from orchestrator.herdr_cli import HerdrCliError, run_herdr
+
+        for bad_str in ("0", "-1", "nan", "inf", "-inf", "abc"):
+            with patch.dict(os.environ, {"HERDR_CLI_TIMEOUT_SEC": bad_str}):
+                with self.assertRaises(HerdrCliError) as ctx:
+                    run_herdr(["--version"])
+                self.assertEqual(ctx.exception.payload.get("error"), "invalid_timeout_setting")
+
+
+class ClassifyPromptErrorTests(unittest.TestCase):
+    def test_external_known_undelivered_marks_failed(self) -> None:
+        from orchestrator.herdr_cli import HerdrCliError, classify_prompt_error
+
+        for code in ("agent_not_found", "agent_not_ready", "agent_blocked"):
+            exc = HerdrCliError("failed", payload={"herdr": {"error": {"code": code}}})
+            outcome, reason = classify_prompt_error(exc)
+            self.assertEqual(outcome, "failed")
+            self.assertEqual(reason, code)
+
+    def test_external_timeout_and_unknown_and_colliding_code_marks_uncertain(self) -> None:
+        from orchestrator.herdr_cli import HerdrCliError, classify_prompt_error
+
+        for code in (
+            "herdr_cli_timeout",
+            "agent_prompt_stalled",
+            "unknown_error",
+            "invalid_timeout_setting",  # External CLI returning same code as internal error
+            "herdr_cli_missing",        # External CLI returning same code as internal error
+        ):
+            exc = HerdrCliError("failed", payload={"herdr": {"error": {"code": code}}})
+            outcome, reason = classify_prompt_error(exc)
+            self.assertEqual(outcome, "uncertain")
+            self.assertEqual(reason, code)
+
+    def test_external_incomplete_or_malformed_json_marks_uncertain(self) -> None:
+        from orchestrator.herdr_cli import HerdrCliError, classify_prompt_error
+
+        # Incomplete JSON without "code" in herdr.error
+        exc1 = HerdrCliError(
+            "failed",
+            payload={"error": "herdr_cli_failed", "exit_code": 1, "herdr": {"error": {"message": "something"}}},
+        )
+        outcome1, reason1 = classify_prompt_error(exc1)
+        self.assertEqual(outcome1, "uncertain")
+        self.assertEqual(reason1, "herdr_prompt_failed")
+
+        # Empty herdr error object
+        exc2 = HerdrCliError(
+            "failed",
+            payload={"error": "herdr_cli_failed", "exit_code": 1, "herdr": {"error": {}}},
+        )
+        outcome2, reason2 = classify_prompt_error(exc2)
+        self.assertEqual(outcome2, "uncertain")
+        self.assertEqual(reason2, "herdr_prompt_failed")
+
+        # Non-JSON stderr from external CLI (payload contains stderr and exit_code)
+        exc3 = HerdrCliError(
+            "failed",
+            payload={"error": "herdr_cli_failed", "exit_code": 1, "stderr": "fatal: crash"},
+        )
+        outcome3, reason3 = classify_prompt_error(exc3)
+        self.assertEqual(outcome3, "uncertain")
+        self.assertEqual(reason3, "herdr_prompt_failed")
+
+    def test_internal_pre_execution_errors_marks_failed(self) -> None:
+        from orchestrator.herdr_cli import HerdrCliError, classify_prompt_error
+
+        for err in ("herdr_cli_missing", "invalid_timeout_setting"):
+            exc = HerdrCliError("failed", payload={"error": err})
+            outcome, reason = classify_prompt_error(exc)
+            self.assertEqual(outcome, "failed")
+            self.assertEqual(reason, err)
+
+
+    def test_internal_unknown_or_malformed_marks_uncertain(self) -> None:
+        from orchestrator.herdr_cli import HerdrCliError, classify_prompt_error
+
+        exc = HerdrCliError("failed", payload={"error": "unexpected_internal_err"})
+        outcome, reason = classify_prompt_error(exc)
+        self.assertEqual(outcome, "uncertain")
+        self.assertEqual(reason, "unexpected_internal_err")
+
+        exc2 = HerdrCliError("failed", payload={})
+        outcome2, reason2 = classify_prompt_error(exc2)
+        self.assertEqual(outcome2, "uncertain")
+        self.assertEqual(reason2, "herdr_prompt_failed")
+
+
 if __name__ == "__main__":
     unittest.main()
+

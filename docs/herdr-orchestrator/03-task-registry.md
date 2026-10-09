@@ -405,7 +405,7 @@ cron / systemd timer を要求せず lazy cleanup とする。削除可能な ta
 
 ```text
 task.status ∈ {succeeded, failed, cancelled}
-completion.status ∈ {not_applicable, sent, failed, uncertain, skipped}
+completion.status ∈ {not_applicable, sent, failed, skipped}
 created から 30 日以上経過
 ```
 
