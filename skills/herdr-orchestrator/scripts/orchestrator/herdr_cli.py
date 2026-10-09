@@ -89,16 +89,16 @@ def run_herdr(args: list[str], *, timeout_sec: float | None = None) -> dict[str,
 def classify_prompt_error(exc: HerdrCliError) -> tuple[str, str]:
     """Classify a Herdr prompt error into (outcome, reason).
 
-    Distinguishes external CLI errors (from payload['herdr']) and internal
-    pre-execution errors (from payload['error']).
+    Distinguishes external CLI errors (from payload['herdr'] or process execution)
+    and internal pre-execution errors (from payload['error']).
     """
     payload = exc.payload or {}
-    herdr_err = payload.get("herdr") if isinstance(payload.get("herdr"), dict) else {}
-    inner = herdr_err.get("error") if isinstance(herdr_err.get("error"), dict) else {}
 
-    # External Herdr CLI error (reported via CLI JSON payload)
-    if isinstance(inner.get("code"), str):
-        cli_code = inner["code"]
+    # External Herdr CLI error (reported via CLI execution / JSON payload)
+    if "herdr" in payload or "stderr" in payload or "exit_code" in payload:
+        herdr_err = payload.get("herdr") if isinstance(payload.get("herdr"), dict) else {}
+        inner = herdr_err.get("error") if isinstance(herdr_err.get("error"), dict) else {}
+        cli_code = inner.get("code") if isinstance(inner.get("code"), str) else "herdr_prompt_failed"
         if cli_code in ("agent_not_found", "agent_not_ready", "agent_blocked"):
             return "failed", cli_code
         return "uncertain", cli_code
@@ -111,4 +111,5 @@ def classify_prompt_error(exc: HerdrCliError) -> tuple[str, str]:
         return "uncertain", internal_error
 
     return "uncertain", "herdr_prompt_failed"
+
 

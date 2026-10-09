@@ -452,11 +452,11 @@ handoff および completion の配送試行時に発生したエラーは、二
    - 外部 Herdr CLI 起因（`payload.herdr.error.code`）: `agent_not_found`、`agent_not_ready`、`agent_blocked`（公式 Herdr CLI 仕様に基づき送信前に拒否されたことが確定しているもの）
    - Orchestrator 内部起因（`payload.error`）: `herdr_cli_missing`（CLI 実行バイナリ不在）、`invalid_timeout_setting`（CLI 起動前の timeout 設定値検証失敗）
 2. **配送結果不明（`uncertain`）**:
-   - 外部 Herdr CLI 起因（`payload.herdr.error.code`）: `herdr_cli_timeout`、`agent_prompt_stalled`、その他解析不能な未知の CLI エラー、および内部エラーと同名のコード（外部 CLI 由来である限り未配送確定と保証できないため安全側へ倒す）
+   - 外部 Herdr CLI 起因: `herdr_cli_timeout`、`agent_prompt_stalled`、コード不在・解析不能な不完全な JSON や未知の CLI エラー、および内部エラーと同名のコード（外部 CLI 由来である限り未配送確定と保証できないため安全側へ倒す）
    - Orchestrator 内部起因（`payload.error`）: 上記以外の予期しない内部エラー
 
 **エラーコード発生元区別の設計方針**:
-クラス階層の肥大化や独自フラグの追加を避け、既存の `HerdrCliError.payload` 構造（外部 CLI の stderr 由来である `herdr` オブジェクトの有無）を利用して発生元を識別する。
+クラス階層の肥大化や独自フラグの追加を避け、既存の `HerdrCliError.payload` 構造（外部 CLI プロセス実行由来である `herdr` / `stderr` / `exit_code` の有無）を利用して発生元を識別する。外部 CLI の実行形跡が存在する場合は外部起因を最優先で判定し、コードが取得できない不完全な JSON やエラーであっても内部エラー判定へ流さず即座に `uncertain` とする。
 外部 CLI から将来的に内部エラーと同名のエラーコードが返された場合や未知のエラーコードが返された場合でも、公式仕様で送信前拒否が明確に確認されている特定コード（`agent_not_*`、`agent_blocked`）以外はすべて保守的に `uncertain`（配送結果不明）へ倒すことで、Herdr のバージョン更新やコード衝突に対しても二重配送防止の安全原則を堅牢に担保する。
 
 正常完了時の proactive user notification は中央 Orchestrator の責務としない。

@@ -205,6 +205,36 @@ class ClassifyPromptErrorTests(unittest.TestCase):
             self.assertEqual(outcome, "uncertain")
             self.assertEqual(reason, code)
 
+    def test_external_incomplete_or_malformed_json_marks_uncertain(self) -> None:
+        from orchestrator.herdr_cli import HerdrCliError, classify_prompt_error
+
+        # Incomplete JSON without "code" in herdr.error
+        exc1 = HerdrCliError(
+            "failed",
+            payload={"error": "herdr_cli_failed", "exit_code": 1, "herdr": {"error": {"message": "something"}}},
+        )
+        outcome1, reason1 = classify_prompt_error(exc1)
+        self.assertEqual(outcome1, "uncertain")
+        self.assertEqual(reason1, "herdr_prompt_failed")
+
+        # Empty herdr error object
+        exc2 = HerdrCliError(
+            "failed",
+            payload={"error": "herdr_cli_failed", "exit_code": 1, "herdr": {"error": {}}},
+        )
+        outcome2, reason2 = classify_prompt_error(exc2)
+        self.assertEqual(outcome2, "uncertain")
+        self.assertEqual(reason2, "herdr_prompt_failed")
+
+        # Non-JSON stderr from external CLI (payload contains stderr and exit_code)
+        exc3 = HerdrCliError(
+            "failed",
+            payload={"error": "herdr_cli_failed", "exit_code": 1, "stderr": "fatal: crash"},
+        )
+        outcome3, reason3 = classify_prompt_error(exc3)
+        self.assertEqual(outcome3, "uncertain")
+        self.assertEqual(reason3, "herdr_prompt_failed")
+
     def test_internal_pre_execution_errors_marks_failed(self) -> None:
         from orchestrator.herdr_cli import HerdrCliError, classify_prompt_error
 
@@ -213,6 +243,7 @@ class ClassifyPromptErrorTests(unittest.TestCase):
             outcome, reason = classify_prompt_error(exc)
             self.assertEqual(outcome, "failed")
             self.assertEqual(reason, err)
+
 
     def test_internal_unknown_or_malformed_marks_uncertain(self) -> None:
         from orchestrator.herdr_cli import HerdrCliError, classify_prompt_error
