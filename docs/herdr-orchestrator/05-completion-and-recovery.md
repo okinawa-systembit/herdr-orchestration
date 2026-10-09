@@ -444,6 +444,19 @@ requester Agentがチャットで配送結果不明を報告
 Herdr 上で対象 Agent の状態を確認してください。
 ```
 
+#### 配送エラー分類と内部設定エラーの扱い
+
+handoff および completion の配送試行時に発生したエラーは、二重配送リスクを最小化するため以下の方針で分類する。
+
+1. **未配送確定（`failed`）**:
+   - 外部 Herdr CLI 起因: `agent_not_found`、`agent_not_ready`、`agent_blocked`（Herdr CLI が送信前に拒否）
+   - Orchestrator 内部起因: `herdr_cli_missing`（CLI 実行バイナリ不在）、`invalid_timeout_setting`（CLI 起動前の timeout 設定値検証失敗）
+2. **配送結果不明（`uncertain`）**:
+   - 外部 Herdr CLI timeout、`agent_prompt_stalled`、その他解析不能な未知の CLI エラー
+
+**エラーコード発生元の区別に関する設計判断**:
+`invalid_timeout_setting` や `herdr_cli_missing` は、Herdr CLI 起動前に Orchestrator 内部で検出される設定・環境エラーであり、未配送確定であるため `failed` に分類する。Herdr 公式 CLI が返す prompt エラーコード（`agent_not_*`、`agent_blocked` 等）の仕様体系に同名のエラーコードは存在せず衝突リスクがないため、エラー発生元の属性フラグ等を新設して区別する内部実装の複雑化は行わない。現行のエラーコード照合により安全かつ決定論的に未配送確定判定を行う。万一未知の外部 CLI エラーが発生した場合はすべて保守的に `uncertain`（配送結果不明）へ倒すため、二重配送防止の安全原則は維持される。
+
 正常完了時の proactive user notification は中央 Orchestrator の責務としない。
 
 異常時のチャット報告は、依頼元 Agent が人間の待ち続けを防ぐために行う fail-visible behavior とする。
