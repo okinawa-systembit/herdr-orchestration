@@ -183,14 +183,22 @@ def run_resume_task(task_id: str) -> dict[str, Any]:
 
 def run_reset_completion(task_id: str) -> dict[str, Any]:
     try:
+        before_doc = registry_ops.get_task(task_id)
+        prev_status = before_doc.get("completion", {}).get("status")
         doc = registry_ops.reset_completion(task_id)
     except RegistryError as exc:
         raise _registry_to_completion(exc) from exc
-    return {
+    payload: dict[str, Any] = {
         "command": "reset-completion",
         "task_id": task_id,
         "completion": copy.deepcopy(doc["completion"]),
     }
+    if prev_status in ("processing", "uncertain"):
+        payload["warning"] = (
+            f"completion was previously {prev_status!r}; prompt may have already been dispatched. "
+            "Verify requester live state before resuming to avoid duplicate task processing."
+        )
+    return payload
 
 
 def run_recover_completion(task_id: str) -> dict[str, Any]:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import shutil
 import subprocess
@@ -12,6 +13,17 @@ class HerdrCliError(Exception):
         super().__init__(message)
         self.exit_code = exit_code
         self.payload = payload or {}
+
+
+def validate_timeout(val: float | None, label: str = "timeout_sec") -> float | None:
+    if val is None:
+        return None
+    if not math.isfinite(val) or val <= 0:
+        raise HerdrCliError(
+            f"invalid {label} {val!r}: must be a positive finite number",
+            payload={"error": "invalid_timeout_setting"},
+        )
+    return val
 
 
 def herdr_binary() -> str:
@@ -27,13 +39,20 @@ def herdr_binary() -> str:
 def run_herdr(args: list[str], *, timeout_sec: float | None = None) -> dict[str, Any]:
     """Run herdr with JSON on stdout. Caller must have verified HERDR_ENV when required."""
     binary = herdr_binary()
-    if timeout_sec is None:
+    if timeout_sec is not None:
+        validate_timeout(timeout_sec)
+    else:
         raw = os.environ.get("HERDR_CLI_TIMEOUT_SEC")
-        if raw:
+        if raw is not None and raw.strip():
             try:
-                timeout_sec = float(raw)
-            except ValueError:
-                pass
+                parsed = float(raw)
+            except ValueError as exc:
+                raise HerdrCliError(
+                    f"invalid HERDR_CLI_TIMEOUT_SEC {raw!r}: must be a positive finite number",
+                    payload={"error": "invalid_timeout_setting"},
+                ) from exc
+            validate_timeout(parsed, label="HERDR_CLI_TIMEOUT_SEC")
+            timeout_sec = parsed
     try:
         proc = subprocess.run(
             [binary, *args],

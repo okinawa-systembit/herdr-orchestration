@@ -310,6 +310,8 @@ result.status = unavailable
 
 `sent` / `not_applicable` / 既に `pending` の task へ reset は不要（拒否または no-op）。reset 後は `completion.status=pending` となり、claim には §9.13 を適用する。
 
+`processing` または `uncertain` の task を手動で `reset-completion` する場合、requester が既に prompt を受信している可能性があるため、Orchestrator CLI は二重配送リスクの警告（`warning`）を出力する。操作者は requester の実機状態（作業中か等）を確認した上で後続の `resume-task` を判断すること。
+
 ---
 
 <a id="sec-9-9"></a>

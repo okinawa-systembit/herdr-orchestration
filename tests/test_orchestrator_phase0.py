@@ -153,5 +153,32 @@ class TaskRegistryCliSmokeTests(unittest.TestCase):
         self.assertEqual(err["error"], "task_not_found")
 
 
+class HerdrCliTimeoutValidationTests(unittest.TestCase):
+    def test_validate_timeout_rejects_non_positive_and_non_finite(self) -> None:
+        from orchestrator.herdr_cli import HerdrCliError, validate_timeout
+
+        for bad in (0, -1, -0.5, float("nan"), float("inf"), float("-inf")):
+            with self.assertRaises(HerdrCliError) as ctx:
+                validate_timeout(bad)
+            self.assertEqual(ctx.exception.payload.get("error"), "invalid_timeout_setting")
+
+    def test_validate_timeout_accepts_positive_finite(self) -> None:
+        from orchestrator.herdr_cli import validate_timeout
+
+        self.assertEqual(validate_timeout(0.1), 0.1)
+        self.assertEqual(validate_timeout(30.0), 30.0)
+        self.assertIsNone(validate_timeout(None))
+
+    def test_run_herdr_rejects_invalid_timeout_env(self) -> None:
+        from unittest.mock import patch
+        from orchestrator.herdr_cli import HerdrCliError, run_herdr
+
+        for bad_str in ("0", "-1", "nan", "inf", "-inf", "abc"):
+            with patch.dict(os.environ, {"HERDR_CLI_TIMEOUT_SEC": bad_str}):
+                with self.assertRaises(HerdrCliError) as ctx:
+                    run_herdr(["--version"])
+                self.assertEqual(ctx.exception.payload.get("error"), "invalid_timeout_setting")
+
+
 if __name__ == "__main__":
     unittest.main()

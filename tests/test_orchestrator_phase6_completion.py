@@ -310,19 +310,38 @@ class Phase6CompletionTests(unittest.TestCase):
         task_id = _async_task_result_pending(self.env, self.worktree)
         with _env_patch(self.env):
             registry_ops.claim_completion(task_id)
-        # reset-completion works on processing
+        # reset-completion works on processing, and includes warning
         proc = _run_cli("reset-completion", task_id, env=self.env)
         self.assertEqual(proc.returncode, 0, proc.stdout)
+        out = json.loads(proc.stdout)
+        self.assertIn("warning", out)
+        self.assertIn("processing", out["warning"])
         with _env_patch(self.env):
             doc = registry_ops.get_task(task_id)
             self.assertEqual(doc["completion"]["status"], "pending")
 
-        # reset-completion works on uncertain
+        # reset-completion works on uncertain, and includes warning
         with _env_patch(self.env):
             registry_ops.claim_completion(task_id)
             registry_ops.finish_completion(task_id, outcome="uncertain", reason="agent_prompt_stalled")
         proc = _run_cli("reset-completion", task_id, env=self.env)
         self.assertEqual(proc.returncode, 0, proc.stdout)
+        out = json.loads(proc.stdout)
+        self.assertIn("warning", out)
+        self.assertIn("uncertain", out["warning"])
+        with _env_patch(self.env):
+            doc = registry_ops.get_task(task_id)
+            self.assertEqual(doc["completion"]["status"], "pending")
+
+    def test_reset_completion_no_warning_on_failed(self) -> None:
+        task_id = _async_task_result_pending(self.env, self.worktree)
+        with _env_patch(self.env):
+            registry_ops.claim_completion(task_id)
+            registry_ops.finish_completion(task_id, outcome="failed", reason="agent_not_found")
+        proc = _run_cli("reset-completion", task_id, env=self.env)
+        self.assertEqual(proc.returncode, 0, proc.stdout)
+        out = json.loads(proc.stdout)
+        self.assertNotIn("warning", out)
         with _env_patch(self.env):
             doc = registry_ops.get_task(task_id)
             self.assertEqual(doc["completion"]["status"], "pending")
