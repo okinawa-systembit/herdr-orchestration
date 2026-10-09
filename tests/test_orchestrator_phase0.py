@@ -180,5 +180,54 @@ class HerdrCliTimeoutValidationTests(unittest.TestCase):
                 self.assertEqual(ctx.exception.payload.get("error"), "invalid_timeout_setting")
 
 
+class ClassifyPromptErrorTests(unittest.TestCase):
+    def test_external_known_undelivered_marks_failed(self) -> None:
+        from orchestrator.herdr_cli import HerdrCliError, classify_prompt_error
+
+        for code in ("agent_not_found", "agent_not_ready", "agent_blocked"):
+            exc = HerdrCliError("failed", payload={"herdr": {"error": {"code": code}}})
+            outcome, reason = classify_prompt_error(exc)
+            self.assertEqual(outcome, "failed")
+            self.assertEqual(reason, code)
+
+    def test_external_timeout_and_unknown_and_colliding_code_marks_uncertain(self) -> None:
+        from orchestrator.herdr_cli import HerdrCliError, classify_prompt_error
+
+        for code in (
+            "herdr_cli_timeout",
+            "agent_prompt_stalled",
+            "unknown_error",
+            "invalid_timeout_setting",  # External CLI returning same code as internal error
+            "herdr_cli_missing",        # External CLI returning same code as internal error
+        ):
+            exc = HerdrCliError("failed", payload={"herdr": {"error": {"code": code}}})
+            outcome, reason = classify_prompt_error(exc)
+            self.assertEqual(outcome, "uncertain")
+            self.assertEqual(reason, code)
+
+    def test_internal_pre_execution_errors_marks_failed(self) -> None:
+        from orchestrator.herdr_cli import HerdrCliError, classify_prompt_error
+
+        for err in ("herdr_cli_missing", "invalid_timeout_setting"):
+            exc = HerdrCliError("failed", payload={"error": err})
+            outcome, reason = classify_prompt_error(exc)
+            self.assertEqual(outcome, "failed")
+            self.assertEqual(reason, err)
+
+    def test_internal_unknown_or_malformed_marks_uncertain(self) -> None:
+        from orchestrator.herdr_cli import HerdrCliError, classify_prompt_error
+
+        exc = HerdrCliError("failed", payload={"error": "unexpected_internal_err"})
+        outcome, reason = classify_prompt_error(exc)
+        self.assertEqual(outcome, "uncertain")
+        self.assertEqual(reason, "unexpected_internal_err")
+
+        exc2 = HerdrCliError("failed", payload={})
+        outcome2, reason2 = classify_prompt_error(exc2)
+        self.assertEqual(outcome2, "uncertain")
+        self.assertEqual(reason2, "herdr_prompt_failed")
+
+
 if __name__ == "__main__":
     unittest.main()
+

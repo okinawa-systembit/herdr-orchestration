@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from orchestrator.handoff_lock import HandoffLockSession
-from orchestrator.herdr_cli import HerdrCliError, run_herdr
+from orchestrator.herdr_cli import HerdrCliError, classify_prompt_error, run_herdr
 from orchestrator.identity import RepositoryIdentityError, derive_repository_identity
 from orchestrator.live_agent import (
     LiveAgentError,
@@ -75,28 +75,8 @@ def build_task_envelope(task_id: str) -> str:
     )
 
 
-def _herdr_error_code(exc: HerdrCliError) -> str:
-    payload = exc.payload or {}
-    herdr_err = payload.get("herdr") if isinstance(payload.get("herdr"), dict) else {}
-    inner = herdr_err.get("error") if isinstance(herdr_err.get("error"), dict) else {}
-    if isinstance(inner.get("code"), str):
-        return inner["code"]
-    if isinstance(payload.get("error"), str):
-        return payload["error"]
-    return "herdr_prompt_failed"
-
-
 def _dispatch_outcome_from_prompt_error(exc: HerdrCliError) -> tuple[str, str]:
-    code = _herdr_error_code(exc)
-    if code in (
-        "agent_not_found",
-        "agent_not_ready",
-        "agent_blocked",
-        "herdr_cli_missing",
-        "invalid_timeout_setting",
-    ):
-        return "failed", code
-    return "uncertain", code
+    return classify_prompt_error(exc)
 
 
 def _require_live_pane_id(snap: Any, *, party: str) -> str:

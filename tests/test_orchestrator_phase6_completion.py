@@ -373,13 +373,24 @@ class Phase6CompletionTests(unittest.TestCase):
         doc = json.loads(proc.stdout)
         self.assertEqual(doc["completion"]["status"], "failed")
 
-    def test_resume_task_prompt_invalid_timeout_setting_marks_failed(self) -> None:
+    def test_resume_task_prompt_external_invalid_timeout_code_marks_uncertain(self) -> None:
         task_id = _async_task_result_pending(self.env, self.worktree)
         env = {**self.env, "FAKE_PROMPT_MODE": "invalid_timeout"}
         proc = _run_cli("resume-task", task_id, env=env)
         self.assertEqual(proc.returncode, 0, proc.stdout)
         doc = json.loads(proc.stdout)
-        self.assertEqual(doc["completion"]["status"], "failed")
+        self.assertEqual(doc["completion"]["status"], "uncertain")
+
+    def test_resume_task_prompt_internal_invalid_timeout_setting_marks_failed(self) -> None:
+        from orchestrator.completion_commands import _completion_outcome_from_prompt_error
+        from orchestrator.herdr_cli import HerdrCliError
+
+        exc = HerdrCliError("invalid timeout", payload={"error": "invalid_timeout_setting"})
+        outcome, reason = _completion_outcome_from_prompt_error(exc)
+        self.assertEqual(outcome, "failed")
+        self.assertEqual(reason, "invalid_timeout_setting")
+
+
 
 
 if __name__ == "__main__":

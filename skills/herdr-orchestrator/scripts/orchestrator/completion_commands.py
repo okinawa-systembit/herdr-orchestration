@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from orchestrator.handoff_commands import build_task_envelope
-from orchestrator.herdr_cli import HerdrCliError, run_herdr
+from orchestrator.herdr_cli import HerdrCliError, classify_prompt_error, run_herdr
 from orchestrator.live_agent import LiveAgentError, verify_live_agent_context
 from orchestrator.registry.errors import RegistryError
 from orchestrator.registry import operations as registry_ops
@@ -39,28 +39,8 @@ def _registry_to_completion(exc: RegistryError) -> CompletionCommandError:
     )
 
 
-def _herdr_error_code(exc: HerdrCliError) -> str:
-    payload = exc.payload or {}
-    herdr_err = payload.get("herdr") if isinstance(payload.get("herdr"), dict) else {}
-    inner = herdr_err.get("error") if isinstance(herdr_err.get("error"), dict) else {}
-    if isinstance(inner.get("code"), str):
-        return inner["code"]
-    if isinstance(payload.get("error"), str):
-        return payload["error"]
-    return "herdr_prompt_failed"
-
-
 def _completion_outcome_from_prompt_error(exc: HerdrCliError) -> tuple[str, str | None]:
-    code = _herdr_error_code(exc)
-    if code in (
-        "agent_not_found",
-        "agent_not_ready",
-        "agent_blocked",
-        "herdr_cli_missing",
-        "invalid_timeout_setting",
-    ):
-        return "failed", code
-    return "uncertain", code
+    return classify_prompt_error(exc)
 
 
 def _require_live_pane_id(snap: Any, *, task_id: str) -> str:

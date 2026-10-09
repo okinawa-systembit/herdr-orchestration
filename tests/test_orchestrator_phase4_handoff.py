@@ -336,15 +336,26 @@ class Phase4HandoffTests(unittest.TestCase):
         self.assertEqual(doc["dispatch"]["status"], "uncertain")
         self.assertEqual(doc["task"]["status"], "unknown")
 
-    def test_prompt_invalid_timeout_setting_marks_dispatch_failed(self) -> None:
+    def test_prompt_external_invalid_timeout_code_marks_dispatch_uncertain(self) -> None:
         env = self.env.copy()
         env["FAKE_PROMPT_MODE"] = "invalid_timeout"
         proc = _run_cli(*self._handoff_base_args(), "--mode", "async", env=env)
         self.assertEqual(proc.returncode, 0, proc.stdout)
         doc = json.loads(proc.stdout)
         self.assertFalse(doc["prompt_sent"])
-        self.assertEqual(doc["dispatch"]["status"], "failed")
-        self.assertEqual(doc["task"]["status"], "failed")
+        self.assertEqual(doc["dispatch"]["status"], "uncertain")
+        self.assertEqual(doc["task"]["status"], "unknown")
+
+    def test_prompt_internal_invalid_timeout_setting_marks_dispatch_failed(self) -> None:
+        from orchestrator.handoff_commands import _dispatch_outcome_from_prompt_error
+        from orchestrator.herdr_cli import HerdrCliError
+
+        exc = HerdrCliError("invalid timeout", payload={"error": "invalid_timeout_setting"})
+        outcome, reason = _dispatch_outcome_from_prompt_error(exc)
+        self.assertEqual(outcome, "failed")
+        self.assertEqual(reason, "invalid_timeout_setting")
+
+
 
     def test_assert_failure_skips_prompt(self) -> None:
         env = self.env.copy()

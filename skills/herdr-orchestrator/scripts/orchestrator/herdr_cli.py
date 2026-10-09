@@ -84,3 +84,31 @@ def run_herdr(args: list[str], *, timeout_sec: float | None = None) -> dict[str,
     except json.JSONDecodeError:
         payload["stderr"] = stderr
     raise HerdrCliError(message, exit_code=proc.returncode, payload=payload)
+
+
+def classify_prompt_error(exc: HerdrCliError) -> tuple[str, str]:
+    """Classify a Herdr prompt error into (outcome, reason).
+
+    Distinguishes external CLI errors (from payload['herdr']) and internal
+    pre-execution errors (from payload['error']).
+    """
+    payload = exc.payload or {}
+    herdr_err = payload.get("herdr") if isinstance(payload.get("herdr"), dict) else {}
+    inner = herdr_err.get("error") if isinstance(herdr_err.get("error"), dict) else {}
+
+    # External Herdr CLI error (reported via CLI JSON payload)
+    if isinstance(inner.get("code"), str):
+        cli_code = inner["code"]
+        if cli_code in ("agent_not_found", "agent_not_ready", "agent_blocked"):
+            return "failed", cli_code
+        return "uncertain", cli_code
+
+    # Internal Orchestrator pre-execution error (CLI not run or config invalid)
+    internal_error = payload.get("error")
+    if isinstance(internal_error, str):
+        if internal_error in ("herdr_cli_missing", "invalid_timeout_setting"):
+            return "failed", internal_error
+        return "uncertain", internal_error
+
+    return "uncertain", "herdr_prompt_failed"
+
