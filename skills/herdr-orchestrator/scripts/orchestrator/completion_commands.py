@@ -45,6 +45,8 @@ def _herdr_error_code(exc: HerdrCliError) -> str:
     inner = herdr_err.get("error") if isinstance(herdr_err.get("error"), dict) else {}
     if isinstance(inner.get("code"), str):
         return inner["code"]
+    if isinstance(payload.get("error"), str):
+        return payload["error"]
     return "herdr_prompt_failed"
 
 
@@ -201,17 +203,17 @@ def run_recover_completion(task_id: str) -> dict[str, Any]:
 
     reset_applied = False
     status = completion["status"]
-    if status in ("processing", "failed", "uncertain", "skipped"):
+    if status in ("processing", "failed", "skipped"):
         try:
             doc = registry_ops.reset_completion(task_id)
             reset_applied = True
         except RegistryError as exc:
             raise _registry_to_completion(exc) from exc
-    elif status == "sent":
+    elif status in ("sent", "uncertain"):
         raise CompletionCommandError(
             "registry_conflict",
             task_id=task_id,
-            message="completion already sent",
+            message=f"completion is {status}; cannot automatically recover to prevent double dispatch",
         )
     elif status not in ("pending",):
         raise CompletionCommandError("registry_conflict", task_id=task_id)

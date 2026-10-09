@@ -40,7 +40,7 @@ Orchestrator は少なくとも次を検証する。
 - [§10.3](#sec-10-3) **worker submit context** を満たす（`agent.name` 一致に加え repository identity / worktree path を Registry と照合）。
 - `result.status ∈ {succeeded, failed}` のとき `result.ref` が非 null で、`context.worktree.path` 配下へ安全に解決でき、**resolve 先ファイルが存在**する。
 - `result.status = unavailable` のとき `result.ref` が null である。
-- workflow 固有の完了条件は repository 固有 Skill が検証する。
+- **独立検証方針**: 汎用 Orchestrator では上記のような schema 適合や path の安全・存在確認といった「汎用検証」のみを行い、workflow やタスク内容に関する業務固有の判定（例: レビューが適切に行われたか、テストが通ったか等）はすべて Repository 側の固有 Skill に委ねる。
 
 <a id="sec-10-1"></a>
 

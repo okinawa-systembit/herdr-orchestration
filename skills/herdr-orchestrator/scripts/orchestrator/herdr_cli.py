@@ -26,13 +26,19 @@ def herdr_binary() -> str:
 def run_herdr(args: list[str], *, timeout_sec: float | None = None) -> dict[str, Any]:
     """Run herdr with JSON on stdout. Caller must have verified HERDR_ENV when required."""
     binary = herdr_binary()
-    proc = subprocess.run(
-        [binary, *args],
-        capture_output=True,
-        text=True,
-        timeout=timeout_sec,
-        check=False,
-    )
+    try:
+        proc = subprocess.run(
+            [binary, *args],
+            capture_output=True,
+            text=True,
+            timeout=timeout_sec,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise HerdrCliError(
+            f"herdr command timed out after {exc.timeout} seconds",
+            payload={"herdr": {"error": {"code": "herdr_cli_timeout"}}},
+        ) from exc
     if proc.returncode == 0:
         text = proc.stdout.strip()
         if not text:

@@ -229,7 +229,7 @@ durable result
 6. `resume-task` 相当の claim/finalize（[§9.13](#sec-9-13) eligibility を満たす場合のみ）
 ```
 
-`recover-completion` は 1〜4 の診断のうえ、**5 と 6 を分離**する。5 は eligibility 不要（reset 受理条件のみ）。6 は reset 後に `completion.status=pending` となり、§9.13 eligibility を満たす場合のみ実行する。eligibility 未達なら reset だけ成功して停止してよい。
+`recover-completion` は 1〜4 の診断のうえ、**5 と 6 を分離**する。5 は eligibility 不要（reset 受理条件のみ）。ただし、二重配送を防止するため `completion.status = uncertain` の場合は自動的な `reset-completion` と再実行（6）を行わず、人間による確認と明示的な reset を要求する。6 は reset 後に `completion.status=pending` となり、§9.13 eligibility を満たす場合のみ実行する。eligibility 未達なら reset だけ成功して停止してよい。
 
 復旧時には履歴を残す。
 

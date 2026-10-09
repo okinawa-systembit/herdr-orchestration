@@ -81,18 +81,21 @@ def _herdr_error_code(exc: HerdrCliError) -> str:
     inner = herdr_err.get("error") if isinstance(herdr_err.get("error"), dict) else {}
     if isinstance(inner.get("code"), str):
         return inner["code"]
+    if isinstance(payload.get("error"), str):
+        return payload["error"]
     return "herdr_prompt_failed"
 
 
 def _dispatch_outcome_from_prompt_error(exc: HerdrCliError) -> tuple[str, str]:
     code = _herdr_error_code(exc)
-    if code in ("agent_prompt_stalled",):
+    if code in ("agent_prompt_stalled", "herdr_cli_timeout"):
         return "uncertain", code
     if code in (
         "agent_not_found",
         "agent_not_ready",
         "agent_blocked",
         "herdr_prompt_failed",
+        "herdr_cli_missing",
     ):
         return "failed", code
     return "uncertain", code
