@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 from typing import Any
@@ -26,6 +27,13 @@ def herdr_binary() -> str:
 def run_herdr(args: list[str], *, timeout_sec: float | None = None) -> dict[str, Any]:
     """Run herdr with JSON on stdout. Caller must have verified HERDR_ENV when required."""
     binary = herdr_binary()
+    if timeout_sec is None:
+        raw = os.environ.get("HERDR_CLI_TIMEOUT_SEC")
+        if raw:
+            try:
+                timeout_sec = float(raw)
+            except ValueError:
+                pass
     try:
         proc = subprocess.run(
             [binary, *args],

@@ -52,13 +52,11 @@ def _herdr_error_code(exc: HerdrCliError) -> str:
 
 def _completion_outcome_from_prompt_error(exc: HerdrCliError) -> tuple[str, str | None]:
     code = _herdr_error_code(exc)
-    if code in ("agent_prompt_stalled",):
-        return "uncertain", code
     if code in (
         "agent_not_found",
         "agent_not_ready",
         "agent_blocked",
-        "herdr_prompt_failed",
+        "herdr_cli_missing",
     ):
         return "failed", code
     return "uncertain", code
@@ -203,13 +201,13 @@ def run_recover_completion(task_id: str) -> dict[str, Any]:
 
     reset_applied = False
     status = completion["status"]
-    if status in ("processing", "failed", "skipped"):
+    if status in ("failed", "skipped"):
         try:
             doc = registry_ops.reset_completion(task_id)
             reset_applied = True
         except RegistryError as exc:
             raise _registry_to_completion(exc) from exc
-    elif status in ("sent", "uncertain"):
+    elif status in ("sent", "uncertain", "processing"):
         raise CompletionCommandError(
             "registry_conflict",
             task_id=task_id,

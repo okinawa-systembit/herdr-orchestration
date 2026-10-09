@@ -53,6 +53,23 @@ if len(sys.argv) >= 4 and sys.argv[1] == "agent" and sys.argv[2] == "prompt":
     if log:
         with open(log, "a", encoding="utf-8") as fh:
             fh.write("prompt\\n")
+    mode = os.environ.get("FAKE_PROMPT_MODE", "ok")
+    if mode == "blocked":
+        sys.stderr.write(json.dumps({"error": {"code": "agent_blocked", "message": "blocked"}}))
+        raise SystemExit(1)
+    if mode == "stalled":
+        sys.stderr.write(json.dumps({"error": {"code": "agent_prompt_stalled", "message": "stalled"}}))
+        raise SystemExit(1)
+    if mode == "timeout":
+        import time
+        time.sleep(2)
+        raise SystemExit(0)
+    if mode == "unknown_cli_err":
+        sys.stderr.write("unexpected failure in herdr daemon\\n")
+        raise SystemExit(1)
+    if mode == "agent_not_found":
+        sys.stderr.write(json.dumps({"error": {"code": "agent_not_found", "message": "agent not found"}}))
+        raise SystemExit(1)
     raise SystemExit(0)
 
 raise SystemExit(99)
@@ -248,13 +265,91 @@ class Phase6CompletionTests(unittest.TestCase):
             registry_ops.mark_dispatch(task_id, outcome="sent")
             path = self.state_home / "herdr-orchestrator" / "tasks" / f"{task_id}.json"
             raw = json.loads(path.read_text(encoding="utf-8"))
-            raw["completion"]["status"] = "processing"
+            raw["completion"]["status"] = "failed"
+            raw["completion"]["failure_reason"] = "something"
             path.write_text(json.dumps(raw, indent=2) + "\n", encoding="utf-8")
         proc = _run_cli("recover-completion", task_id, env=self.env)
         self.assertEqual(proc.returncode, 0, proc.stdout)
         out = json.loads(proc.stdout)
         self.assertTrue(out["reset_applied"])
         self.assertFalse(out["resumed"])
+
+    def test_recover_completion_rejects_uncertain_to_prevent_double_dispatch(self) -> None:
+        task_id = _async_task_result_pending(self.env, self.worktree)
+        with _env_patch(self.env):
+            registry_ops.claim_completion(task_id)
+            registry_ops.finish_completion(task_id, outcome="uncertain", reason="agent_prompt_stalled")
+        proc = _run_cli("recover-completion", task_id, env=self.env)
+        self.assertEqual(proc.returncode, 1)
+        self.assertEqual(json.loads(proc.stdout)["error"], "registry_conflict")
+        with _env_patch(self.env):
+            doc = registry_ops.get_task(task_id)
+            self.assertEqual(doc["completion"]["status"], "uncertain")
+
+    def test_recover_completion_rejects_processing_to_prevent_double_dispatch(self) -> None:
+        task_id = _async_task_result_pending(self.env, self.worktree)
+        with _env_patch(self.env):
+            registry_ops.claim_completion(task_id)
+        proc = _run_cli("recover-completion", task_id, env=self.env)
+        self.assertEqual(proc.returncode, 1)
+        self.assertEqual(json.loads(proc.stdout)["error"], "registry_conflict")
+        with _env_patch(self.env):
+            doc = registry_ops.get_task(task_id)
+            self.assertEqual(doc["completion"]["status"], "processing")
+
+    def test_recover_completion_rejects_sent_to_prevent_double_dispatch(self) -> None:
+        task_id = _async_task_result_pending(self.env, self.worktree)
+        with _env_patch(self.env):
+            registry_ops.claim_completion(task_id)
+            registry_ops.finish_completion(task_id, outcome="sent")
+        proc = _run_cli("recover-completion", task_id, env=self.env)
+        self.assertEqual(proc.returncode, 1)
+        self.assertEqual(json.loads(proc.stdout)["error"], "registry_conflict")
+
+    def test_reset_completion_allows_processing_and_uncertain(self) -> None:
+        task_id = _async_task_result_pending(self.env, self.worktree)
+        with _env_patch(self.env):
+            registry_ops.claim_completion(task_id)
+        # reset-completion works on processing
+        proc = _run_cli("reset-completion", task_id, env=self.env)
+        self.assertEqual(proc.returncode, 0, proc.stdout)
+        with _env_patch(self.env):
+            doc = registry_ops.get_task(task_id)
+            self.assertEqual(doc["completion"]["status"], "pending")
+
+        # reset-completion works on uncertain
+        with _env_patch(self.env):
+            registry_ops.claim_completion(task_id)
+            registry_ops.finish_completion(task_id, outcome="uncertain", reason="agent_prompt_stalled")
+        proc = _run_cli("reset-completion", task_id, env=self.env)
+        self.assertEqual(proc.returncode, 0, proc.stdout)
+        with _env_patch(self.env):
+            doc = registry_ops.get_task(task_id)
+            self.assertEqual(doc["completion"]["status"], "pending")
+
+    def test_resume_task_prompt_timeout_and_unknown_err_marks_uncertain(self) -> None:
+        task_id = _async_task_result_pending(self.env, self.worktree)
+        env = {**self.env, "FAKE_PROMPT_MODE": "timeout", "HERDR_CLI_TIMEOUT_SEC": "0.2"}
+        proc = _run_cli("resume-task", task_id, env=env)
+        self.assertEqual(proc.returncode, 0, proc.stdout)
+        doc = json.loads(proc.stdout)
+        self.assertEqual(doc["completion"]["status"], "uncertain")
+
+        # Unknown CLI error also marks uncertain
+        task_id2 = _async_task_result_pending(self.env, self.worktree)
+        env2 = {**self.env, "FAKE_PROMPT_MODE": "unknown_cli_err"}
+        proc2 = _run_cli("resume-task", task_id2, env=env2)
+        self.assertEqual(proc2.returncode, 0, proc2.stdout)
+        doc2 = json.loads(proc2.stdout)
+        self.assertEqual(doc2["completion"]["status"], "uncertain")
+
+    def test_resume_task_prompt_agent_not_found_marks_failed(self) -> None:
+        task_id = _async_task_result_pending(self.env, self.worktree)
+        env = {**self.env, "FAKE_PROMPT_MODE": "agent_not_found"}
+        proc = _run_cli("resume-task", task_id, env=env)
+        self.assertEqual(proc.returncode, 0, proc.stdout)
+        doc = json.loads(proc.stdout)
+        self.assertEqual(doc["completion"]["status"], "failed")
 
 
 if __name__ == "__main__":

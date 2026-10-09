@@ -92,6 +92,16 @@ if len(sys.argv) >= 4 and sys.argv[1] == "agent" and sys.argv[2] == "prompt":
     if mode == "stalled":
         sys.stderr.write(json.dumps({"error": {"code": "agent_prompt_stalled", "message": "stalled"}}))
         raise SystemExit(1)
+    if mode == "timeout":
+        import time
+        time.sleep(2)
+        raise SystemExit(0)
+    if mode == "unknown_cli_err":
+        sys.stderr.write("unexpected failure in herdr daemon\\n")
+        raise SystemExit(1)
+    if mode == "cli_json_err":
+        sys.stderr.write(json.dumps({"error": {"message": "something without code"}}))
+        raise SystemExit(1)
     raise SystemExit(0)
 
 raise SystemExit(99)
@@ -285,6 +295,37 @@ class Phase4HandoffTests(unittest.TestCase):
     def test_prompt_stalled_marks_dispatch_uncertain(self) -> None:
         env = self.env.copy()
         env["FAKE_PROMPT_MODE"] = "stalled"
+        proc = _run_cli(*self._handoff_base_args(), "--mode", "async", env=env)
+        self.assertEqual(proc.returncode, 0, proc.stdout)
+        doc = json.loads(proc.stdout)
+        self.assertFalse(doc["prompt_sent"])
+        self.assertEqual(doc["dispatch"]["status"], "uncertain")
+        self.assertEqual(doc["task"]["status"], "unknown")
+
+    def test_prompt_timeout_marks_dispatch_uncertain(self) -> None:
+        env = self.env.copy()
+        env["FAKE_PROMPT_MODE"] = "timeout"
+        env["HERDR_CLI_TIMEOUT_SEC"] = "0.2"
+        proc = _run_cli(*self._handoff_base_args(), "--mode", "async", env=env)
+        self.assertEqual(proc.returncode, 0, proc.stdout)
+        doc = json.loads(proc.stdout)
+        self.assertFalse(doc["prompt_sent"])
+        self.assertEqual(doc["dispatch"]["status"], "uncertain")
+        self.assertEqual(doc["task"]["status"], "unknown")
+
+    def test_prompt_unknown_cli_err_marks_dispatch_uncertain(self) -> None:
+        env = self.env.copy()
+        env["FAKE_PROMPT_MODE"] = "unknown_cli_err"
+        proc = _run_cli(*self._handoff_base_args(), "--mode", "async", env=env)
+        self.assertEqual(proc.returncode, 0, proc.stdout)
+        doc = json.loads(proc.stdout)
+        self.assertFalse(doc["prompt_sent"])
+        self.assertEqual(doc["dispatch"]["status"], "uncertain")
+        self.assertEqual(doc["task"]["status"], "unknown")
+
+    def test_prompt_cli_json_err_without_code_marks_dispatch_uncertain(self) -> None:
+        env = self.env.copy()
+        env["FAKE_PROMPT_MODE"] = "cli_json_err"
         proc = _run_cli(*self._handoff_base_args(), "--mode", "async", env=env)
         self.assertEqual(proc.returncode, 0, proc.stdout)
         doc = json.loads(proc.stdout)
