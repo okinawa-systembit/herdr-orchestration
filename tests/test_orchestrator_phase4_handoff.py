@@ -102,6 +102,9 @@ if len(sys.argv) >= 4 and sys.argv[1] == "agent" and sys.argv[2] == "prompt":
     if mode == "cli_json_err":
         sys.stderr.write(json.dumps({"error": {"message": "something without code"}}))
         raise SystemExit(1)
+    if mode == "invalid_timeout":
+        sys.stderr.write(json.dumps({"error": {"code": "invalid_timeout_setting", "message": "invalid timeout"}}))
+        raise SystemExit(1)
     raise SystemExit(0)
 
 raise SystemExit(99)
@@ -332,6 +335,16 @@ class Phase4HandoffTests(unittest.TestCase):
         self.assertFalse(doc["prompt_sent"])
         self.assertEqual(doc["dispatch"]["status"], "uncertain")
         self.assertEqual(doc["task"]["status"], "unknown")
+
+    def test_prompt_invalid_timeout_setting_marks_dispatch_failed(self) -> None:
+        env = self.env.copy()
+        env["FAKE_PROMPT_MODE"] = "invalid_timeout"
+        proc = _run_cli(*self._handoff_base_args(), "--mode", "async", env=env)
+        self.assertEqual(proc.returncode, 0, proc.stdout)
+        doc = json.loads(proc.stdout)
+        self.assertFalse(doc["prompt_sent"])
+        self.assertEqual(doc["dispatch"]["status"], "failed")
+        self.assertEqual(doc["task"]["status"], "failed")
 
     def test_assert_failure_skips_prompt(self) -> None:
         env = self.env.copy()

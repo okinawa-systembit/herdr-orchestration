@@ -57,6 +57,7 @@ def _completion_outcome_from_prompt_error(exc: HerdrCliError) -> tuple[str, str 
         "agent_not_ready",
         "agent_blocked",
         "herdr_cli_missing",
+        "invalid_timeout_setting",
     ):
         return "failed", code
     return "uncertain", code

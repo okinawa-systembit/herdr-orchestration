@@ -70,6 +70,9 @@ if len(sys.argv) >= 4 and sys.argv[1] == "agent" and sys.argv[2] == "prompt":
     if mode == "agent_not_found":
         sys.stderr.write(json.dumps({"error": {"code": "agent_not_found", "message": "agent not found"}}))
         raise SystemExit(1)
+    if mode == "invalid_timeout":
+        sys.stderr.write(json.dumps({"error": {"code": "invalid_timeout_setting", "message": "invalid timeout"}}))
+        raise SystemExit(1)
     raise SystemExit(0)
 
 raise SystemExit(99)
@@ -365,6 +368,14 @@ class Phase6CompletionTests(unittest.TestCase):
     def test_resume_task_prompt_agent_not_found_marks_failed(self) -> None:
         task_id = _async_task_result_pending(self.env, self.worktree)
         env = {**self.env, "FAKE_PROMPT_MODE": "agent_not_found"}
+        proc = _run_cli("resume-task", task_id, env=env)
+        self.assertEqual(proc.returncode, 0, proc.stdout)
+        doc = json.loads(proc.stdout)
+        self.assertEqual(doc["completion"]["status"], "failed")
+
+    def test_resume_task_prompt_invalid_timeout_setting_marks_failed(self) -> None:
+        task_id = _async_task_result_pending(self.env, self.worktree)
+        env = {**self.env, "FAKE_PROMPT_MODE": "invalid_timeout"}
         proc = _run_cli("resume-task", task_id, env=env)
         self.assertEqual(proc.returncode, 0, proc.stdout)
         doc = json.loads(proc.stdout)
