@@ -2,6 +2,8 @@
 
 開発時は [dev-local-install.md](dev-local-install.md) と `install/dev-local-install.sh` を使う。本書は **clone なしで導入・更新する配布環境** の正式仕様。パッケージマネージャ（npm/pip 等）は使わず、GitHub Releases の Release Tarball を活用した `curl | bash` インストールと、`herdr-orchestrator update` CLI による更新を提供する。
 
+※ **対象動作環境**: **WSL2（Ubuntu）** 限定。Windows ネイティブ環境および macOS への対応は不要。電源断、WSL 強制終了、SIGKILL からの自動復旧は保証対象外とし、通常のスクリプトエラーやシグナル中断に対する既存インストールの保護・復旧を保証する。
+
 ---
 
 ## 1. 配布パッケージ仕様（Release Tarball）
@@ -399,8 +401,8 @@ jobs:
 インストーラは途中で障害が発生しても、既存の正常なインストール環境を破壊しないよう安全に動作する。各 rename 操作は原子的だが、切替全体としてはミリ秒単位の移行期間が存在することを前提とし、プロセス内異常時は自動ロールバック復旧する。
 
 1. **パイプ切断保護**: スクリプト全体を `main() { ... }` 関数でラップし、末尾で `main "$@"` を呼ぶ。冒頭に `set -euo pipefail` を指定し、パイプラインの途中エラーを確実に検知する。
-2. **事前環境確認**: `curl`, `tar`, `python3` の存在確認。
-3. **インストール排他ロック**: `~/.agents/skills/.herdr-orchestrator.install.lock` に対し `flock` を取得し、複数インストーラや更新処理の同時実行を防止する。
+2. **事前環境確認**: `curl`, `tar`, `python3`, `flock` の存在確認。
+3. **インストール排他ロック**: `~/.agents/skills/.herdr-orchestrator.install.lock` に対し、`flock -n 200`（ファイルディスクリプタ 200）による非ブロッキング排他ロックを取得。親 Bash プロセスが生存している間ロックが確実に保持され、複数インストーラや更新処理の同時並行実行を防止する。正常終了時および異常終了時にプロセス終了とともに自動解放される。
 4. **バージョン解決**: `--version` が未指定の場合、GitHub Releases API からプレリリースを除いた最新安定版（`latest`）タグ名を取得する。
 5. **一時領域へのダウンロード**: 一時作業ディレクトリ（`mktemp -d`）に tarball と `.sha256` をダウンロードする（GitHub 管理下の正規ホストへの HTTPS リダイレクトのみ許可）。
 6. **完全性検証**: ダウンロードした tarball の SHA256 ハッシュを計算し、`.sha256` ファイルと厳密に照合する。不一致時は即座に中断する。
@@ -415,13 +417,20 @@ jobs:
    - 実行権限を設定（`chmod +x scripts/herdr-orchestrator scripts/task-registry.py`）。
    - `scripts/herdr-orchestrator --help` を実行し、Python ランタイムおよび CLI が正常に動作することを事前検証する。
 9. **配置切替と障害モデル**:
-   - 検証が完全に成功した後、既存の配置先（`~/.agents/skills/herdr-orchestration`）が存在する場合は一時バックアップ（`~/.agents/skills/.herdr-orchestration.backup`）へ `mv` リネーム退避し、ステージングディレクトリを正式配置先パスへ `mv` リネーム配置する。
+   - 検証が完全に成功した後、既存の配置先（`~/.agents/skills/herdr-orchestration`）が存在する場合は一時バックアップ（`~/.agents/skills/.herdr-orchestration.backup`）へ `mv` リネーム退避し、ステージングディレクトリを正式配置先パスへ `mv` リネーム配置する。初回インストール時（旧配置が存在しない場合）はバックアップなしでステージングを配置する。
    - ※ 2 回の `mv` 間に生じる極めて短い移行期間（ミリ秒単位）が存在することを許容する。
    - **復旧モデルの境界**:
-     - _プロセス内障害（通信断、tar 展開失敗、検証失敗）_: `trap` ハンドラにより即座に `.backup` から元の状態へ自動ロールバックし、一時領域をクリーンアップする。
-     - _外部強制終了（SIGKILL、電源断）_: `trap` が動作しない障害については、次回起動時または次回 `install.sh`/`update` 実行時に残存した `.backup` を検知して自動修復を促すフェイルセーフ仕様とする。
-10. **CLI シンボリックリンクの更新**:
-    - `~/.local/bin/herdr-orchestrator` -> `<dest>/scripts/herdr-orchestrator` を更新（`link-cli.sh` のロジック）。
+     - _プロセス内障害（通信断、tar 展開失敗、検証失敗、新配置移動失敗、symlink 作成失敗、および SIGINT / SIGTERM / SIGHUP シグナル中断）_:
+       - `trap` ハンドラにより、更新時であれば退避先バックアップから元の状態へ自動ロールバック復旧する（既存配置の退避完了直後からロールバック可能状態として記録され、新配置移動失敗時にも即座に旧バージョンへ復元される）。
+       - ロールバック処理の成否（`mv` の成功）を確認し、成否を明示する（復旧後の必須ファイル検査は健全性通知として分離し、ファイル操作自体の成功判定を阻害しない）。
+       - ロールバック失敗時はバックアップの保存場所とともに、配置先ディレクトリの確認・クリーンアップ（`ls -ld`, `rm -rf`）および手動復旧（`mv`）の手順をエラー出力し、バックアップを削除せず保全する。
+       - 初回インストール時の配置後失敗時は、不完全な配置ディレクトリを削除して初期状態へクリーンアップする。
+     - _外部強制終了（SIGKILL、電源断、WSL 強制終了）_:
+       - プロセスや OS がシグナル捕捉不能な形で突然死する障害からの自動復旧は本ツールの保証対象外とする。
+10. **CLI シンボリックリンクの更新と既存ファイル保護**:
+    - `~/.local/bin/herdr-orchestrator` -> `<dest>/scripts/herdr-orchestrator` を更新する。
+    - リンク先が存在しない場合は新規作成、既存シンボリックリンクは更新する。
+    - リンク先に通常ファイルまたはディレクトリが既に存在する場合は、誤上書きを防ぐためデフォルトで拒否し、`--force` 指定時のみ上書きを許可する。
 11. **正常完了後のクリーンアップ**:
     - 正常完了時は一時バックアップおよび一時ダウンロード領域を削除し、排他ロックを解放する。
 
@@ -468,12 +477,12 @@ herdr-orchestrator update [--version <tag>] [--force] [--dry-run]
 
 ## 5. 開発用インストールとの対比
 
-| 項目                 | 開発用（`dev-local-install.sh`）       | 配布用（`install.sh` / `update`）              |
-| :------------------- | :------------------------------------- | :--------------------------------------------- |
-| **入手元**           | ローカル checkout ツリー               | GitHub Release Tarball                         |
-| **前提条件**         | git リポジトリクローン済み             | curl, tar, python3（git 不要）                 |
-| **配置先**           | `~/.agents/skills/herdr-orchestration` | `~/.agents/skills/herdr-orchestration`（同一） |
-| **CLI リンク**       | `~/.local/bin/herdr-orchestrator`      | `~/.local/bin/herdr-orchestrator`（同一）      |
-| **切り替え・復旧**   | 手動再実行                             | ステージング切替 (各mv) + 自動ロールバック     |
-| **実行中タスク制御** | 開発者の責任                           | デフォルト更新拒否 (Fail-Closed) + 運用制約    |
-| **更新方法**         | `npm run install:orchestrator-dev`     | `herdr-orchestrator update`                    |
+| 項目                 | 開発用（`dev-local-install.sh`）       | 配布用（`install.sh` / `update`）                  |
+| :------------------- | :------------------------------------- | :------------------------------------------------- |
+| **入手元**           | ローカル checkout ツリー               | GitHub Release Tarball                             |
+| **前提条件**         | git リポジトリクローン済み             | curl, tar, python3, flock（git 不要、WSL2 Ubuntu） |
+| **配置先**           | `~/.agents/skills/herdr-orchestration` | `~/.agents/skills/herdr-orchestration`（同一）     |
+| **CLI リンク**       | `~/.local/bin/herdr-orchestrator`      | `~/.local/bin/herdr-orchestrator`（同一）          |
+| **切り替え・復旧**   | 手動再実行                             | ステージング切替 (各mv) + 自動ロールバック         |
+| **実行中タスク制御** | 開発者の責任                           | デフォルト更新拒否 (Fail-Closed) + 運用制約        |
+| **更新方法**         | `npm run install:orchestrator-dev`     | `herdr-orchestrator update`                        |
