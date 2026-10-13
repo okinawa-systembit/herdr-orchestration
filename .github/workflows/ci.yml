@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_call:
+    inputs:
+      target_ref:
+        description: "Target Git ref to checkout and test"
+        type: string
+        required: false
+        default: ""
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+
+    steps:
+      - name: 1. Checkout repository
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.target_ref || github.ref }}
+
+      - name: 2. Log checked-out commit SHA
+        run: |
+          echo "Checked out commit SHA: $(git rev-parse HEAD)"
+
+      - name: 3. Setup Python 3
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 4. Setup Node.js 24
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: "npm"
+
+      - name: 5. Install npm dependencies
+        run: npm ci
+
+      - name: 6. Run orchestrator unit tests
+        run: npm run test:orchestrator
+
+      - name: 7. Check markdown linting & formatting
+        run: npm run check:md
