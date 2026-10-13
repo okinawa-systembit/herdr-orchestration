@@ -10,17 +10,22 @@ CLEANUP_STAGING_DIR=""
 CLEANUP_BACKUP_DIR=""
 CLEANUP_DEST=""
 CLEANUP_SWAPPED=0
+CLEANUP_BACKUP_CREATED=0
+CLEANUP_NEW_PLACED=0
 
 cleanup() {
   local exit_code=$?
   trap - EXIT INT TERM HUP
   # Rollback or clean up if swapped and failed
-  if [[ ${CLEANUP_SWAPPED:-0} -eq 1 && $exit_code -ne 0 ]]; then
+  if [[ (${CLEANUP_BACKUP_CREATED:-0} -eq 1 || ${CLEANUP_SWAPPED:-0} -eq 1 || ${CLEANUP_NEW_PLACED:-0} -eq 1) && $exit_code -ne 0 ]]; then
     if [[ -n "${CLEANUP_BACKUP_DIR:-}" && -d "$CLEANUP_BACKUP_DIR" ]]; then
       echo "Installation failed. Rolling back to previous installation..." >&2
       rm -rf "$CLEANUP_DEST" 2>/dev/null || true
-      if [[ ! -e "$CLEANUP_DEST" ]] && mv "$CLEANUP_BACKUP_DIR" "$CLEANUP_DEST" 2>/dev/null && [[ -d "$CLEANUP_DEST" && -f "${CLEANUP_DEST}/SKILL.md" ]]; then
+      if [[ ! -e "$CLEANUP_DEST" ]] && mv "$CLEANUP_BACKUP_DIR" "$CLEANUP_DEST" 2>/dev/null; then
         echo "Rolled back successfully to previous installation." >&2
+        if [[ ! -f "${CLEANUP_DEST}/SKILL.md" ]]; then
+          echo "Notice: Restored previous installation is missing SKILL.md." >&2
+        fi
       else
         echo "Error: Rollback to previous installation failed!" >&2
         if [[ -d "$CLEANUP_BACKUP_DIR" ]]; then
@@ -28,7 +33,7 @@ cleanup() {
           echo "Please restore it manually: mv '${CLEANUP_BACKUP_DIR}' '${CLEANUP_DEST}'" >&2
         fi
       fi
-    else
+    elif [[ ${CLEANUP_NEW_PLACED:-0} -eq 1 ]]; then
       # Initial installation failed after swap (no previous backup)
       if [[ -n "${CLEANUP_DEST:-}" && -d "$CLEANUP_DEST" ]]; then
         echo "Installation failed. Cleaning up incomplete installation at ${CLEANUP_DEST}..." >&2
@@ -254,9 +259,12 @@ main() {
   mkdir -p "$(dirname "$dest")"
   if [[ -d "$dest" ]]; then
     mv "$dest" "$backup_dir"
+    CLEANUP_BACKUP_CREATED=1 # Backup created; rollback required on any subsequent failure
+    CLEANUP_SWAPPED=1
   fi
   mv "$staging_dir" "$dest"
-  CLEANUP_SWAPPED=1 # staging moved into place; rollback or cleanup if subsequent steps fail
+  CLEANUP_NEW_PLACED=1 # Staging moved into place; rollback or cleanup if subsequent steps fail
+  CLEANUP_SWAPPED=1
 
   # Step 12: Update CLI symlink
   mkdir -p "$bin_dir"
@@ -272,6 +280,8 @@ main() {
   fi
   ln -sf "${dest}/scripts/herdr-orchestrator" "$link_path"
   echo "Linked CLI: ${link_path} -> ${dest}/scripts/herdr-orchestrator"
+  CLEANUP_BACKUP_CREATED=0
+  CLEANUP_NEW_PLACED=0
   CLEANUP_SWAPPED=0 # installation and symlink fully successful
 
   # Success notification

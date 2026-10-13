@@ -586,6 +586,78 @@ class DistributionInstallerTests(unittest.TestCase):
             self.assertNotIn("Rolled back successfully", proc.stderr)
             self.assertTrue((backup / "backup_marker.txt").is_file(), "Backup must NOT be deleted when rollback fails")
 
+    def test_staging_move_failure_after_backup_rolls_back_original_installation(self) -> None:
+        """Verify that if new staging move fails after backup creation in Step 11, the original installation is rolled back."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            dest = tmp_path / "skill"
+            backup = tmp_path / "backup_dir"
+            backup.mkdir()
+            (backup / "original_data.txt").write_text("keep_this_original_version")
+
+            content = INSTALL_SH.read_text(encoding="utf-8")
+            main_pos = content.find("main() {")
+            preamble = content[:main_pos]
+
+            # In Step 11, mv "$dest" "$backup_dir" sets CLEANUP_BACKUP_CREATED=1.
+            # Then mv "$staging_dir" "$dest" fails.
+            sim_script = f"""
+            {preamble}
+            CLEANUP_DEST="{dest}"
+            CLEANUP_BACKUP_DIR="{backup}"
+            CLEANUP_BACKUP_CREATED=1
+            CLEANUP_NEW_PLACED=0
+
+            # Simulate failure right before/during staging move (dest is currently empty)
+            echo "Simulated error during staging move" >&2
+            exit 1
+            """
+            proc = subprocess.run(
+                ["bash", "-c", sim_script],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertNotEqual(proc.returncode, 0)
+            self.assertIn("Rolling back to previous installation", proc.stderr)
+            self.assertIn("Rolled back successfully to previous installation", proc.stderr)
+            self.assertTrue((dest / "original_data.txt").is_file(), "Original installation must be restored to dest")
+            self.assertFalse(backup.is_dir(), "Backup dir should be moved back to dest")
+
+    def test_rollback_succeeds_even_if_old_install_lacks_skill_md(self) -> None:
+        """Verify that rollback succeeds and warns without error if restored previous installation lacked SKILL.md."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            dest = tmp_path / "skill"
+            backup = tmp_path / "backup_dir"
+            backup.mkdir()
+            # Notice: NO SKILL.md here
+            (backup / "custom_config.json").write_text("custom")
+
+            content = INSTALL_SH.read_text(encoding="utf-8")
+            main_pos = content.find("main() {")
+            preamble = content[:main_pos]
+
+            sim_script = f"""
+            {preamble}
+            CLEANUP_DEST="{dest}"
+            CLEANUP_BACKUP_DIR="{backup}"
+            CLEANUP_BACKUP_CREATED=1
+
+            exit 1
+            """
+            proc = subprocess.run(
+                ["bash", "-c", sim_script],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertNotEqual(proc.returncode, 0)
+            self.assertIn("Rolled back successfully to previous installation.", proc.stderr)
+            self.assertIn("Notice: Restored previous installation is missing SKILL.md.", proc.stderr)
+            self.assertNotIn("Error: Rollback to previous installation failed!", proc.stderr)
+            self.assertTrue((dest / "custom_config.json").is_file())
+
     def test_initial_install_failure_cleans_up_incomplete_destination(self) -> None:
         """Verify that if initial installation fails in Step 12, the incomplete dest is cleaned up."""
         with tempfile.TemporaryDirectory() as tmp:
