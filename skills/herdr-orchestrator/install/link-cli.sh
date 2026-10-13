@@ -4,19 +4,24 @@ set -euo pipefail
 
 link_herdr_orchestrator_cli() {
   local cli_path=$1
-  local dry_run=${2:-0}
+  local dry_run_arg=${2:-0}
   local link_path="${HERDR_ORCHESTRATOR_BIN_LINK:-${HOME}/.local/bin/herdr-orchestrator}"
+  local dry_run=0
 
-  [[ -f "$cli_path" ]] || {
-    echo "link-cli.sh: missing CLI: $cli_path" >&2
-    return 1
-  }
+  if [[ "$dry_run_arg" == "1" || "$dry_run_arg" == "--dry-run" ]]; then
+    dry_run=1
+  fi
 
   if [[ $dry_run -eq 1 ]]; then
     echo "would mkdir -p $(dirname "$link_path")"
     echo "would ln -sf $cli_path $link_path"
     return 0
   fi
+
+  [[ -f "$cli_path" ]] || {
+    echo "link-cli.sh: missing CLI: $cli_path" >&2
+    return 1
+  }
 
   mkdir -p "$(dirname "$link_path")"
   ln -sf "$cli_path" "$link_path"

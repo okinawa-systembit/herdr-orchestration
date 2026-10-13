@@ -179,6 +179,26 @@ class HerdrCliTimeoutValidationTests(unittest.TestCase):
                     run_herdr(["--version"])
                 self.assertEqual(ctx.exception.payload.get("error"), "invalid_timeout_setting")
 
+    def test_run_herdr_checks_binary_when_timeout_valid_or_none(self) -> None:
+        from unittest.mock import patch
+        from orchestrator.herdr_cli import HerdrCliError, run_herdr
+
+        with patch("shutil.which", return_value=None):
+            with self.assertRaises(HerdrCliError) as ctx1:
+                run_herdr(["--version"], timeout_sec=10.0)
+            self.assertEqual(ctx1.exception.payload.get("error"), "herdr_cli_missing")
+
+            with patch.dict(os.environ, {"HERDR_CLI_TIMEOUT_SEC": "10.0"}):
+                with self.assertRaises(HerdrCliError) as ctx2:
+                    run_herdr(["--version"])
+                self.assertEqual(ctx2.exception.payload.get("error"), "herdr_cli_missing")
+
+            with patch.dict(os.environ, {}, clear=False):
+                os.environ.pop("HERDR_CLI_TIMEOUT_SEC", None)
+                with self.assertRaises(HerdrCliError) as ctx3:
+                    run_herdr(["--version"])
+                self.assertEqual(ctx3.exception.payload.get("error"), "herdr_cli_missing")
+
 
 class ClassifyPromptErrorTests(unittest.TestCase):
     def test_external_known_undelivered_marks_failed(self) -> None:

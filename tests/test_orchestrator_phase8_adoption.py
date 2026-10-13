@@ -58,6 +58,21 @@ class Phase8AdoptionTests(unittest.TestCase):
         self.assertIn("herdr-orchestration", proc.stdout)
         self.assertIn("would ln -sf", proc.stdout)
 
+    def test_dev_local_install_dry_run_in_clean_env(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_home:
+            env = os.environ.copy()
+            env["HOME"] = tmp_home
+            proc = subprocess.run(
+                ["bash", str(DEV_INSTALL), "--dry-run"],
+                capture_output=True,
+                text=True,
+                env=env,
+                check=False,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("would ln -sf", proc.stdout)
+            self.assertIn(f"{tmp_home}/.agents/skills/herdr-orchestration", proc.stdout)
+
     def test_dev_local_installs_to_temp_dest(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             dest = Path(tmp) / "herdr-orchestration"
