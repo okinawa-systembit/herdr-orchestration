@@ -21,7 +21,7 @@ Previous version: 0.8.x
 Update method: herdr update
 ```
 
-実際に `herdr update` により 0.8.x から 0.9.3 へ更新され、更新後も `herdr channel show` は `stable` であることを確認した。したがって、社内運用では GitHub Releases 等の表示を独自の最新版判定基準とせず、Herdr 自身の configured update channel と update mechanism を正とする。
+実際に `herdr update` により 0.8.x から 0.9.3 へ更新され、更新後も `herdr channel show` は `stable` であることを確認した。したがって、標準運用では GitHub Releases 等の表示を独自の最新版判定基準とせず、Herdr 自身の configured update channel と update mechanism を正とする。
 
 <a id="sec-20-2"></a>
 
@@ -105,7 +105,7 @@ herdr status
 
 ### 20.6 Update Channel
 
-社内標準は原則 `stable` とする。
+推奨チャンネルは原則 `stable` とする。
 
 ```bash
 herdr channel show
@@ -129,7 +129,7 @@ Herdr起動・通常利用
   → 必要ならユーザーへ更新を案内
 ```
 
-将来的に社内共通の定期確認が必要になった場合も、`herdr-orchestrator` の handoff 本体ではなく、独立した setup / doctor / maintenance workflow として実装する。
+将来的に共通の定期確認が必要になった場合も、`herdr-orchestrator` の handoff 本体ではなく、独立した setup / doctor / maintenance workflow として実装する。
 
 ---
 
@@ -157,6 +157,8 @@ Orchestrator 側で Herdr CLI の変更を追従実装しない。
 - sync / async policy
 - callback policy
 
+配布環境における更新は、ユーザーまたは管理者が明示的に `herdr-orchestrator update`（または最新インストーラ）を実行して GitHub Release Tarball を取得・置換する（詳細は [distribution-install.md](../../skills/herdr-orchestrator/references/distribution-install.md) 参照）。実行中タスクの破壊を防ぐためバックグラウンドでの自動更新は行わず、未完了タスクが存在する場合はデフォルトで更新を拒否する（`--force` でのみ強制可能）。通常のタスク処理パイプラインへの影響を避けるため共通メンテナンスロックは設けず、更新同士の排他ロックと未完了タスクの事前確認、および運用制約により安全性を確保する（更新と通常タスクの完全排他は保証しない）。更新時はステージング展開と安全な配置切替（`mv`）を用い、プロセス内異常時は既存環境へ自動ロールバックする（各 rename は原子的だが、切替全体の完全な原子性は保証しない）。また `update` 操作はセッション外メンテナンスを考慮し `HERDR_ENV=1` を免除する。開発環境では手元 checkout から `npm run install:orchestrator-dev` により反映する（[dev-local-install.md](../../skills/herdr-orchestrator/references/dev-local-install.md) 参照）。
+
 <a id="sec-21-update-repository"></a>
 
 ### Repository 更新
@@ -178,7 +180,7 @@ Orchestrator 側で Herdr CLI の変更を追従実装しない。
 
 以下を原則禁止する。
 
-- Herdr 公式 Skill の社内 fork を通常運用する。
+- Herdr 公式 Skill の独自 fork を通常運用する。
 - Herdr CLI の操作仕様を `herdr-orchestrator` に複製する。
 - 中央 Skill を利用するためだけに個別 repository を変更する。
 - requester を無条件で `main` へ rename する。
