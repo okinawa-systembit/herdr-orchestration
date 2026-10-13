@@ -214,6 +214,14 @@ class Phase4HandoffTests(unittest.TestCase):
         self.env["HERDR_ORCHESTRATOR_RESULT_POLL_SEC"] = "0.05"
         (self.worktree / "sub").mkdir(exist_ok=True)
 
+    def _wait_for_prompt(self, timeout_sec: float = 5.0) -> None:
+        deadline = time.monotonic() + timeout_sec
+        while time.monotonic() < deadline:
+            if self.prompt_log.exists():
+                return
+            time.sleep(0.01)
+        raise TimeoutError("fake herdr prompt was not recorded within deadline")
+
     def _handoff_base_args(self) -> list[str]:
         return [
             "handoff",
@@ -238,17 +246,21 @@ class Phase4HandoffTests(unittest.TestCase):
 
     def test_sync_handoff_waits_for_terminal_result(self) -> None:
         def submit_later() -> None:
-            time.sleep(0.2)
+            self._wait_for_prompt()
             tasks = self.state_home / "herdr-orchestrator" / "tasks"
-            for path in tasks.glob("task_*.json"):
-                with _env_patch(self.env):
-                    registry_ops.update_result(
-                        path.stem,
-                        result_status="succeeded",
-                        result_ref="artifacts/review.md",
-                        summary="done",
-                    )
-                return
+            deadline = time.monotonic() + 5.0
+            while time.monotonic() < deadline:
+                found = list(tasks.glob("task_*.json"))
+                if found:
+                    with _env_patch(self.env):
+                        registry_ops.update_result(
+                            found[0].stem,
+                            result_status="succeeded",
+                            result_ref="artifacts/review.md",
+                            summary="done",
+                        )
+                    return
+                time.sleep(0.01)
 
         threading.Thread(target=submit_later, daemon=True).start()
         proc = _run_cli(
@@ -387,7 +399,7 @@ class Phase4HandoffTests(unittest.TestCase):
         env["FAKE_WORKER_BLOCKED_FLAG"] = str(blocked_flag)
 
         def flip_blocked() -> None:
-            time.sleep(0.15)
+            self._wait_for_prompt()
             blocked_flag.write_text("1", encoding="utf-8")
 
         threading.Thread(target=flip_blocked, daemon=True).start()
@@ -406,7 +418,7 @@ class Phase4HandoffTests(unittest.TestCase):
         env["FAKE_WORKER_GONE_FLAG"] = str(gone_flag)
 
         def mark_gone() -> None:
-            time.sleep(0.15)
+            self._wait_for_prompt()
             gone_flag.write_text("1", encoding="utf-8")
 
         threading.Thread(target=mark_gone, daemon=True).start()
