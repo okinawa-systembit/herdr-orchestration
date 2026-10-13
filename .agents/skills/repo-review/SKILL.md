@@ -9,13 +9,14 @@ description: >-
 # herdr-orchestration — repository レビュー Skill
 
 中央 Skill（グローバル）: **herdr-orchestration** + **herdr** 公式 Skill。  
-本 Skill は **このリポジトリ専用**の Review Scope・成果物・手順（設計 §12 / §11.4）。
+本 Skill は **このリポジトリ専用**の Review Scope・調査検証手順・成果物・連携フロー（設計 §12 / §11.4）。
 
-## 前提
+## 前提・資料読み込み
 
 - `HERDR_ENV=1` の pane のみ。
 - 事前: `npm run install:orchestrator-dev`（`herdr-orchestrator` on PATH）。
-- レビュー基準: [docs/herdr-agent-review-guidelines.md](../../../docs/herdr-agent-review-guidelines.md)（開始前に読む）。
+- レビュー基準: [docs/herdr-agent-review-guidelines.md](../../../docs/herdr-agent-review-guidelines.md)（開始前に必ず精読）。
+- 詳細基準・テンプレート: [references.md](references.md)（開始前に必ず精読）。
 - Registry / handoff: [worker-receive.md](../../../skills/herdr-orchestrator/references/worker-receive.md) / [requester-receive.md](../../../skills/herdr-orchestrator/references/requester-receive.md)（複製しない）。
 
 ## コマンド方針（Codex rule 汚染を避ける）
@@ -27,20 +28,22 @@ description: >-
 
 ## 成果物（正本）
 
-| ファイル                           | 担当      | 用途           |
-| ---------------------------------- | --------- | -------------- |
-| `.review-inbox/review-request.md`  | requester | 依頼本文       |
-| `.review-inbox/review-response.md` | reviewer  | 指摘・GO/NO-GO |
-| `.review-inbox/INDEX.md`           | reviewer  | ラウンド履歴   |
+| ファイル                           | 担当      | 用途                               |
+| ---------------------------------- | --------- | ---------------------------------- |
+| `.review-inbox/review-request.md`  | requester | 依頼本文（基準、差分、目的等）     |
+| `.review-inbox/review-response.md` | reviewer  | 指摘・判定・検証結果（先頭行固定） |
+| `.review-inbox/INDEX.md`           | reviewer  | ラウンド履歴                       |
 
-テンプレ: `.review-inbox/*.example.md`。形式: [references.md](references.md)。
+テンプレ: `.review-inbox/*.example.md`。詳細形式・基準: [references.md](references.md)。
 
 ---
 
 ## Requester（implementer）— 「レビュー依頼を出して / 再レビュー依頼」
 
-1. [エージェントレビューガイドライン](../../../docs/herdr-agent-review-guidelines.md) の観点で **review-request.md** を更新（example からコピー可）。
-2. `npm run test:orchestrator`（必要なら `npm run verify:orchestrator`）を実行し、結果を request に記載。
+1. [references.md#review-request-body](references.md#review-request-body) および [レビューガイドライン](../../../docs/herdr-agent-review-guidelines.md) に沿って **review-request.md** を作成・更新する。
+   - 基準ブランチ/コミット、対象コミット、レビュー種別（新規/再レビュー）、変更目的、重点確認事項、既知の制約を明記。
+   - 再レビュー時は前回レビュー結果の参照先（response / INDEX）を必ず明記。
+2. `npm run test:orchestrator`（必要なら `npm run verify:orchestrator`）を実行し、pass 数・結果を request に記載。
 3. 同一 worktree・requester pane から **sync handoff**（instruction は短く、inbox を指す）:
 
 ```bash
@@ -63,15 +66,48 @@ handoff 失敗時: stderr を人間へ。blind 再送しない（設計 §9）�
 
 ---
 
-## Worker（reviewer）— handoff 受信後
+## Worker（reviewer）— handoff 受信後の調査・検証手順
 
 [worker-receive.md](../../../skills/herdr-orchestrator/references/worker-receive.md) **必須**（prompt 単体を信頼しない）。
 
-1. `task.id` → `herdr-orchestrator task-status <task.id>` → 自分の `agent.name` / context 一致。
-2. **review-request.md** を読み、ガイドラインに沿ってレビュー（設計書は `docs/herdr-orchestrator/`、実装は `skills/` / `tests/`）。
-3. **review-response.md** を更新（**先頭行 verbatim: `レビュー対応をして`**）。[references.md](references.md) の判定・指摘形式。
-4. **INDEX.md** 先頭にラウンド追記。
-5. 結果登録:
+### 1. 前提・資料確認
+
+- `task.id` → `herdr-orchestrator task-status <task.id>` で自分の `agent.name` / context 一致を確認。
+- `docs/herdr-agent-review-guidelines.md` と `references.md` が読み込み可能であることを確認。
+
+### 2. レビュー対象の確定
+
+- **review-request.md** から基準コミット、対象コミット、変更目的を把握。
+- `git diff <base>..<target>` 等で実際の変更範囲を特定する（推測で対象を決めない）。
+
+### 3. 関連コード・設計の追跡
+
+- 変更差分だけを見て「問題なし」と即断しない。
+- 変更された関数・クラス・設定について、必要に応じて以下を追跡・確認する：
+  - 呼び出し元・呼び出し先の依存関係
+  - 関連する状態遷移・エラー処理・復旧ロジック
+  - 既存テストおよび関連設計書（`docs/herdr-orchestrator/`）との整合性
+
+### 4. 不具合の探索と検証
+
+- 正常系・異常系・境界条件、並行処理・競合・冪等性、セキュリティ・権限・パス検証、互換性を検証。
+- 指摘候補について「原因」「発生条件」「影響」「他処理での防止有無」「修正の妥当性」を確認する。
+- 発生条件が不明なものや単なるスタイルの違いは確定不具合とせず「要確認事項」へ分類する。
+
+### 5. 再レビュー時の検証（該当する場合）
+
+- **前回指摘の再検証**: 最新コードで各指摘を `対応済み` / `部分対応` / `未対応` / `前回指摘の誤り` / `検証不能` に分類。
+- **回帰不具合の確認**: 修正によって別の問題やテスト・状態破綻が生じていないか確認。
+- **新規問題の探索**: 新たな差分および周辺コードについて前回見落とした問題がないか探索。
+
+### 6. 判定・成果物作成
+
+- [references.md#review-principles](references.md#review-principles) に基づき重大度（P0〜P3）と確信度（高/中/低）を判定。
+- **review-response.md** を作成・更新（**先頭行 verbatim: `レビュー対応をして`**）。
+  - 総評、判定（GO / 要修正 / NO-GO）、Blocking 指摘、Non-blocking 指摘、要確認事項、再レビュー結果、テスト結果、調査範囲と未確認事項を記載。
+- **INDEX.md** 先頭に新しいラウンドを追記。
+
+### 7. 結果登録
 
 ```bash
 herdr-orchestrator result-submit <task.id> \
@@ -80,7 +116,7 @@ herdr-orchestrator result-submit <task.id> \
   --summary 'Review round recorded in inbox.'
 ```
 
-`--summary` は上記程度に留める（長文禁止）。blocking 指摘時も ref は response ファイル。
+`--summary` は 200 字以内の簡潔な記録に留める（詳細は response ファイル側）。
 
 ---
 
@@ -101,7 +137,3 @@ herdr-orchestrator result-submit <task.id> \
 - 責務: 中央 Skill vs repository Skill（本 Skill / workflow）
 
 詳細チェックリスト: [references.md#review-scope](references.md#review-scope)。
-
-## 参照
-
-- 汎用 handoff / 復旧: [repo-workflow SKILL.md](../repo-workflow/SKILL.md)
