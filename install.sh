@@ -30,7 +30,10 @@ cleanup() {
         echo "Error: Rollback to previous installation failed!" >&2
         if [[ -d "$CLEANUP_BACKUP_DIR" ]]; then
           echo "Your previous installation backup is preserved at: ${CLEANUP_BACKUP_DIR}" >&2
-          echo "Please restore it manually: mv '${CLEANUP_BACKUP_DIR}' '${CLEANUP_DEST}'" >&2
+          echo "To restore manually, ensure '${CLEANUP_DEST}' is cleared before moving the backup:" >&2
+          echo "  1. Check destination: ls -ld '${CLEANUP_DEST}'" >&2
+          echo "  2. Remove or move aside incomplete destination if present: rm -rf '${CLEANUP_DEST}'" >&2
+          echo "  3. Restore previous installation: mv '${CLEANUP_BACKUP_DIR}' '${CLEANUP_DEST}'" >&2
         fi
       fi
     elif [[ ${CLEANUP_NEW_PLACED:-0} -eq 1 ]]; then

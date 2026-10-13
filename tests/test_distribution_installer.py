@@ -583,6 +583,9 @@ class DistributionInstallerTests(unittest.TestCase):
             self.assertNotEqual(proc.returncode, 0)
             self.assertIn("Error: Rollback to previous installation failed!", proc.stderr)
             self.assertIn("Your previous installation backup is preserved at:", proc.stderr)
+            self.assertIn("To restore manually, ensure", proc.stderr)
+            self.assertIn("Check destination: ls -ld", proc.stderr)
+            self.assertIn("Restore previous installation: mv", proc.stderr)
             self.assertNotIn("Rolled back successfully", proc.stderr)
             self.assertTrue((backup / "backup_marker.txt").is_file(), "Backup must NOT be deleted when rollback fails")
 
