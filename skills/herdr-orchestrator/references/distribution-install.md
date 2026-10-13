@@ -205,23 +205,34 @@ jobs:
         uses: actions/checkout@v7
         with:
           ref: ${{ needs.resolve.outputs.commit_sha }}
+          fetch-depth: 0
 
       - name: 2. Verify tag commit match and immutability
         run: |
           TARGET_TAG="${{ needs.resolve.outputs.tag }}"
           EXPECTED_SHA="${{ needs.resolve.outputs.commit_sha }}"
-          CURRENT_TAG_SHA=$(git rev-list -n 1 "$TARGET_TAG" 2>/dev/null || echo "")
           HEAD_SHA=$(git rev-parse HEAD)
           echo "Target tag:   $TARGET_TAG"
           echo "Expected SHA: $EXPECTED_SHA"
-          echo "Current Tag:  $CURRENT_TAG_SHA"
           echo "HEAD SHA:     $HEAD_SHA"
+
+          # 1. HEAD が解決済みコミット SHA と一致することを確認
           if [[ "$HEAD_SHA" != "$EXPECTED_SHA" ]]; then
             echo "Error: Checkout HEAD SHA ($HEAD_SHA) does not match expected SHA ($EXPECTED_SHA)" >&2
             exit 1
           fi
+
+          # 2. リモートの最新タグ参照を明示的に取得（タグ削除・移動の検出）
+          if ! git fetch --force origin "refs/tags/${TARGET_TAG}:refs/tags/${TARGET_TAG}"; then
+            echo "Error: Failed to fetch remote tag refs/tags/${TARGET_TAG} (tag may have been deleted)" >&2
+            exit 1
+          fi
+
+          # 3. 最新のタグが指すコミット SHA と期待 SHA が一致することを検証
+          CURRENT_TAG_SHA=$(git rev-parse "refs/tags/${TARGET_TAG}^{commit}")
+          echo "Current Tag:  $CURRENT_TAG_SHA"
           if [[ "$CURRENT_TAG_SHA" != "$EXPECTED_SHA" ]]; then
-            echo "Error: Tag SHA ($CURRENT_TAG_SHA) has moved or differs from expected SHA ($EXPECTED_SHA)" >&2
+            echo "Error: Remote tag SHA ($CURRENT_TAG_SHA) has moved or differs from expected SHA ($EXPECTED_SHA)" >&2
             exit 1
           fi
 
@@ -267,24 +278,31 @@ jobs:
           rm -rf "${TEST_DIR}"
           echo "Smoke test passed successfully."
 
-      - name: 7. Check release existence (Immutability & API error classification)
+      - name: 7. Check release existence (Immutability & HTTP status code classification)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           VERSION="${{ needs.resolve.outputs.tag }}"
-          set +e
-          VIEW_OUTPUT=$(gh release view "${VERSION}" 2>&1)
-          VIEW_STATUS=$?
-          set -e
+          REPO="${{ github.repository }}"
+          echo "Checking release existence for ${VERSION} in ${REPO}..."
 
-          if [ $VIEW_STATUS -eq 0 ]; then
-            echo "Error: Release ${VERSION} already exists. Immutable release policy forbids overwriting." >&2
+          # GitHub REST API で HTTP ステータスコードを直接取得
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "Authorization: token ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${REPO}/releases/tags/${VERSION}")
+
+          echo "GitHub API HTTP Status: ${HTTP_STATUS}"
+          if [ "${HTTP_STATUS}" = "200" ]; then
+            echo "Error: Release ${VERSION} already exists (HTTP 200). Immutable release policy forbids overwriting." >&2
             exit 1
-          elif echo "$VIEW_OUTPUT" | grep -iqE "release not found|could not find"; then
-            echo "Confirmed: Release ${VERSION} does not exist. Proceeding with release."
+          elif [ "${HTTP_STATUS}" = "404" ]; then
+            echo "Confirmed: Release ${VERSION} does not exist (HTTP 404). Proceeding with release."
+          elif [ "${HTTP_STATUS}" = "401" ] || [ "${HTTP_STATUS}" = "403" ]; then
+            echo "Error: Authentication or permission error while checking release (HTTP ${HTTP_STATUS})" >&2
+            exit 1
           else
-            echo "Error: Unexpected failure while checking release existence (API or network error):" >&2
-            echo "$VIEW_OUTPUT" >&2
+            echo "Error: Unexpected API response or network failure while checking release (HTTP ${HTTP_STATUS})" >&2
             exit 1
           fi
 
