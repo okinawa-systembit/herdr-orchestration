@@ -84,7 +84,7 @@ tar -czf "herdr-orchestration-${VERSION}.tar.gz" \
 | ライブラリ             | 採用バージョン  | 役割                                             |
 | :--------------------- | :-------------- | :----------------------------------------------- |
 | `actions/checkout`     | `v7` (`v7.0.1`) | リポジトリの安全なチェックアウト                 |
-| `actions/setup-python` | `v5`            | Python 3 実行環境（ユニットテスト用）            |
+| `actions/setup-python` | `v7` (`v7.0.0`) | Python 3 実行環境（ユニットテスト用）            |
 | `actions/setup-node`   | `v7`            | Node.js 実行環境（Prettier / markdownlint 用）   |
 | `gh` CLI               | ランナー標準    | 公式 GitHub CLI によるリリース作成・アセット添付 |
 
@@ -139,7 +139,7 @@ jobs:
           echo "Checked out commit SHA: $(git rev-parse HEAD)"
 
       - name: 3. Setup Python 3
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
