@@ -274,6 +274,28 @@ class DistributionInstallerTests(unittest.TestCase):
             self.assertEqual(force_proc.returncode, 0, force_proc.stderr)
             self.assertTrue((dest / "SKILL.md").is_file())
 
+    def test_prerequisites_check_missing_flock_fails(self) -> None:
+        """Verify that missing flock fails pre-environment check."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_bin = Path(tmp) / "restricted_bin"
+            tmp_bin.mkdir()
+            for cmd in ["bash", "curl", "tar", "python3"]:
+                real_cmd = shutil.which(cmd)
+                if real_cmd:
+                    (tmp_bin / cmd).symlink_to(real_cmd)
+
+            env = os.environ.copy()
+            env["PATH"] = str(tmp_bin)
+            proc_run = subprocess.run(
+                [str(INSTALL_SH), "--version", "v0.1.0"],
+                capture_output=True,
+                text=True,
+                env=env,
+                check=False,
+            )
+            self.assertEqual(proc_run.returncode, 1)
+            self.assertIn("Required command not found: flock", proc_run.stderr)
+
     def test_exclusive_lock_prevents_concurrent_install(self) -> None:
         import fcntl
 
@@ -302,6 +324,96 @@ class DistributionInstallerTests(unittest.TestCase):
             finally:
                 fcntl.flock(fd, fcntl.LOCK_UN)
                 os.close(fd)
+
+    def test_installer_holds_lock_during_execution_and_rejects_concurrent_installer(self) -> None:
+        """Verify that installer A holds the flock until completion and rejects concurrent installer B."""
+        import time
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            home_dir = tmp_path / "home"
+            home_dir.mkdir()
+            sync_file = tmp_path / "sync_wait"
+            running_file = tmp_path / "running_a"
+
+            # Create a custom tarball where scripts/herdr-orchestrator waits for sync_file to be removed
+            custom_tarball = tmp_path / "waiting.tar.gz"
+            waiting_script = (
+                f"#!/bin/bash\n"
+                f"touch '{running_file}'\n"
+                f"while [ -f '{sync_file}' ]; do sleep 0.02; done\n"
+                f"exit 0\n"
+            ).encode("utf-8")
+
+            sync_file.write_text("wait")
+
+            with tarfile.open(custom_tarball, "w:gz") as tar:
+                import io
+
+                ti = tarfile.TarInfo(name="SKILL.md")
+                ti.size = 5
+                tar.addfile(ti, io.BytesIO(b"skill"))
+
+                ti_cli = tarfile.TarInfo(name="scripts/herdr-orchestrator")
+                ti_cli.size = len(waiting_script)
+                ti_cli.mode = 0o755
+                tar.addfile(ti_cli, io.BytesIO(waiting_script))
+
+                ti_ref = tarfile.TarInfo(name="references")
+                ti_ref.type = tarfile.DIRTYPE
+                tar.addfile(ti_ref)
+
+            dest_a = tmp_path / "skill_a"
+            dest_b = tmp_path / "skill_b"
+            bin_dir = tmp_path / "bin"
+            env = os.environ.copy()
+            env["HOME"] = str(home_dir)
+            env["HERDR_INSTALL_LOCAL_TARBALL"] = str(custom_tarball)
+
+            # Start installer A in background
+            proc_a = subprocess.Popen(
+                [str(INSTALL_SH), "--dest", str(dest_a), "--bin-dir", str(bin_dir)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                env=env,
+            )
+
+            try:
+                # Wait until installer A reaches CLI verification (lock held!)
+                waited = 0.0
+                while not running_file.is_file() and waited < 5.0:
+                    time.sleep(0.05)
+                    waited += 0.05
+                self.assertTrue(running_file.is_file(), "Installer A should be running with lock held")
+
+                # Launch installer B while installer A is still running
+                proc_b = subprocess.run(
+                    [str(INSTALL_SH), "--dest", str(dest_b), "--bin-dir", str(bin_dir)],
+                    capture_output=True,
+                    text=True,
+                    env=env,
+                    check=False,
+                )
+                self.assertEqual(proc_b.returncode, 1)
+                self.assertIn("Another installation or update process is currently running", proc_b.stderr)
+
+            finally:
+                # Signal installer A to proceed and finish
+                if sync_file.is_file():
+                    sync_file.unlink()
+                stdout_a, stderr_a = proc_a.communicate(timeout=10)
+                self.assertEqual(proc_a.returncode, 0, stderr_a)
+
+            # After installer A finishes, installer C should be able to acquire lock and run
+            proc_c = subprocess.run(
+                [str(INSTALL_SH), "--dest", str(dest_b), "--bin-dir", str(bin_dir)],
+                capture_output=True,
+                text=True,
+                env=env,
+                check=False,
+            )
+            self.assertEqual(proc_c.returncode, 0, proc_c.stderr)
 
     def test_broken_cli_aborts_and_preserves_existing_installation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -427,6 +539,153 @@ class DistributionInstallerTests(unittest.TestCase):
             self.assertNotEqual(proc.returncode, 0)
             self.assertIn("Rolling back to previous installation", proc.stderr)
             self.assertTrue((dest / "original_version.txt").is_file(), "Original installation must be preserved")
+
+    def test_rollback_failure_preserves_backup_and_notifies_user(self) -> None:
+        """Verify that if rollback fails, error is clearly reported, success is NOT printed, and backup is preserved."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            dest_parent = tmp_path / "protected_parent"
+            dest_parent.mkdir()
+            dest = dest_parent / "skill"
+            dest.mkdir()
+            (dest / "orig.txt").write_text("orig")
+
+            backup = tmp_path / "backup_dir"
+            backup.mkdir()
+            (backup / "backup_marker.txt").write_text("must_be_preserved")
+
+            content = INSTALL_SH.read_text(encoding="utf-8")
+            main_pos = content.find("main() {")
+            preamble = content[:main_pos]
+
+            sim_script = f"""
+            {preamble}
+            CLEANUP_DEST="{dest}"
+            CLEANUP_BACKUP_DIR="{backup}"
+            CLEANUP_SWAPPED=1
+
+            # Make dest_parent read-only so rm or mv fails
+            chmod 555 "{dest_parent}"
+
+            # Trigger failure exit
+            exit 1
+            """
+            try:
+                proc = subprocess.run(
+                    ["bash", "-c", sim_script],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+            finally:
+                dest_parent.chmod(0o755)
+
+            self.assertNotEqual(proc.returncode, 0)
+            self.assertIn("Error: Rollback to previous installation failed!", proc.stderr)
+            self.assertIn("Your previous installation backup is preserved at:", proc.stderr)
+            self.assertNotIn("Rolled back successfully", proc.stderr)
+            self.assertTrue((backup / "backup_marker.txt").is_file(), "Backup must NOT be deleted when rollback fails")
+
+    def test_initial_install_failure_cleans_up_incomplete_destination(self) -> None:
+        """Verify that if initial installation fails in Step 12, the incomplete dest is cleaned up."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            dest = tmp_path / "fresh_skill"
+            self.assertFalse(dest.exists())
+
+            valid_tarball = tmp_path / "valid.tar.gz"
+            create_sample_tarball(valid_tarball)
+
+            # Bad bin-dir causes failure in Step 12
+            bad_bin_dir = tmp_path / "bad_bin"
+            bad_bin_dir.write_text("not_a_directory")
+
+            env = os.environ.copy()
+            env["HERDR_INSTALL_LOCAL_TARBALL"] = str(valid_tarball)
+
+            proc = subprocess.run(
+                [
+                    str(INSTALL_SH),
+                    "--dest", str(dest),
+                    "--bin-dir", str(bad_bin_dir),
+                ],
+                capture_output=True,
+                text=True,
+                env=env,
+                check=False,
+            )
+            self.assertNotEqual(proc.returncode, 0)
+            self.assertIn("Cleaning up incomplete installation", proc.stderr)
+            self.assertFalse(dest.exists(), "Incomplete dest must be cleaned up on initial install failure")
+
+    def test_symlink_target_existing_regular_file_rejected_without_force(self) -> None:
+        """Verify that if link_path is a regular file, installation is rejected unless --force is given."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            dest = tmp_path / "skill"
+            bin_dir = tmp_path / "bin"
+            bin_dir.mkdir()
+            existing_bin = bin_dir / "herdr-orchestrator"
+            existing_bin.write_text("#!/bin/sh\necho custom_tool\n")
+
+            valid_tarball = tmp_path / "valid.tar.gz"
+            create_sample_tarball(valid_tarball)
+
+            env = os.environ.copy()
+            env["HERDR_INSTALL_LOCAL_TARBALL"] = str(valid_tarball)
+
+            # 1. Without --force -> fails
+            proc = subprocess.run(
+                [str(INSTALL_SH), "--dest", str(dest), "--bin-dir", str(bin_dir)],
+                capture_output=True,
+                text=True,
+                env=env,
+                check=False,
+            )
+            self.assertEqual(proc.returncode, 1)
+            self.assertIn("already exists and is not a symlink", proc.stderr)
+            self.assertFalse(existing_bin.is_symlink(), "Existing file must not be modified without --force")
+
+            # 2. With --force -> succeeds and replaces regular file with symlink
+            force_proc = subprocess.run(
+                [str(INSTALL_SH), "--dest", str(dest), "--bin-dir", str(bin_dir), "--force"],
+                capture_output=True,
+                text=True,
+                env=env,
+                check=False,
+            )
+            self.assertEqual(force_proc.returncode, 0, force_proc.stderr)
+            self.assertTrue(existing_bin.is_symlink(), "Link must be created with --force")
+            self.assertTrue((dest / "SKILL.md").is_file())
+
+    def test_existing_symlink_is_updated_without_force(self) -> None:
+        """Verify that existing symlink is smoothly updated without requiring --force."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            dest = tmp_path / "skill"
+            bin_dir = tmp_path / "bin"
+            bin_dir.mkdir()
+            link_path = bin_dir / "herdr-orchestrator"
+            dummy_target = tmp_path / "dummy"
+            dummy_target.touch()
+            link_path.symlink_to(dummy_target)
+
+            valid_tarball = tmp_path / "valid.tar.gz"
+            create_sample_tarball(valid_tarball)
+
+            env = os.environ.copy()
+            env["HERDR_INSTALL_LOCAL_TARBALL"] = str(valid_tarball)
+
+            proc = subprocess.run(
+                [str(INSTALL_SH), "--dest", str(dest), "--bin-dir", str(bin_dir)],
+                capture_output=True,
+                text=True,
+                env=env,
+                check=False,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertTrue(link_path.is_symlink())
+            self.assertEqual(link_path.resolve(), (dest / "scripts" / "herdr-orchestrator").resolve())
 
 
 if __name__ == "__main__":

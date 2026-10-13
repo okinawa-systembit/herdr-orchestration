@@ -14,13 +14,26 @@ CLEANUP_SWAPPED=0
 cleanup() {
   local exit_code=$?
   trap - EXIT INT TERM HUP
-  # Rollback if swapped and failed
+  # Rollback or clean up if swapped and failed
   if [[ ${CLEANUP_SWAPPED:-0} -eq 1 && $exit_code -ne 0 ]]; then
-    echo "Installation failed. Rolling back to previous installation..." >&2
     if [[ -n "${CLEANUP_BACKUP_DIR:-}" && -d "$CLEANUP_BACKUP_DIR" ]]; then
+      echo "Installation failed. Rolling back to previous installation..." >&2
       rm -rf "$CLEANUP_DEST" 2>/dev/null || true
-      mv "$CLEANUP_BACKUP_DIR" "$CLEANUP_DEST" 2>/dev/null || true
-      echo "Rolled back successfully." >&2
+      if [[ ! -e "$CLEANUP_DEST" ]] && mv "$CLEANUP_BACKUP_DIR" "$CLEANUP_DEST" 2>/dev/null && [[ -d "$CLEANUP_DEST" && -f "${CLEANUP_DEST}/SKILL.md" ]]; then
+        echo "Rolled back successfully to previous installation." >&2
+      else
+        echo "Error: Rollback to previous installation failed!" >&2
+        if [[ -d "$CLEANUP_BACKUP_DIR" ]]; then
+          echo "Your previous installation backup is preserved at: ${CLEANUP_BACKUP_DIR}" >&2
+          echo "Please restore it manually: mv '${CLEANUP_BACKUP_DIR}' '${CLEANUP_DEST}'" >&2
+        fi
+      fi
+    else
+      # Initial installation failed after swap (no previous backup)
+      if [[ -n "${CLEANUP_DEST:-}" && -d "$CLEANUP_DEST" ]]; then
+        echo "Installation failed. Cleaning up incomplete installation at ${CLEANUP_DEST}..." >&2
+        rm -rf "$CLEANUP_DEST" 2>/dev/null || true
+      fi
     fi
   fi
   # Clean up staging, backup on success, and temp_dir
@@ -87,7 +100,7 @@ main() {
   done
 
   # Step 1: Pre-environment checks
-  for cmd in curl tar python3; do
+  for cmd in curl tar python3 flock; do
     if ! command -v "$cmd" > /dev/null 2>&1; then
       echo "Error: Required command not found: $cmd" >&2
       exit 1
@@ -164,9 +177,9 @@ main() {
   mkdir -p "$lock_dir"
   local lock_file="${lock_dir}/.herdr-orchestrator.install.lock"
 
-  # Acquire lock using python3 fcntl for high portability across Linux and macOS
+  # Acquire exclusive lock using flock on file descriptor 200
   exec 200>"$lock_file"
-  if ! python3 -c 'import fcntl, sys; fcntl.flock(200, fcntl.LOCK_EX | fcntl.LOCK_NB)' 2>/dev/null; then
+  if ! flock -n 200; then
     echo "Error: Another installation or update process is currently running (locked: ${lock_file})." >&2
     exit 1
   fi
@@ -241,12 +254,22 @@ main() {
   mkdir -p "$(dirname "$dest")"
   if [[ -d "$dest" ]]; then
     mv "$dest" "$backup_dir"
-    CLEANUP_SWAPPED=1
   fi
   mv "$staging_dir" "$dest"
+  CLEANUP_SWAPPED=1 # staging moved into place; rollback or cleanup if subsequent steps fail
 
   # Step 12: Update CLI symlink
   mkdir -p "$bin_dir"
+  if [[ -e "$link_path" && ! -L "$link_path" ]]; then
+    if [[ $force -eq 1 ]]; then
+      echo "Warning: '${link_path}' already exists and is not a symlink. Overwriting due to --force." >&2
+      rm -rf "$link_path"
+    else
+      echo "Error: Binary link target '${link_path}' already exists and is not a symlink." >&2
+      echo "Use --force to overwrite it, or specify a different --bin-dir." >&2
+      exit 1
+    fi
+  fi
   ln -sf "${dest}/scripts/herdr-orchestrator" "$link_path"
   echo "Linked CLI: ${link_path} -> ${dest}/scripts/herdr-orchestrator"
   CLEANUP_SWAPPED=0 # installation and symlink fully successful
@@ -281,7 +304,7 @@ Options:
   --dest <path>      Skill installation destination (default: ~/.agents/skills/herdr-orchestration)
   --bin-dir <path>   Binary symlink directory (default: ~/.local/bin)
   --dry-run          Print planned installation actions without making any changes
-  --force            Force installation over existing development git repositories
+  --force            Force installation over existing development git repositories or non-symlink binary targets
   -h, --help         Show this help message and exit
 
 Environment Variables:
