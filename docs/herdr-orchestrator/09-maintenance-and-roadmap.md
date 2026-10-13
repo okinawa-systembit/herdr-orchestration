@@ -157,7 +157,7 @@ Orchestrator 側で Herdr CLI の変更を追従実装しない。
 - sync / async policy
 - callback policy
 
-配布環境における更新は、ユーザーまたは管理者が明示的に `herdr-orchestrator update`（または最新インストーラ）を実行して GitHub Release Tarball を取得・置換する（詳細は [distribution-install.md](../../skills/herdr-orchestrator/references/distribution-install.md) 参照）。実行中タスクの破壊を防ぐためバックグラウンドでの自動更新は行わず、未完了タスクが存在する場合はデフォルトで更新を拒否する（`--force` でのみ強制可能）。更新時はステージング展開と原子的切替（`mv`）を用い、異常発生時は既存環境へ自動ロールバックする。また `update` 操作はセッション外メンテナンスを考慮し `HERDR_ENV=1` を免除する。開発環境では手元 checkout から `npm run install:orchestrator-dev` により反映する（[dev-local-install.md](../../skills/herdr-orchestrator/references/dev-local-install.md) 参照）。
+配布環境における更新は、ユーザーまたは管理者が明示的に `herdr-orchestrator update`（または最新インストーラ）を実行して GitHub Release Tarball を取得・置換する（詳細は [distribution-install.md](../../skills/herdr-orchestrator/references/distribution-install.md) 参照）。実行中タスクの破壊を防ぐためバックグラウンドでの自動更新は行わず、未完了タスクが存在する場合はデフォルトで更新を拒否する（`--force` でのみ強制可能）。更新処理とタスク処理の競合は共通メンテナンスロック（`.maintenance.lock`）により排他制御される。更新時はステージング展開と原子的切替（`mv`）を用い、プロセス内異常時は既存環境へ自動ロールバックする。また `update` 操作はセッション外メンテナンスを考慮し `HERDR_ENV=1` を免除する。開発環境では手元 checkout から `npm run install:orchestrator-dev` により反映する（[dev-local-install.md](../../skills/herdr-orchestrator/references/dev-local-install.md) 参照）。
 
 <a id="sec-21-update-repository"></a>
 
