@@ -235,7 +235,10 @@ jobs:
 
           # 2. リモートの最新タグ参照を git ls-remote で直接取得（タグ移動・削除・改ざんの検出）
           echo "Checking remote tag reference via git ls-remote..."
-          LS_REMOTE_OUT=$(git ls-remote origin "refs/tags/${TARGET_TAG}" "refs/tags/${TARGET_TAG}^{}")
+          if ! LS_REMOTE_OUT=$(git ls-remote origin "refs/tags/${TARGET_TAG}" "refs/tags/${TARGET_TAG}^{}"); then
+            echo "Error: Failed to query remote tag references from origin via git ls-remote" >&2
+            exit 1
+          fi
           if [ -z "$LS_REMOTE_OUT" ]; then
             echo "Error: Remote tag refs/tags/${TARGET_TAG} does not exist on origin" >&2
             exit 1
