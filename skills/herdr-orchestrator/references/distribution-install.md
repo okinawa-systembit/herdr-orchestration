@@ -66,6 +66,18 @@ tar -czf "herdr-orchestration-${VERSION}.tar.gz" \
   - リリース対象コミットに所定のテスト定義が含まれている前提で動作するため、手動指定時も SemVer に準拠した有効なリリースコミットを指定する。
 - **権限（Permissions）の最小化方針**:
   - ワークフロー全体での不用意な権限剥奪（トップレベル設定による意図しない全権限の一律 none 化）を防止しつつ最小権限（Least Privilege）を確立するため、各ジョブ単位で明示的に権限を宣言する。`resolve` ジョブおよび `verify` ジョブ（Reusable CI 含む）には `permissions: contents: read` を付与し、Release 作成が必要な `release` ジョブにのみ `permissions: contents: write` を明示付与するジョブ単位の最小権限ポリシーを採用する。
+- **並行実行制御（`concurrency`）の適用範囲と重複実行防止**:
+  - プルリクエスト（PR）への連続プッシュ時や、同一ブランチでの連続コミット時に古いアクションが滞留・並行して実行されるのを防ぐため、CI ワークフロー単位で `concurrency` を導入する。
+  - `concurrency: group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}, cancel-in-progress: true` により並行制御を行う。
+    - **キーの分割**: PR イベント時は PR 番号（`${{ github.event.pull_request.number }}`）をキーとし、同一 PR への連続 push 時の先行ジョブを自動キャンセルする。push イベント時は Git ref（`${{ github.ref }}`、例: `refs/heads/main`）をキーとし、同一ブランチへの連続 push 時の先行ジョブを自動キャンセルする。
+    - **PR と main 実行の独立性**: PR 番号とブランチ名は異なるグループキーとなるため、PR の実行とマージ後の main push 実行は相互にキャンセルせず、それぞれの最新状態が独立して検証される。
+    - **Release ワークフローへの非適用**: `release.yml` には無条件に `cancel-in-progress: true` を適用しない。タグ検証、tarball ビルド、アセット添付などの不可逆な公開処理が途中で強制中断されるリスクを回避するためである。
+    - **キャンセルの性質**: `concurrency` は先行ジョブへのキャンセル要求であり、ステップ実行中のタイミングによっては即時停止しない場合がある。
+- **PR マージ結合テストの維持と参照消失エラー対策**:
+  - **マージ結合テストの維持**: `pull_request` イベントでは、PR ブランチ単体ではなく最新の base（`main`）と結合した「仮想マージ結果（`refs/pull/<PR番号>/merge`）」をテストすることで、マージ後に発生し得る競合やテスト破損を事前に検知する品質保証水準（マージゲート）を維持する。
+  - **参照消失とジョブ起動の競合モデル**: PR がマージまたはクローズされると、GitHub 側の仮想マージ参照（`refs/pull/<PR番号>/merge`）は即座に削除・無効化される。ジョブ実行条件 `if: github.event.pull_request == null || github.event.pull_request.state == 'open'` は、イベント発火時点で既にクローズされていた不要な実行（遅延起動や手動再実行など）をスキップするガードとして機能する。
+  - **競合の限界と複合アプローチ**: ただし、`github.event.pull_request.state` はワークフロー起動時のイベントペイロードのスナップショットであるため、キュー滞留中に PR がマージ・クローズされた場合、参照消失とチェックアウト実行の競合を完全に排除できるものではない。このため、`concurrency` による古い実行の即座キャンセルによってキュー滞留時間を極小化し、競合発生確率を低減する設計とする。万一マージ直後に取り残された古い PR ジョブで参照消失による checkout エラーが生じた場合でも、マージ後の `main` への push CI が独立して実行されて最新コミットが検証されるため、リポジトリ全体の整合性は維持される。
+  - **Reusable 呼び出し時の優先度**: Reusable Workflow（`workflow_call`）から `inputs.target_ref` が渡された場合はそれが最優先され、タグ・コミット固定のリリース検証要件も完全に維持する。
 
 ### 2.2 採用アクションライブラリ（最新版）
 
@@ -86,7 +98,7 @@ tar -czf "herdr-orchestration-${VERSION}.tar.gz" \
 
 #### ① 共通 CI ワークフロー (`.github/workflows/ci.yml`)
 
-`workflow_call` の入力パラメータとして `target_ref` を受け取り、指定された ref を確実にチェックアウトしてテストする。
+`workflow_call` の入力パラメータとして `target_ref` を受け取り、指定された ref を確実にチェックアウトしてテストする。また、並行制御（`concurrency`）による同一 PR / ブランチの重複排除、およびオープン中 PR の仮想マージ結合テストを安全に実行する。
 
 ```yaml
 name: CI
@@ -104,8 +116,13 @@ on:
         required: false
         default: ""
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   verify:
+    if: github.event.pull_request == null || github.event.pull_request.state == 'open'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
