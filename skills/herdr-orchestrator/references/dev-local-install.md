@@ -48,7 +48,7 @@ npm run install:orchestrator-dev
 - **正本**: 常に `skills/herdr-orchestrator/`（編集はここだけ）。
 - **コピー先**: `~/.agents/skills/herdr-orchestration/`（上書きコピー）。
 - **再実行**: Skill / CLI を直したら **同スクリプトを再実行**してグローバルコピーを更新（配布 install 後の更新と同型）。
-- **PATH**: `~/.local/bin/herdr-orchestrator` → install 先 `scripts/herdr-orchestrator` へ **symlink**（`install/link-cli.sh`）。開発・配布で同じ。
+- **PATH**: `~/.local/bin/herdr-orchestrator` → install 先 `scripts/herdr-orchestrator` へ **symlink**（`install/link-cli.sh`）。開発・配布で同じ（`--dry-run` 時は未インストール環境でもシミュレーション実行可能）。
 
 別パス:
 

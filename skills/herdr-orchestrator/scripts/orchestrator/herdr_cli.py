@@ -46,7 +46,6 @@ def run_herdr(args: list[str], *, timeout_sec: float | None = None) -> dict[str,
     Note: 'herdr' in payload includes synthetic objects generated on timeout
     (e.g. herdr_cli_timeout) as well as parsed stderr JSON.
     """
-    binary = herdr_binary()
     if timeout_sec is not None:
         validate_timeout(timeout_sec)
     else:
@@ -61,6 +60,7 @@ def run_herdr(args: list[str], *, timeout_sec: float | None = None) -> dict[str,
                 ) from exc
             validate_timeout(parsed, label="HERDR_CLI_TIMEOUT_SEC")
             timeout_sec = parsed
+    binary = herdr_binary()
     try:
         proc = subprocess.run(
             [binary, *args],
