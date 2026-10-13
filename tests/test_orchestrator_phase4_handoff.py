@@ -222,6 +222,23 @@ class Phase4HandoffTests(unittest.TestCase):
             time.sleep(0.01)
         raise TimeoutError("fake herdr prompt was not recorded within deadline")
 
+    def _wait_for_dispatch_sent(self, timeout_sec: float = 5.0) -> str:
+        self._wait_for_prompt(timeout_sec=timeout_sec)
+        tasks = self.state_home / "herdr-orchestrator" / "tasks"
+        deadline = time.monotonic() + timeout_sec
+        while time.monotonic() < deadline:
+            found = list(tasks.glob("task_*.json"))
+            if found:
+                with _env_patch(self.env):
+                    try:
+                        doc = registry_ops.get_task(found[0].stem)
+                        if doc["dispatch"]["status"] == "sent":
+                            return found[0].stem
+                    except Exception:
+                        pass
+            time.sleep(0.01)
+        raise TimeoutError("dispatch status 'sent' was not reached within deadline")
+
     def _handoff_base_args(self) -> list[str]:
         return [
             "handoff",
@@ -246,21 +263,23 @@ class Phase4HandoffTests(unittest.TestCase):
 
     def test_sync_handoff_waits_for_terminal_result(self) -> None:
         def submit_later() -> None:
-            self._wait_for_prompt()
-            tasks = self.state_home / "herdr-orchestrator" / "tasks"
-            deadline = time.monotonic() + 5.0
-            while time.monotonic() < deadline:
-                found = list(tasks.glob("task_*.json"))
-                if found:
-                    with _env_patch(self.env):
+            task_id = self._wait_for_dispatch_sent()
+            with _env_patch(self.env):
+                deadline = time.monotonic() + 5.0
+                while time.monotonic() < deadline:
+                    try:
                         registry_ops.update_result(
-                            found[0].stem,
+                            task_id,
                             result_status="succeeded",
                             result_ref="artifacts/review.md",
                             summary="done",
                         )
-                    return
-                time.sleep(0.01)
+                        return
+                    except RegistryError as exc:
+                        if exc.code in ("dispatch_not_ready", "registry_conflict"):
+                            time.sleep(0.01)
+                            continue
+                        raise
 
         threading.Thread(target=submit_later, daemon=True).start()
         proc = _run_cli(
@@ -399,7 +418,7 @@ class Phase4HandoffTests(unittest.TestCase):
         env["FAKE_WORKER_BLOCKED_FLAG"] = str(blocked_flag)
 
         def flip_blocked() -> None:
-            self._wait_for_prompt()
+            self._wait_for_dispatch_sent()
             blocked_flag.write_text("1", encoding="utf-8")
 
         threading.Thread(target=flip_blocked, daemon=True).start()
@@ -418,7 +437,7 @@ class Phase4HandoffTests(unittest.TestCase):
         env["FAKE_WORKER_GONE_FLAG"] = str(gone_flag)
 
         def mark_gone() -> None:
-            self._wait_for_prompt()
+            self._wait_for_dispatch_sent()
             gone_flag.write_text("1", encoding="utf-8")
 
         threading.Thread(target=mark_gone, daemon=True).start()
