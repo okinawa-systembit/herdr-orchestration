@@ -12,7 +12,7 @@ Herdr 上の **中央オーケストレーション**（Task Registry、role、h
 
 ## 開発時ローカルインストール
 
-社内（Cursor / Codex / Agy）共通: Skill を **`~/.agents/skills/herdr-orchestration`** にコピー（公式 `herdr` と別名）。
+各エージェント（Cursor / Codex / Agy）共通: Skill を **`~/.agents/skills/herdr-orchestration`** にコピー（公式 `herdr` と別名）。
 
 ```bash
 git clone <this-repo-url> herdr-orchestration

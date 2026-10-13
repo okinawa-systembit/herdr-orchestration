@@ -3,7 +3,7 @@
 **git clone を編集しながら** Orchestrator を触る手順。Skill のユーザーグローバル配置は専用スクリプトで行う。  
 **配布**（curl \| bash 等）は [distribution-install.md](distribution-install.md)（方針のみ）。
 
-## 1. Skill 名・配置先（社内: Cursor / Codex / Agy）
+## 1. Skill 名・配置先（Cursor / Codex / Agy 共通）
 
 | 項目                            | 値                                                                                                |
 | ------------------------------- | ------------------------------------------------------------------------------------------------- |
@@ -82,7 +82,7 @@ export PATH="${HOME}/.local/bin:${PATH}"
 | Repository workflow | `.agents/skills/repo-workflow/` | プロジェクト内   |
 | Repository review   | `.agents/skills/repo-review/`   | 本 repo レビュー |
 
-中央 Skill は **グローバルコピー**（§4）で足りる。`.agents/skills/` へ中央 Skill を symlink する方式は使わない（社内標準は `~/.agents/skills/herdr-orchestration`）。
+中央 Skill は **グローバルコピー**（§4）で足りる。`.agents/skills/` へ中央 Skill を symlink する方式は使わない（標準配置先は `~/.agents/skills/herdr-orchestration`）。
 
 ## 7. Task Registry
 
@@ -94,7 +94,7 @@ export PATH="${HOME}/.local/bin:${PATH}"
 | --------------------------------------------- | ----------------------------------------------------------- |
 | 編集後に再インストールしない                  | Agent / `herdr-orchestrator` が古い install 先を指す        |
 | repo 内 `skills/.../scripts` を PATH に載せる | 配布後と PATH・Codex rule がずれる                          |
-| `setup.sh` を社内日常の正本にしない           | default が `~/.cursor/skills/herdr-orchestrator` のレガシー |
+| `setup.sh` を日常の正本にしない               | default が `~/.cursor/skills/herdr-orchestrator` のレガシー |
 | Registry JSON 手編集                          | public CLI のみ                                             |
 
 ## 9. 関連

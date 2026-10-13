@@ -11,7 +11,7 @@
 
 ## 2. 中央 Skill のインストール（§17.3）
 
-社内（Cursor / Codex / Agy）: **`~/.agents/skills/herdr-orchestration`**（公式 **herdr** Skill と別名）。開発 clone から:
+各エージェント（Cursor / Codex / Agy）共通: **`~/.agents/skills/herdr-orchestration`**（公式 **herdr** Skill と別名）。開発 clone から:
 
 ```bash
 skills/herdr-orchestrator/install/dev-local-install.sh --dry-run

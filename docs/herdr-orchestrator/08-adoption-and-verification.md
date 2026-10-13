@@ -69,6 +69,18 @@ Task Registry cleanup は `herdr-orchestrator` 内蔵の lazy cleanup を使用�
 
 各 Agent の allowlist / approval 設定は任意の最適化とする。設定しなくても動作できることを要件とし、設定する場合は [§15](07-skill-and-implementation.md#sec-15) Approval Minimization の非破壊的 command surface のみを候補とする。
 
+<a id="sec-17-4"></a>
+
+### 17.4 配布インストールと更新
+
+パッケージ化（npm/pip 等）は行わず、中央 GitHub リポジトリ上の Release Tarball を取得する `curl | bash` インストーラ（`install.sh`）を標準の配布方式とする。
+
+- **配置先**: 各エージェント環境（Cursor / Codex / Antigravity）共通のグローバル領域 `~/.agents/skills/herdr-orchestration` に配置し、CLI symlink を `~/.local/bin/herdr-orchestrator` に作成する。
+- **開発インストールとの等価性**: 開発時の手元 checkout 反映（`dev-local-install.sh`）と同一のディレクトリ構成・シンボリックリンク構成を保つ。
+- **更新運用**: 実行中タスクの破壊を防ぐためバックグラウンド自動更新は行わず、ユーザーによる明示的な `herdr-orchestrator update` コマンド実行またはインストーラ再実行により最新 Release Tarball を取得・置換する。
+
+詳細なパッケージ構成・GitHub Actions 自動リリースワークフロー・引数仕様は [distribution-install.md](../../skills/herdr-orchestrator/references/distribution-install.md) を正とする。
+
 ---
 
 <a id="sec-18"></a>
