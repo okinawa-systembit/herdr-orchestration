@@ -61,6 +61,11 @@ tar -czf "herdr-orchestration-${VERSION}.tar.gz" \
 - **意図しないリリースの防止**:
   - 通常の `main` へのプルリクエストマージ（リポジトリ専用スキル `.agents/skills/` や設計ドキュメントの修正など）ではアクションは**起動しない**。
   - 開発者が明示的にバージョンタグをプッシュ、または手動 dispatch したときのみ実行される。
+- **手動実行（`workflow_dispatch`）時の実行コンテキストと対象コミット**:
+  - GitHub Actions の仕様上、手動実行時のワークフロー定義自体はディスパッチを実行したブランチ（通常 `main`）からロードされるが、`resolve` ジョブで指定タグから解決されたコミット SHA を Reusable CI（`ci.yml`）および `release` ジョブのチェックアウト ref として厳格に引き渡す。これにより、手動実行時でも検証・パッケージング対象のコードは指定タグのコミット SHA に完全に固定される。
+  - リリース対象コミットに所定のテスト定義が含まれている前提で動作するため、手動指定時も SemVer に準拠した有効なリリースコミットを指定する。
+- **権限（Permissions）の最小化方針**:
+  - ワークフロー全体での不用意な権限剥奪（トップレベル設定による意図しない権限の一律 none 化）を防止し、Reusable Workflow 呼び出しやリリースノート自動生成（`--generate-notes`）に必要な連携を損なわないよう、書き込み権限が必要な `release` ジョブにのみ `permissions: contents: write` を明示付与するジョブ単位の最小権限ポリシーを採用する。
 
 ### 2.2 採用アクションライブラリ（最新版）
 
@@ -222,17 +227,23 @@ jobs:
             exit 1
           fi
 
-          # 2. リモートの最新タグ参照を明示的に取得（タグ削除・移動の検出）
-          if ! git fetch --force origin "refs/tags/${TARGET_TAG}:refs/tags/${TARGET_TAG}"; then
-            echo "Error: Failed to fetch remote tag refs/tags/${TARGET_TAG} (tag may have been deleted)" >&2
+          # 2. リモートの最新タグ参照を git ls-remote で直接取得（タグ移動・削除・改ざんの検出）
+          echo "Checking remote tag reference via git ls-remote..."
+          LS_REMOTE_OUT=$(git ls-remote origin "refs/tags/${TARGET_TAG}*")
+          if [ -z "$LS_REMOTE_OUT" ]; then
+            echo "Error: Remote tag refs/tags/${TARGET_TAG} does not exist on origin" >&2
             exit 1
           fi
 
-          # 3. 最新のタグが指すコミット SHA と期待 SHA が一致することを検証
-          CURRENT_TAG_SHA=$(git rev-parse "refs/tags/${TARGET_TAG}^{commit}")
-          echo "Current Tag:  $CURRENT_TAG_SHA"
-          if [[ "$CURRENT_TAG_SHA" != "$EXPECTED_SHA" ]]; then
-            echo "Error: Remote tag SHA ($CURRENT_TAG_SHA) has moved or differs from expected SHA ($EXPECTED_SHA)" >&2
+          # Annotated tag の剥離コミット SHA (^{}) を優先取得、なければ直接のタグ SHA を取得
+          REMOTE_TAG_SHA=$(echo "$LS_REMOTE_OUT" | awk -v tag="refs/tags/${TARGET_TAG}^{}" '$2 == tag {print $1}')
+          if [ -z "$REMOTE_TAG_SHA" ]; then
+            REMOTE_TAG_SHA=$(echo "$LS_REMOTE_OUT" | awk -v tag="refs/tags/${TARGET_TAG}" '$2 == tag {print $1}')
+          fi
+
+          echo "Current Remote Tag SHA: $REMOTE_TAG_SHA"
+          if [[ "$REMOTE_TAG_SHA" != "$EXPECTED_SHA" ]]; then
+            echo "Error: Remote tag SHA ($REMOTE_TAG_SHA) has moved or differs from expected SHA ($EXPECTED_SHA)" >&2
             exit 1
           fi
 
@@ -286,11 +297,14 @@ jobs:
           REPO="${{ github.repository }}"
           echo "Checking release existence for ${VERSION} in ${REPO}..."
 
-          # GitHub REST API で HTTP ステータスコードを直接取得
-          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+          # GitHub REST API で HTTP ステータスコードを直接取得（通信失敗も明示検出）
+          if ! HTTP_STATUS=$(curl -sS -o /dev/null -w "%{http_code}" \
             -H "Authorization: token ${GH_TOKEN}" \
             -H "Accept: application/vnd.github.v3+json" \
-            "https://api.github.com/repos/${REPO}/releases/tags/${VERSION}")
+            "https://api.github.com/repos/${REPO}/releases/tags/${VERSION}"); then
+            echo "Error: Failed to communicate with GitHub API via curl" >&2
+            exit 1
+          fi
 
           echo "GitHub API HTTP Status: ${HTTP_STATUS}"
           if [ "${HTTP_STATUS}" = "200" ]; then
