@@ -73,11 +73,13 @@ Task Registry cleanup は `herdr-orchestrator` 内蔵の lazy cleanup を使用�
 
 ### 17.4 配布インストールと更新
 
-パッケージ化（npm/pip 等）は行わず、中央 GitHub リポジトリ上の Release Tarball を取得する `curl | bash` インストーラ（`install.sh`）を標準の配布方式とする。
+パッケージ化（npm/pip 等）は行わず、公式 GitHub リポジトリ（`https://github.com/okinawa-systembit/herdr-orchestration`）上の Release Tarball を取得する `curl | bash` インストーラ（`install.sh`）を標準の配布方式とする。
 
 - **配置先**: 各エージェント環境（Cursor / Codex / Antigravity）共通のグローバル領域 `~/.agents/skills/herdr-orchestration` に配置し、CLI symlink を `~/.local/bin/herdr-orchestrator` に作成する。
+- **原子的切替とロールバック**: 一時ステージング領域での事前検証（必須ファイル、実行権限、`--help` 実行確認）を経て原子的（`mv`）に配置を切り替え、異常終了時も既存環境を破壊せず自動復旧する。
 - **開発インストールとの等価性**: 開発時の手元 checkout 反映（`dev-local-install.sh`）と同一のディレクトリ構成・シンボリックリンク構成を保つ。
-- **更新運用**: 実行中タスクの破壊を防ぐためバックグラウンド自動更新は行わず、ユーザーによる明示的な `herdr-orchestrator update` コマンド実行またはインストーラ再実行により最新 Release Tarball を取得・置換する。
+- **更新運用とタスク保護**: 実行中タスクの破壊を防ぐためバックグラウンド自動更新は行わない。ユーザーによる明示的な `herdr-orchestrator update` コマンド実行またはインストーラ再実行により最新 Release Tarball を取得・置換する。Registry 内に未完了タスクが存在する場合はデフォルトで更新を拒否し、`--force` 指定時のみオーバーライドを許可する。
+- **実行環境制約の免除**: `install.sh` および `herdr-orchestrator update` は、エージェントセッション外からのメンテナンス操作を可能とするため `HERDR_ENV=1` の環境制約を免除する。
 
 詳細なパッケージ構成・GitHub Actions 自動リリースワークフロー・引数仕様は [distribution-install.md](../../skills/herdr-orchestrator/references/distribution-install.md) を正とする。
 
