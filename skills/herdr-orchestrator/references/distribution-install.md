@@ -351,20 +351,25 @@ herdr-orchestrator update [--version <tag>] [--force] [--dry-run]
 - **`HERDR_ENV=1` の免除**:
   - `update` コマンドはエージェントセッション外や Herdr 未起動のターミナルから人間・管理者が実行することが想定されるため、通常の `handoff` や `task-status` 等と異なり、**`HERDR_ENV=1` の環境制約を免除**する。
 
-### 4.3 更新ポリシーと共通メンテナンスロック排他
+### 4.3 更新ポリシー・排他制御と運用制約
 
 - **自動更新の禁止**:
   - タスク実行中の予期せぬ破壊や競合を防ぐため、バックグラウンドでの自動更新は行わない（[09-maintenance-and-roadmap.md §20.4](../../../docs/herdr-orchestrator/09-maintenance-and-roadmap.md#sec-20-4) の原則に準拠）。
-- **共通メンテナンスロックによるタスク処理との排他制御**:
-  - 更新処理と通常タスク処理（`handoff`, `result-submit`, `resume-task` 等）の競合を防ぐため、**共通メンテナンスロック（`${XDG_STATE_HOME:-~/.local/state}/herdr-orchestrator/tasks/.maintenance.lock`）** を導入する。
-  - **通常タスク処理側**: 実行開始時に `.maintenance.lock` の共有ロック（`fcntl.LOCK_SH | fcntl.LOCK_NB`）を取得する。取得失敗（更新処理中）時は、エラーコード `maintenance_in_progress` で即座に安全に中断する。
-  - **更新処理側（`update`）**: 更新開始時に `.maintenance.lock` の排他ロック（`fcntl.LOCK_EX | fcntl.LOCK_NB`）を取得する。タスク処理中であれば即座に拒否（`task_in_progress`）。
-  - すべてのロック取得はノンブロッキング（`LOCK_NB`）で行い、デッドロックを防止する。
-- **実行中タスクのデフォルト拒否（Fail-Closed）**:
-  - 排他ロック取得後、Task Registry をスキャンし、進行中タスク（`task.status` が `dispatched` または `in_progress`、あるいは `completion.status` が `processing`）が存在する場合、**デフォルトで更新を即座にエラー終了（exit 1）**する。
-  - エラーメッセージには実行中タスクの ID を表示し、タスクの完了を待つか、不要な場合は `recover-completion` 等で解決するよう促す。
+- **インストール・更新処理同士の排他制御**:
+  - `install.sh` と `herdr-orchestrator update` は同一のインストールロック（`~/.agents/skills/.herdr-orchestrator.install.lock` に対する `flock` 排他ロック）を使用し、複数インストーラや更新処理が同時並行で実行されることを防止する。
+  - 通常の Orchestrator CLI 処理（`handoff`、`result-submit`、`resume-task` 等）にはロック処理を追加せず、既存のタスク処理パイプラインへのオーバーヘッドや複雑性を排除する（`.maintenance.lock` は導入しない）。
+- **実行中タスクの事前確認とデフォルト拒否（Fail-Closed）**:
+  - 更新処理の開始前に Task Registry を確認し、未完了タスク（`task.status` が `dispatched` または `in_progress`、あるいは `completion.status` が `processing`）が存在する場合、**デフォルトで更新を拒否して即座にエラー終了（exit 1）**する。
+  - エラーメッセージには未完了タスクの ID を表示し、タスクの完了を待つか、不要な場合は `recover-completion` 等で解決するよう促す。
+  - ※ この確認は Task Registry に基づくベストエフォートの事前確認であり、通常タスク処理との完全な排他をシステム的に保証するものではない。
+- **運用上の制約**:
+  - 通常タスク処理との完全排他はシステム保証されないため、以下の運用制約を厳守する：
+    1. Orchestrator の CLI 処理が実行中の場合、更新操作を行わない。
+    2. 更新処理中は、新規の `handoff` や `result-submit` 等を開始しない。
+    3. 非同期タスクが未完了の場合は、原則として更新を行わない。
+    - 上記の運用制約に違反した場合、更新とタスク処理の競合による正常動作は保証されない。
 - **強制更新オプション (`--force`)**:
-  - 管理者が意図的に実行中タスクの存在や開発インストールの警告を無視して更新したい場合のみ、明示的に `--force` フラグを付与することで更新を続行可能とする（実行時にコンソールへ影響範囲を警告表示する）。
+  - 管理者が意図的に未完了タスクの存在や開発インストールの警告を無視して更新したい場合のみ、明示的に `--force` フラグを付与することで更新を許可する（実行時にコンソールへ競合や破壊の危険性を明示警告した上で続行する）。
 - **開発インストールの保護**:
   - 配置先が git checkout ツリー（開発用ローカルインストール）であると検知された場合、通常の `update` は警告を出して中止する（誤って手元の開発作業を上書き消去することを防止）。上書きには `--force` を要求する。
 - **Registry スキーマ互換性**:
@@ -381,5 +386,5 @@ herdr-orchestrator update [--version <tag>] [--force] [--dry-run]
 | **配置先**           | `~/.agents/skills/herdr-orchestration` | `~/.agents/skills/herdr-orchestration`（同一） |
 | **CLI リンク**       | `~/.local/bin/herdr-orchestrator`      | `~/.local/bin/herdr-orchestrator`（同一）      |
 | **切り替え・復旧**   | 手動再実行                             | 原子的リネーム + 自動ロールバック              |
-| **実行中タスク制御** | 開発者の責任                           | 共通ロック排他 + デフォルト拒否 (Fail-Closed)  |
+| **実行中タスク制御** | 開発者の責任                           | デフォルト更新拒否 (Fail-Closed) + 運用制約    |
 | **更新方法**         | `npm run install:orchestrator-dev`     | `herdr-orchestrator update`                    |
