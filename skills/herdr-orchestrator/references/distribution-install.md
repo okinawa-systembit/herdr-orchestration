@@ -66,6 +66,13 @@ tar -czf "herdr-orchestration-${VERSION}.tar.gz" \
   - リリース対象コミットに所定のテスト定義が含まれている前提で動作するため、手動指定時も SemVer に準拠した有効なリリースコミットを指定する。
 - **権限（Permissions）の最小化方針**:
   - ワークフロー全体での不用意な権限剥奪（トップレベル設定による意図しない全権限の一律 none 化）を防止しつつ最小権限（Least Privilege）を確立するため、各ジョブ単位で明示的に権限を宣言する。`resolve` ジョブおよび `verify` ジョブ（Reusable CI 含む）には `permissions: contents: read` を付与し、Release 作成が必要な `release` ジョブにのみ `permissions: contents: write` を明示付与するジョブ単位の最小権限ポリシーを採用する。
+- **並行実行制御（`concurrency`）による同一 PR / 同一ブランチの先行ジョブ自動キャンセル**:
+  - プルリクエスト（PR）への連続プッシュ時や、同一ブランチでの連続コミット時に古いアクションが滞留・並行して実行されるのを防ぐため、ワークフロー単位で `concurrency` を導入する。
+  - `concurrency: group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}, cancel-in-progress: true` により、同一 PR（PR番号ごと）または同一ブランチ（refごと）で新しい実行が開始された場合は先行ジョブを即座に自動キャンセルし、不要な多重実行を防止する（※ PR 番号とブランチ名は別グループとなるため、PR 実行とマージ後の main push 実行は相互にキャンセルせず、それぞれの最新状態が独立して検証される）。
+- **PR マージ結合テストの維持とクローズ後・マージ後エラーの防止**:
+  - `pull_request` イベントでは、PR ブランチ単体ではなく最新の base（`main`）と結合した「仮想マージ結果（`refs/pull/<PR番号>/merge`）」をテストすることで、マージ後に発生し得る競合やテスト破損を事前に検知する品質保証（マージゲート）を維持する。
+  - PR がマージまたはクローズされた直後に遅延起動した古い PR ジョブが、消失した仮想マージ参照をフェッチして `fatal: couldn't find remote ref refs/pull/.../merge` で失敗することを防ぐため、ジョブ実行条件に `if: github.event.pull_request == null || github.event.pull_request.state == 'open'` を設定する。
+  - Reusable Workflow（`workflow_call`）から `inputs.target_ref` が渡された場合はそれが最優先され、タグ・コミット固定のリリース検証要件も完全に維持する。
 
 ### 2.2 採用アクションライブラリ（最新版）
 
@@ -86,7 +93,7 @@ tar -czf "herdr-orchestration-${VERSION}.tar.gz" \
 
 #### ① 共通 CI ワークフロー (`.github/workflows/ci.yml`)
 
-`workflow_call` の入力パラメータとして `target_ref` を受け取り、指定された ref を確実にチェックアウトしてテストする。
+`workflow_call` の入力パラメータとして `target_ref` を受け取り、指定された ref を確実にチェックアウトしてテストする。また、並行制御（`concurrency`）による同一 PR / ブランチの重複排除、およびオープン中 PR の仮想マージ結合テストを安全に実行する。
 
 ```yaml
 name: CI
@@ -104,8 +111,13 @@ on:
         required: false
         default: ""
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   verify:
+    if: github.event.pull_request == null || github.event.pull_request.state == 'open'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
