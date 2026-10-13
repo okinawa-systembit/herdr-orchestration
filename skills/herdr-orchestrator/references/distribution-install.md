@@ -65,7 +65,7 @@ tar -czf "herdr-orchestration-${VERSION}.tar.gz" \
   - GitHub Actions の仕様上、手動実行時のワークフロー定義自体はディスパッチを実行したブランチ（通常 `main`）からロードされるが、`resolve` ジョブで指定タグから解決されたコミット SHA を Reusable CI（`ci.yml`）および `release` ジョブのチェックアウト ref として厳格に引き渡す。これにより、手動実行時でも検証・パッケージング対象のコードは指定タグのコミット SHA に完全に固定される。
   - リリース対象コミットに所定のテスト定義が含まれている前提で動作するため、手動指定時も SemVer に準拠した有効なリリースコミットを指定する。
 - **権限（Permissions）の最小化方針**:
-  - ワークフロー全体での不用意な権限剥奪（トップレベル設定による意図しない権限の一律 none 化）を防止し、Reusable Workflow 呼び出しやリリースノート自動生成（`--generate-notes`）に必要な連携を損なわないよう、書き込み権限が必要な `release` ジョブにのみ `permissions: contents: write` を明示付与するジョブ単位の最小権限ポリシーを採用する。
+  - ワークフロー全体での不用意な権限剥奪（トップレベル設定による意図しない全権限の一律 none 化）を防止しつつ最小権限（Least Privilege）を確立するため、各ジョブ単位で明示的に権限を宣言する。`resolve` ジョブおよび `verify` ジョブ（Reusable CI 含む）には `permissions: contents: read` を付与し、Release 作成が必要な `release` ジョブにのみ `permissions: contents: write` を明示付与するジョブ単位の最小権限ポリシーを採用する。
 
 ### 2.2 採用アクションライブラリ（最新版）
 
@@ -108,6 +108,8 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
 
     steps:
       - name: 1. Checkout repository
@@ -162,6 +164,8 @@ jobs:
   resolve:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
     outputs:
       tag: ${{ steps.resolve.outputs.tag }}
       commit_sha: ${{ steps.resolve.outputs.commit_sha }}
@@ -193,6 +197,8 @@ jobs:
   # 2. 確定された同一コミットSHAに対して共通 CI を実行
   verify:
     needs: resolve
+    permissions:
+      contents: read
     uses: ./.github/workflows/ci.yml
     with:
       target_ref: ${{ needs.resolve.outputs.commit_sha }}
@@ -229,7 +235,7 @@ jobs:
 
           # 2. リモートの最新タグ参照を git ls-remote で直接取得（タグ移動・削除・改ざんの検出）
           echo "Checking remote tag reference via git ls-remote..."
-          LS_REMOTE_OUT=$(git ls-remote origin "refs/tags/${TARGET_TAG}*")
+          LS_REMOTE_OUT=$(git ls-remote origin "refs/tags/${TARGET_TAG}" "refs/tags/${TARGET_TAG}^{}")
           if [ -z "$LS_REMOTE_OUT" ]; then
             echo "Error: Remote tag refs/tags/${TARGET_TAG} does not exist on origin" >&2
             exit 1
