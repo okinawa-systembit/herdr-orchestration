@@ -1,0 +1,177 @@
+name: Release Orchestrator
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v0.1.0)"
+        required: true
+
+jobs:
+  # 1. 対象タグの解決、SemVer検証、およびコミットSHAの確定
+  resolve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+      commit_sha: ${{ steps.resolve.outputs.commit_sha }}
+
+    steps:
+      - name: 1. Checkout repository to resolve commit SHA
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: 2. Resolve and validate target tag and commit SHA
+        id: resolve
+        run: |
+          TAG="${{ inputs.tag || github.ref_name }}"
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]; then
+            echo "Error: Invalid tag format: $TAG (must follow SemVer, e.g. v0.1.0)" >&2
+            exit 1
+          fi
+          if ! git rev-parse "refs/tags/${TAG}" > /dev/null 2>&1; then
+            echo "Error: Tag refs/tags/${TAG} does not exist" >&2
+            exit 1
+          fi
+          COMMIT_SHA=$(git rev-parse "refs/tags/${TAG}^{commit}")
+          echo "Resolved tag: $TAG"
+          echo "Resolved commit SHA: $COMMIT_SHA"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "commit_sha=${COMMIT_SHA}" >> "$GITHUB_OUTPUT"
+
+  # 2. 確定された同一コミットSHAに対して共通 CI を実行
+  verify:
+    needs: resolve
+    uses: ./.github/workflows/ci.yml
+    with:
+      target_ref: ${{ needs.resolve.outputs.commit_sha }}
+
+  # 3. 検証成功後に同一コミットSHAからパッケージング、スモークテスト、リリースを実行
+  release:
+    needs: [resolve, verify]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    steps:
+      - name: 1. Checkout resolved commit SHA
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.resolve.outputs.commit_sha }}
+          fetch-depth: 0
+
+      - name: 2. Verify tag commit match and immutability
+        run: |
+          TARGET_TAG="${{ needs.resolve.outputs.tag }}"
+          EXPECTED_SHA="${{ needs.resolve.outputs.commit_sha }}"
+          HEAD_SHA=$(git rev-parse HEAD)
+          echo "Target tag:   $TARGET_TAG"
+          echo "Expected SHA: $EXPECTED_SHA"
+          echo "HEAD SHA:     $HEAD_SHA"
+
+          # 1. HEAD が解決済みコミット SHA と一致することを確認
+          if [[ "$HEAD_SHA" != "$EXPECTED_SHA" ]]; then
+            echo "Error: Checkout HEAD SHA ($HEAD_SHA) does not match expected SHA ($EXPECTED_SHA)" >&2
+            exit 1
+          fi
+
+          # 2. リモートの最新タグ参照を明示的に取得（タグ削除・移動の検出）
+          if ! git fetch --force origin "refs/tags/${TARGET_TAG}:refs/tags/${TARGET_TAG}"; then
+            echo "Error: Failed to fetch remote tag refs/tags/${TARGET_TAG} (tag may have been deleted)" >&2
+            exit 1
+          fi
+
+          # 3. 最新のタグが指すコミット SHA と期待 SHA が一致することを検証
+          CURRENT_TAG_SHA=$(git rev-parse "refs/tags/${TARGET_TAG}^{commit}")
+          echo "Current Tag:  $CURRENT_TAG_SHA"
+          if [[ "$CURRENT_TAG_SHA" != "$EXPECTED_SHA" ]]; then
+            echo "Error: Remote tag SHA ($CURRENT_TAG_SHA) has moved or differs from expected SHA ($EXPECTED_SHA)" >&2
+            exit 1
+          fi
+
+      - name: 3. Verify package source files
+        run: |
+          for item in SKILL.md scripts references; do
+            if [ ! -e "skills/herdr-orchestrator/${item}" ]; then
+              echo "Error: Missing required package item: skills/herdr-orchestrator/${item}" >&2
+              exit 1
+            fi
+          done
+
+      - name: 4. Ensure executable permissions & build distribution tarball
+        run: |
+          VERSION="${{ needs.resolve.outputs.tag }}"
+          chmod +x skills/herdr-orchestrator/scripts/herdr-orchestrator \
+                   skills/herdr-orchestrator/scripts/task-registry.py
+          tar -czf "herdr-orchestration-${VERSION}.tar.gz" \
+              -C skills/herdr-orchestrator \
+              SKILL.md scripts references
+
+      - name: 5. Generate SHA256 checksum
+        run: |
+          VERSION="${{ needs.resolve.outputs.tag }}"
+          ARCHIVE_NAME="herdr-orchestration-${VERSION}.tar.gz"
+          sha256sum "${ARCHIVE_NAME}" > "${ARCHIVE_NAME}.sha256"
+
+      - name: 6. Smoke test distribution tarball
+        run: |
+          VERSION="${{ needs.resolve.outputs.tag }}"
+          ARCHIVE_NAME="herdr-orchestration-${VERSION}.tar.gz"
+          TEST_DIR=$(mktemp -d)
+          echo "Testing archive in ${TEST_DIR}..."
+          tar -xzf "${ARCHIVE_NAME}" -C "${TEST_DIR}"
+          # 必須ファイルの存在確認
+          test -f "${TEST_DIR}/SKILL.md"
+          test -x "${TEST_DIR}/scripts/herdr-orchestrator"
+          test -x "${TEST_DIR}/scripts/task-registry.py"
+          # CLI ヘルプ実行確認
+          "${TEST_DIR}/scripts/herdr-orchestrator" --help > /dev/null
+          # チェックサム検証確認
+          sha256sum -c "${ARCHIVE_NAME}.sha256"
+          rm -rf "${TEST_DIR}"
+          echo "Smoke test passed successfully."
+
+      - name: 7. Check release existence (Immutability & HTTP status code classification)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ needs.resolve.outputs.tag }}"
+          REPO="${{ github.repository }}"
+          echo "Checking release existence for ${VERSION} in ${REPO}..."
+
+          # GitHub REST API で HTTP ステータスコードを直接取得
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "Authorization: token ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${REPO}/releases/tags/${VERSION}")
+
+          echo "GitHub API HTTP Status: ${HTTP_STATUS}"
+          if [ "${HTTP_STATUS}" = "200" ]; then
+            echo "Error: Release ${VERSION} already exists (HTTP 200). Immutable release policy forbids overwriting." >&2
+            exit 1
+          elif [ "${HTTP_STATUS}" = "404" ]; then
+            echo "Confirmed: Release ${VERSION} does not exist (HTTP 404). Proceeding with release."
+          elif [ "${HTTP_STATUS}" = "401" ] || [ "${HTTP_STATUS}" = "403" ]; then
+            echo "Error: Authentication or permission error while checking release (HTTP ${HTTP_STATUS})" >&2
+            exit 1
+          else
+            echo "Error: Unexpected API response or network failure while checking release (HTTP ${HTTP_STATUS})" >&2
+            exit 1
+          fi
+
+      - name: 8. Create GitHub Release and upload assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ needs.resolve.outputs.tag }}"
+          ARCHIVE_NAME="herdr-orchestration-${VERSION}.tar.gz"
+          gh release create "${VERSION}" \
+              "${ARCHIVE_NAME}" \
+              "${ARCHIVE_NAME}.sha256" \
+              --title "Release ${VERSION}" \
+              --generate-notes
