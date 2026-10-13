@@ -153,15 +153,21 @@ on:
         required: true
 
 jobs:
-  # 1. 対象タグの解決と SemVer バリデーション
+  # 1. 対象タグの解決、SemVer検証、およびコミットSHAの確定
   resolve:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
       tag: ${{ steps.resolve.outputs.tag }}
+      commit_sha: ${{ steps.resolve.outputs.commit_sha }}
 
     steps:
-      - name: 1. Resolve and validate target tag
+      - name: 1. Checkout repository to resolve commit SHA
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: 2. Resolve and validate target tag and commit SHA
         id: resolve
         run: |
           TAG="${{ inputs.tag || github.ref_name }}"
@@ -169,16 +175,24 @@ jobs:
             echo "Error: Invalid tag format: $TAG (must follow SemVer, e.g. v0.1.0)" >&2
             exit 1
           fi
+          if ! git rev-parse "refs/tags/${TAG}" > /dev/null 2>&1; then
+            echo "Error: Tag refs/tags/${TAG} does not exist" >&2
+            exit 1
+          fi
+          COMMIT_SHA=$(git rev-parse "refs/tags/${TAG}^{commit}")
+          echo "Resolved tag: $TAG"
+          echo "Resolved commit SHA: $COMMIT_SHA"
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "commit_sha=${COMMIT_SHA}" >> "$GITHUB_OUTPUT"
 
-  # 2. 解決されたタグと同一の ref に対して共通 CI を実行
+  # 2. 確定された同一コミットSHAに対して共通 CI を実行
   verify:
     needs: resolve
     uses: ./.github/workflows/ci.yml
     with:
-      target_ref: ${{ needs.resolve.outputs.tag }}
+      target_ref: ${{ needs.resolve.outputs.commit_sha }}
 
-  # 3. 検証成功後にパッケージング、スモークテスト、リリースを実行
+  # 3. 検証成功後に同一コミットSHAからパッケージング、スモークテスト、リリースを実行
   release:
     needs: [resolve, verify]
     runs-on: ubuntu-latest
@@ -187,21 +201,27 @@ jobs:
       contents: write
 
     steps:
-      - name: 1. Checkout target tag
+      - name: 1. Checkout resolved commit SHA
         uses: actions/checkout@v7
         with:
-          ref: ${{ needs.resolve.outputs.tag }}
+          ref: ${{ needs.resolve.outputs.commit_sha }}
 
-      - name: 2. Verify tag commit match
+      - name: 2. Verify tag commit match and immutability
         run: |
           TARGET_TAG="${{ needs.resolve.outputs.tag }}"
-          TAG_SHA=$(git rev-list -n 1 "$TARGET_TAG")
+          EXPECTED_SHA="${{ needs.resolve.outputs.commit_sha }}"
+          CURRENT_TAG_SHA=$(git rev-list -n 1 "$TARGET_TAG" 2>/dev/null || echo "")
           HEAD_SHA=$(git rev-parse HEAD)
-          echo "Target tag: $TARGET_TAG"
-          echo "Tag SHA:    $TAG_SHA"
-          echo "HEAD SHA:   $HEAD_SHA"
-          if [[ "$TAG_SHA" != "$HEAD_SHA" ]]; then
-            echo "Error: Tag SHA ($TAG_SHA) does not match checkout HEAD SHA ($HEAD_SHA)" >&2
+          echo "Target tag:   $TARGET_TAG"
+          echo "Expected SHA: $EXPECTED_SHA"
+          echo "Current Tag:  $CURRENT_TAG_SHA"
+          echo "HEAD SHA:     $HEAD_SHA"
+          if [[ "$HEAD_SHA" != "$EXPECTED_SHA" ]]; then
+            echo "Error: Checkout HEAD SHA ($HEAD_SHA) does not match expected SHA ($EXPECTED_SHA)" >&2
+            exit 1
+          fi
+          if [[ "$CURRENT_TAG_SHA" != "$EXPECTED_SHA" ]]; then
+            echo "Error: Tag SHA ($CURRENT_TAG_SHA) has moved or differs from expected SHA ($EXPECTED_SHA)" >&2
             exit 1
           fi
 
@@ -247,13 +267,24 @@ jobs:
           rm -rf "${TEST_DIR}"
           echo "Smoke test passed successfully."
 
-      - name: 7. Check release existence (Immutability guarantee)
+      - name: 7. Check release existence (Immutability & API error classification)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           VERSION="${{ needs.resolve.outputs.tag }}"
-          if gh release view "${VERSION}" > /dev/null 2>&1; then
+          set +e
+          VIEW_OUTPUT=$(gh release view "${VERSION}" 2>&1)
+          VIEW_STATUS=$?
+          set -e
+
+          if [ $VIEW_STATUS -eq 0 ]; then
             echo "Error: Release ${VERSION} already exists. Immutable release policy forbids overwriting." >&2
+            exit 1
+          elif echo "$VIEW_OUTPUT" | grep -iqE "release not found|could not find"; then
+            echo "Confirmed: Release ${VERSION} does not exist. Proceeding with release."
+          else
+            echo "Error: Unexpected failure while checking release existence (API or network error):" >&2
+            echo "$VIEW_OUTPUT" >&2
             exit 1
           fi
 
@@ -305,9 +336,9 @@ jobs:
 - `--force`: 既存の開発インストールや実行中タスクの警告を明示的にオーバーライド（コンソールに危険性を警告表示した上で続行）
 - `-h, --help`: ヘルプを表示
 
-### 3.3 原子的切替（Atomic Switch）と復旧仕様
+### 3.3 安全な配置切替と復旧仕様
 
-インストーラは途中で障害が発生しても、既存の正常なインストール環境を破壊しないよう原子的（Atomic）に動作する。
+インストーラは途中で障害が発生しても、既存の正常なインストール環境を破壊しないよう安全に動作する。各 rename 操作は原子的だが、切替全体としてはミリ秒単位の移行期間が存在することを前提とし、プロセス内異常時は自動ロールバック復旧する。
 
 1. **パイプ切断保護**: スクリプト全体を `main() { ... }` 関数でラップし、末尾で `main "$@"` を呼ぶ。冒頭に `set -euo pipefail` を指定し、パイプラインの途中エラーを確実に検知する。
 2. **事前環境確認**: `curl`, `tar`, `python3` の存在確認。
@@ -385,6 +416,6 @@ herdr-orchestrator update [--version <tag>] [--force] [--dry-run]
 | **前提条件**         | git リポジトリクローン済み             | curl, tar, python3（git 不要）                 |
 | **配置先**           | `~/.agents/skills/herdr-orchestration` | `~/.agents/skills/herdr-orchestration`（同一） |
 | **CLI リンク**       | `~/.local/bin/herdr-orchestrator`      | `~/.local/bin/herdr-orchestrator`（同一）      |
-| **切り替え・復旧**   | 手動再実行                             | 原子的リネーム + 自動ロールバック              |
+| **切り替え・復旧**   | 手動再実行                             | ステージング切替 (各mv) + 自動ロールバック     |
 | **実行中タスク制御** | 開発者の責任                           | デフォルト更新拒否 (Fail-Closed) + 運用制約    |
 | **更新方法**         | `npm run install:orchestrator-dev`     | `herdr-orchestrator update`                    |
