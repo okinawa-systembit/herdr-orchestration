@@ -1,0 +1,54 @@
+# レビュー依頼: R013: Skills 定義 & 運用リファレンス
+
+- **タスクID**: `R013-skills`
+- **対象コミットSHA**: `e527edc67866ffee5d7ec1527e1274b4ab395a9d`
+- **推定負荷**: **中**
+- **依存タスク**: R011, R012
+- **レビュー基準**: [.agents/skills/repo-review/SKILL.md](../../../.agents/skills/repo-review/SKILL.md) / [references.md](../../../.agents/skills/repo-review/references.md) / [docs/herdr-agent-review-guidelines.md](../../../docs/herdr-agent-review-guidelines.md)
+
+---
+
+## 1. 主レビュー対象ファイル
+
+- `skills/herdr-orchestrator/SKILL.md`
+- `skills/herdr-orchestrator/references/*.md (8ファイル)`
+- `.agents/skills/repo-review/SKILL.md`
+- `.agents/skills/repo-review/references.md`
+- `.agents/skills/repo-workflow/SKILL.md`
+- `.agents/skills/design-doc-markdown-format/SKILL.md`
+
+## 2. 参照ファイル
+
+- なし
+
+## 3. 参照設計書・仕様
+
+- `docs/herdr-orchestrator/06-results-and-workflows.md#sec-11-4`
+- `docs/herdr-orchestrator/06-results-and-workflows.md#sec-12`
+- `docs/herdr-orchestrator/07-skill-and-implementation.md#sec-14`
+- `docs/herdr-orchestrator/08-adoption-and-verification.md#sec-19`
+
+## 4. 関連テスト
+
+- `tests/test_orchestrator_phase7_skill.py`
+
+## 5. 重点確認事項
+
+- YAML frontmatter (name, description) の構文妥当性
+- コマンド例の実装との 100% 一致（オプション名、引数形式）
+- Herdr 公式 Skill との責務分離（公式仕様を複製せず委譲）
+- review-inbox 規約とラウンド履歴管理の整合性
+
+---
+
+## 6. レビュー手順・必須条件
+
+1. **第1段階：仕様・設計との整合性検証**:
+   - 要求仕様や設計書の契約・定義と整合しているか確認する。
+2. **第2段階：批判的な不具合探索（必須）**:
+   - 設計書と一致したことだけを理由に GO とせず、境界値・例外経路・競合・既存保証の喪失を探索する。
+3. **反証確認（必須）**:
+   - 指摘候補について「既存処理で防がれていないか」「具体的な失敗条件が成立するか」を確認する。
+4. **結果の記録**:
+   - 初回レビュー結果は同ディレクトリの `result.md` に記録する。
+   - レビュー台帳 [../INDEX.md](../INDEX.md) を更新する。

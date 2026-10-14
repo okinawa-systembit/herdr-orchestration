@@ -1,0 +1,51 @@
+# レビュー依頼: R002: リポジトリ識別 & Herdr CLI 基盤
+
+- **タスクID**: `R002-identity-cli`
+- **対象コミットSHA**: `e527edc67866ffee5d7ec1527e1274b4ab395a9d`
+- **推定負荷**: **中**
+- **依存タスク**: R001
+- **レビュー基準**: [.agents/skills/repo-review/SKILL.md](../../../.agents/skills/repo-review/SKILL.md) / [references.md](../../../.agents/skills/repo-review/references.md) / [docs/herdr-agent-review-guidelines.md](../../../docs/herdr-agent-review-guidelines.md)
+
+---
+
+## 1. 主レビュー対象ファイル
+
+- `skills/herdr-orchestrator/scripts/orchestrator/identity.py`
+- `skills/herdr-orchestrator/scripts/orchestrator/herdr_cli.py`
+
+## 2. 参照ファイル
+
+- `skills/herdr-orchestrator/scripts/orchestrator/paths.py`
+- `skills/herdr-orchestrator/scripts/orchestrator/errors.py`
+
+## 3. 参照設計書・仕様
+
+- `docs/herdr-orchestrator/02-roles-and-task-contract.md#sec-4`
+- `docs/herdr-orchestrator/06-results-and-workflows.md#sec-11-0`
+- `docs/herdr-orchestrator/09-maintenance-and-roadmap.md#sec-20`
+
+## 4. 関連テスト
+
+- `tests/test_orchestrator_phase1_identity.py`
+- `tests/test_orchestrator_phase1_identity_git.py`
+
+## 5. 重点確認事項
+
+- Git remote URL 正規化と複数 remote 照合の厳格性
+- run_herdr でのサブプロセス実行の安全性（shell=False, インジェクション防止）
+- classify_prompt_error による failed と uncertain の厳密な切り分け
+- タイムアウト・stalled 時のプロセス終了と例外処理
+
+---
+
+## 6. レビュー手順・必須条件
+
+1. **第1段階：仕様・設計との整合性検証**:
+   - 要求仕様や設計書の契約・定義と整合しているか確認する。
+2. **第2段階：批判的な不具合探索（必須）**:
+   - 設計書と一致したことだけを理由に GO とせず、境界値・例外経路・競合・既存保証の喪失を探索する。
+3. **反証確認（必須）**:
+   - 指摘候補について「既存処理で防がれていないか」「具体的な失敗条件が成立するか」を確認する。
+4. **結果の記録**:
+   - 初回レビュー結果は同ディレクトリの `result.md` に記録する。
+   - レビュー台帳 [../INDEX.md](../INDEX.md) を更新する。
