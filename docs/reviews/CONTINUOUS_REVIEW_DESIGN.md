@@ -47,39 +47,41 @@
 
 ### 1.2 現行設計の課題と外部レビュー検出事項
 
-Phase 1 設計書の外部レビュー（第2回〜第10回）において、継続的品質管理基盤としての堅牢性を確保するために以下の課題が特定された。
+Phase 1 設計書の外部レビュー（第2回〜第11回）において、継続的品質管理基盤としての堅牢性を確保するために以下の課題が特定された。
 
-| 課題領域                   | レビュー検出事項                                                |        重大度         | 継続運用におけるリスクと影響                                                                                                                                          |
-| :------------------------- | :-------------------------------------------------------------- | :-------------------: | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Finding ID 採番競合**    | REV-01：Gitブランチ間の衝突解決と履歴不変性の矛盾               |   **P1 / Blocking**   | ブランチ間衝突時に確定済み結果ファイルの参照を書き換える方式は不変性原則と矛盾する。ローカルファイルロックでは異なるブランチ間の競合を防げない。                      |
-| **単一Writerの形骸化**     | REV-02：再レビュー時に単一Writerを経由しない更新経路            |   **P2 / Blocking**   | 再レビュー時に Implementer が台帳を直接更新し、Reviewer が確定結果ファイルを直接作成する設計になっており、排他制御と整合しない。                                      |
-| **鮮度判定の見落とし**     | REV-03：未分類ファイル検出による既知Scope評価の中断             |   **P2 / Blocking**   | 未分類ファイル検出時に早期終了するフローチャートになっており、同一コミットに含まれる既知Scopeの変更評価（stale判定）が見落とされる。                                  |
-| **依存導入の記述齟齬**     | REV-04：依存ライブラリ導入時期の記述不一致                      | **P2 / Non-blocking** | `@11ty/gray-matter` は Phase 1 で既に追加済み（package.json/lockfile更新済み）であるにもかかわらず、設計書内でPhase 2作業と記述されていた。                           |
-| **確定前結果の受け渡し**   | NEW-01：確定前レビュー結果の永続化・受け渡し経路が不明確        |   **P2 / Blocking**   | Git管理外の `.review-inbox/` だけでは別作業ツリー・別マシン・別エージェントで管理ブランチ実行時に成果物が引き継がれず喪失・未登録となる。                             |
-| **状態変更履歴の復旧**     | NEW-02：INDEX再生成だけではFindingの状態変更履歴を復旧不能      |   **P2 / Blocking**   | 初回確定結果のみでは Implementer の修正完了等の動的状態変更が失われ、INDEX破損時に最新状態を 100% 決定論的に復元できない。                                            |
-| **複数ファイル更新**       | NEW-03：複数ファイルの原子的更新に関する説明が不正確            | **P2 / Non-blocking** | `fs.renameSync` はファイル単位の原子的操作であり複数ファイル間トランザクションではないため、クラッシュ時の部分不整合と復旧手順の明記が必要。                          |
-| **複数正本ファイル不整合** | NEW-04：複数正本ファイルの部分更新に対する復旧設計が不足        |   **P1 / Blocking**   | 確定成果物とEVENTS.mdの片方のみ更新された状態でクラッシュした場合、再実行時のfingerprint照合や正本間不整合により復旧できなくなる。                                    |
-| **提出・確定タイミング**   | NEW-05：proposal.mdの受け渡し・確定タイミングが不明確           |   **P2 / Blocking**   | PRマージ前後の登録タイミング、管理ブランチでの取得方法、対象SHA検証、コード先行変更時の扱いが曖昧。                                                                   |
-| **追記不変性とヘッダー**   | NEW-06：EVENTS.mdの追記型不変性とFrontmatter更新の関係曖昧      | **P2 / Non-blocking** | Frontmatter内の集計メタデータ（件数等）を更新する設計では、ファイル先頭の書き換えが発生し純粋な追記のみ（Append-only）と矛盾する。                                    |
-| **中断時の更新責務**       | NEW-07：中断時のINDEX直接更新が単一Writer原則と不整合           | **P2 / Non-blocking** | レビュワーが中断時にINDEXを直接更新する記述が残っており、台帳管理CLIによる単一Writer原則と矛盾する。                                                                  |
-| **マージ方式の差異**       | NEW-08：Squash Merge時にレビュー対象SHAの先祖関係検証失敗       |   **P1 / Blocking**   | Squash/Rebase MergeでPRコミットが圧縮・再生成されると先祖関係検証（`--is-ancestor`）が失敗し、正常な提出物が登録拒絶される。                                          |
-| **イベント行途中書き込み** | NEW-09：EVENTS.md追記途中の異常終了時の復旧設計が未定義         |   **P2 / Blocking**   | `appendFileSync`途中でクラッシュした場合に末尾に残る破損・不完全なイベント行の検知・切り戻し（トリム）・安全な再処理方法が未定義。                                    |
-| **検証と修復の責務混在**   | NEW-10：`review:check`の読取専用責務と自動修復処理が矛盾        | **P2 / Non-blocking** | 読み取り専用であるべき`review:check`が修復書き込みを行う記述になっており、CIや静的検査で意図せぬファイル変更を引き起こす恐れがある。                                  |
-| **中断状態とINDEX再生成**  | NEW-11：中断状態の永続性とINDEX再生成の関係が不明確             | **P2 / Non-blocking** | `rebuild-index`時に確定成果物のみを参照すると、`draft.md`に退避された作業中・中断状態（`paused`）がINDEX上で未着手に巻き戻ってしまう。                                |
-| **独立イベント消失リスク** | NEW-12：EVENTS.md末尾復旧で状態変更イベントを消失する可能性     |   **P1 / Blocking**   | 確定成果物を持たない独立イベント（`status_update`等）の追記途中でクラッシュした場合、末尾トリムにより状態変更履歴が恒久的に失われる。                                 |
-| **先祖判定でのコード見逃** | NEW-13：SHA先祖判定成功時にレビュー対象コードの変更見逃し       |   **P1 / Blocking**   | 先祖判定（`--is-ancestor`）成功時にコード同一性確認を省略すると、レビュー対象コミット以降にマージされた変更が存在しても`fresh`と誤判定される。                        |
-| **SHA検証と鮮度判定矛盾**  | NEW-14：SHA検証のハイブリッド方式と鮮度判定方針が矛盾           | **P2 / Non-blocking** | ハッシュ不一致時の振る舞いについて、「登録ブロック」と「過去結果として登録し鮮度判定でstale遷移」という相反する方針が混在している。                                   |
-| **Intent削除時期と復旧**   | NEW-15：操作意図ファイルの削除時期による障害復旧の不完全さ      |   **P1 / Blocking**   | 追記完了判定の曖昧さやINDEX更新前のクラッシュ、再実行時のイベント二重追記リスク、未完了Intentの冪等処理が未定義。                                                     |
-| **Squash履歴アルゴリズム** | NEW-16：Squash/Rebase Merge時の履歴正当性検証が未確定           |   **P2 / Blocking**   | コミットSHAが変化するSquash/Rebaseにおいて、PRや管理ブランチ取り込みを証明する具体的Git走査手順や検証不能時の安全停止が未確定。                                       |
-| **トリム前の復元根拠検証** | NEW-17：EVENTS.md末尾トリム前に復元可能性を未検証               | **P2 / Non-blocking** | 復元根拠（成果物やIntent）の有無を確認する前に破損行を切り戻すと、復元不能時に破損行の情報まで失われ手動復旧が困難になる。                                            |
-| **提出元コミット正当性**   | NEW-18：C_importのハッシュ一致だけでは提出元正当性が不十分      |   **P1 / Blocking**   | ハッシュ一致は内容の一致しか証明せず、target_commitが実際にそのPRのレビュー対象であったか、そのPRを通じて取り込まれたかの履歴的正当性を保証できない。                 |
-| **破損イベント根拠対応**   | NEW-19：破損イベントと復元根拠の対応検証不足                    |   **P2 / Blocking**   | 末尾破損行の復旧時に、単に根拠ファイルが存在するだけでトリム・復元を行うと、無関係な過去成果物を誤認して別イベントを破損・誤トリムする恐れがある。                    |
-| **Intent残存重複判定不足** | NEW-20：Intent残存時の重複判定が不十分                          | **P2 / Non-blocking** | event_idの一致だけで適用済みと判定すると、同一IDで別内容のイベントが存在した場合に状態変更が消失し、台帳不整合を引き起こす危険性がある。                              |
-| **パッチID比較対象不整合** | NEW-21：`git patch-id`の比較対象が異なり正常マージを拒否        |   **P1 / Blocking**   | レビュー後に追加コミットやScope外差分が含まれる正常なPRにおいて、`base..target`と`C_import^..C_import`の厳格パッチID一致を要求すると正常提出物が誤拒絶される。        |
-| **PRメタデータ単独証明**   | NEW-22：任意のPRメタデータ照合を単独の正当性証明としている      |   **P2 / Blocking**   | 提出物側に任意記録可能なPR番号や編集可能なコミットタイトルの一致のみを単独の合格条件とすると、真正性の証明として不十分である。                                        |
-| **マージ時変更と登録矛盾** | NEW-23：マージ時コード変更を過去レビュー結果として登録不能      | **P2 / Non-blocking** | 第1判定で取り込み時点のハッシュ一致を強制すると、マージ時に差分が入った場合に「過去結果として登録し鮮度をstaleにする」という第3判定の基本原則と矛盾する。             |
-| **差分包含の真正性不足**   | NEW-24：方式Bの差分包含検証では提出元コミットの真正性を保証不能 |   **P1 / Blocking**   | コード差分の包含関係（Sub-patch Containment）は同一変更の別ブランチ等でも成立し得るため真正性証明にならず、Git標準に判定コマンドも存在しない。                        |
-| **PR参照の取り込み未証明** | NEW-25：方式AのPR参照検証だけでは対象PRの取り込みを証明不能     |   **P2 / Blocking**   | PR番号のコミットメッセージ一致は単なるテキスト照合であり、`refs/pull/<pr>/head`先祖検証と組み合わせてもPRマージの客観的事実や取り込みコミットとの結合を証明できない。 |
+| 課題領域                   | レビュー検出事項                                                               |        重大度         | 継続運用におけるリスクと影響                                                                                                                                          |
+| :------------------------- | :----------------------------------------------------------------------------- | :-------------------: | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Finding ID 採番競合**    | REV-01：Gitブランチ間の衝突解決と履歴不変性の矛盾                              |   **P1 / Blocking**   | ブランチ間衝突時に確定済み結果ファイルの参照を書き換える方式は不変性原則と矛盾する。ローカルファイルロックでは異なるブランチ間の競合を防げない。                      |
+| **単一Writerの形骸化**     | REV-02：再レビュー時に単一Writerを経由しない更新経路                           |   **P2 / Blocking**   | 再レビュー時に Implementer が台帳を直接更新し、Reviewer が確定結果ファイルを直接作成する設計になっており、排他制御と整合しない。                                      |
+| **鮮度判定の見落とし**     | REV-03：未分類ファイル検出による既知Scope評価の中断                            |   **P2 / Blocking**   | 未分類ファイル検出時に早期終了するフローチャートになっており、同一コミットに含まれる既知Scopeの変更評価（stale判定）が見落とされる。                                  |
+| **依存導入の記述齟齬**     | REV-04：依存ライブラリ導入時期の記述不一致                                     | **P2 / Non-blocking** | `@11ty/gray-matter` は Phase 1 で既に追加済み（package.json/lockfile更新済み）であるにもかかわらず、設計書内でPhase 2作業と記述されていた。                           |
+| **確定前結果の受け渡し**   | NEW-01：確定前レビュー結果の永続化・受け渡し経路が不明確                       |   **P2 / Blocking**   | Git管理外の `.review-inbox/` だけでは別作業ツリー・別マシン・別エージェントで管理ブランチ実行時に成果物が引き継がれず喪失・未登録となる。                             |
+| **状態変更履歴の復旧**     | NEW-02：INDEX再生成だけではFindingの状態変更履歴を復旧不能                     |   **P2 / Blocking**   | 初回確定結果のみでは Implementer の修正完了等の動的状態変更が失われ、INDEX破損時に最新状態を 100% 決定論的に復元できない。                                            |
+| **複数ファイル更新**       | NEW-03：複数ファイルの原子的更新に関する説明が不正確                           | **P2 / Non-blocking** | `fs.renameSync` はファイル単位の原子的操作であり複数ファイル間トランザクションではないため、クラッシュ時の部分不整合と復旧手順の明記が必要。                          |
+| **複数正本ファイル不整合** | NEW-04：複数正本ファイルの部分更新に対する復旧設計が不足                       |   **P1 / Blocking**   | 確定成果物とEVENTS.mdの片方のみ更新された状態でクラッシュした場合、再実行時のfingerprint照合や正本間不整合により復旧できなくなる。                                    |
+| **提出・確定タイミング**   | NEW-05：proposal.mdの受け渡し・確定タイミングが不明確                          |   **P2 / Blocking**   | PRマージ前後の登録タイミング、管理ブランチでの取得方法、対象SHA検証、コード先行変更時の扱いが曖昧。                                                                   |
+| **追記不変性とヘッダー**   | NEW-06：EVENTS.mdの追記型不変性とFrontmatter更新の関係曖昧                     | **P2 / Non-blocking** | Frontmatter内の集計メタデータ（件数等）を更新する設計では、ファイル先頭の書き換えが発生し純粋な追記のみ（Append-only）と矛盾する。                                    |
+| **中断時の更新責務**       | NEW-07：中断時のINDEX直接更新が単一Writer原則と不整合                          | **P2 / Non-blocking** | レビュワーが中断時にINDEXを直接更新する記述が残っており、台帳管理CLIによる単一Writer原則と矛盾する。                                                                  |
+| **マージ方式の差異**       | NEW-08：Squash Merge時にレビュー対象SHAの先祖関係検証失敗                      |   **P1 / Blocking**   | Squash/Rebase MergeでPRコミットが圧縮・再生成されると先祖関係検証（`--is-ancestor`）が失敗し、正常な提出物が登録拒絶される。                                          |
+| **イベント行途中書き込み** | NEW-09：EVENTS.md追記途中の異常終了時の復旧設計が未定義                        |   **P2 / Blocking**   | `appendFileSync`途中でクラッシュした場合に末尾に残る破損・不完全なイベント行の検知・切り戻し（トリム）・安全な再処理方法が未定義。                                    |
+| **検証と修復の責務混在**   | NEW-10：`review:check`の読取専用責務と自動修復処理が矛盾                       | **P2 / Non-blocking** | 読み取り専用であるべき`review:check`が修復書き込みを行う記述になっており、CIや静的検査で意図せぬファイル変更を引き起こす恐れがある。                                  |
+| **中断状態とINDEX再生成**  | NEW-11：中断状態の永続性とINDEX再生成の関係が不明確                            | **P2 / Non-blocking** | `rebuild-index`時に確定成果物のみを参照すると、`draft.md`に退避された作業中・中断状態（`paused`）がINDEX上で未着手に巻き戻ってしまう。                                |
+| **独立イベント消失リスク** | NEW-12：EVENTS.md末尾復旧で状態変更イベントを消失する可能性                    |   **P1 / Blocking**   | 確定成果物を持たない独立イベント（`status_update`等）の追記途中でクラッシュした場合、末尾トリムにより状態変更履歴が恒久的に失われる。                                 |
+| **先祖判定でのコード見逃** | NEW-13：SHA先祖判定成功時にレビュー対象コードの変更見逃し                      |   **P1 / Blocking**   | 先祖判定（`--is-ancestor`）成功時にコード同一性確認を省略すると、レビュー対象コミット以降にマージされた変更が存在しても`fresh`と誤判定される。                        |
+| **SHA検証と鮮度判定矛盾**  | NEW-14：SHA検証のハイブリッド方式と鮮度判定方針が矛盾                          | **P2 / Non-blocking** | ハッシュ不一致時の振る舞いについて、「登録ブロック」と「過去結果として登録し鮮度判定でstale遷移」という相反する方針が混在している。                                   |
+| **Intent削除時期と復旧**   | NEW-15：操作意図ファイルの削除時期による障害復旧の不完全さ                     |   **P1 / Blocking**   | 追記完了判定の曖昧さやINDEX更新前のクラッシュ、再実行時のイベント二重追記リスク、未完了Intentの冪等処理が未定義。                                                     |
+| **Squash履歴アルゴリズム** | NEW-16：Squash/Rebase Merge時の履歴正当性検証が未確定                          |   **P2 / Blocking**   | コミットSHAが変化するSquash/Rebaseにおいて、PRや管理ブランチ取り込みを証明する具体的Git走査手順や検証不能時の安全停止が未確定。                                       |
+| **トリム前の復元根拠検証** | NEW-17：EVENTS.md末尾トリム前に復元可能性を未検証                              | **P2 / Non-blocking** | 復元根拠（成果物やIntent）の有無を確認する前に破損行を切り戻すと、復元不能時に破損行の情報まで失われ手動復旧が困難になる。                                            |
+| **提出元コミット正当性**   | NEW-18：C_importのハッシュ一致だけでは提出元正当性が不十分                     |   **P1 / Blocking**   | ハッシュ一致は内容の一致しか証明せず、target_commitが実際にそのPRのレビュー対象であったか、そのPRを通じて取り込まれたかの履歴的正当性を保証できない。                 |
+| **破損イベント根拠対応**   | NEW-19：破損イベントと復元根拠の対応検証不足                                   |   **P2 / Blocking**   | 末尾破損行の復旧時に、単に根拠ファイルが存在するだけでトリム・復元を行うと、無関係な過去成果物を誤認して別イベントを破損・誤トリムする恐れがある。                    |
+| **Intent残存重複判定不足** | NEW-20：Intent残存時の重複判定が不十分                                         | **P2 / Non-blocking** | event_idの一致だけで適用済みと判定すると、同一IDで別内容のイベントが存在した場合に状態変更が消失し、台帳不整合を引き起こす危険性がある。                              |
+| **パッチID比較対象不整合** | NEW-21：`git patch-id`の比較対象が異なり正常マージを拒否                       |   **P1 / Blocking**   | レビュー後に追加コミットやScope外差分が含まれる正常なPRにおいて、`base..target`と`C_import^..C_import`の厳格パッチID一致を要求すると正常提出物が誤拒絶される。        |
+| **PRメタデータ単独証明**   | NEW-22：任意のPRメタデータ照合を単独の正当性証明としている                     |   **P2 / Blocking**   | 提出物側に任意記録可能なPR番号や編集可能なコミットタイトルの一致のみを単独の合格条件とすると、真正性の証明として不十分である。                                        |
+| **マージ時変更と登録矛盾** | NEW-23：マージ時コード変更を過去レビュー結果として登録不能                     | **P2 / Non-blocking** | 第1判定で取り込み時点のハッシュ一致を強制すると、マージ時に差分が入った場合に「過去結果として登録し鮮度をstaleにする」という第3判定の基本原則と矛盾する。             |
+| **差分包含の真正性不足**   | NEW-24：方式Bの差分包含検証では提出元コミットの真正性を保証不能                |   **P1 / Blocking**   | コード差分の包含関係（Sub-patch Containment）は同一変更の別ブランチ等でも成立し得るため真正性証明にならず、Git標準に判定コマンドも存在しない。                        |
+| **PR参照の取り込み未証明** | NEW-25：方式AのPR参照検証だけでは対象PRの取り込みを証明不能                    |   **P2 / Blocking**   | PR番号のコミットメッセージ一致は単なるテキスト照合であり、`refs/pull/<pr>/head`先祖検証と組み合わせてもPRマージの客観的事実や取り込みコミットとの結合を証明できない。 |
+| **PRマージ結合不足**       | NEW-26：PRマージコミットがHEAD先祖であるだけではproposal取り込み元PRを特定不能 |   **P1 / Blocking**   | PRマージコミットがHEADの先祖であることだけを条件にすると、無関係な過去PRのマージコミットを誤認・悪用し、別PRで取り込まれたproposal.mdが不正通過する危険性がある。     |
+| **PR番号算出タイミング**   | NEW-27：pr_numberの自動算出時点と提出フローが未整理                            | **P2 / Non-blocking** | PR作成前にproposal.mdを生成する場合にpr_numberが未確定となり、複数PR候補時の一意決定や手動指定時の検証手順が定義されていない。                                        |
 
 ---
 
@@ -525,29 +527,29 @@ completed_at: 2026-10-15T10:00:00+09:00
 
 ### 5.8 各レビュー種別の Frontmatter 項目対応表
 
-| 項目                           |    提出物 (`proposal.md`)    |    初回 (`result.md`)     | 再レビュー (`recheck-NN.md`) |   差分 (`delta-NN.md`)    | 用途                                                       |
-| :----------------------------- | :--------------------------: | :-----------------------: | :--------------------------: | :-----------------------: | :--------------------------------------------------------- |
-| `campaign_id`                  |           **必須**           |         **必須**          |           **必須**           |         **必須**          | 所属する実施回                                             |
-| `scope_id`                     |           **必須**           |         **必須**          |           **必須**           |         **必須**          | 対象論理 Scope                                             |
-| `review_type`                  |          `proposal`          |         `initial`         |         `re-review`          |          `delta`          | レビュー種別の識別                                         |
-| `target_commit`                |           **必須**           |         **必須**          |           **必須**           |         **必須**          | 検証対象コミットSHA                                        |
-| `scope_tree_hash`              |           **必須**           |           任意            |             なし             |           なし            | Squash/Rebase時の構成ファイル複合ハッシュ (NEW-08, 16対応) |
-| `base_commit`                  |           **必須**           |       任意 (null可)       |           **必須**           |         **必須**          | 比較元・分岐元コミットSHA (NEW-18対応)                     |
-| `source_branch`                |           **必須**           |           任意            |             なし             |           なし            | 提出元ブランチ名 (NEW-18対応)                              |
-| `patch_id`                     |        任意 (null可)         |           任意            |             なし             |           なし            | 当該Scope差分のパッチID (補助情報)                         |
-| `pr_number`                    | 任意 (Squash/Rebase時は必須) |           任意            |             任意             |           任意            | 関連 PR 番号 (NEW-18, NEW-25対応)                          |
-| `previous_result_ref`          |             なし             |           なし            |           **必須**           |           任意            | 前回の結果ファイル参照                                     |
-| `recheck_round`                |             なし             |           なし            |           **必須**           |           なし            | 再レビュー連番                                             |
-| `provisional_findings`         |           **必須**           |           なし            |             なし             |           なし            | 仮ID・fingerprint付き指摘リスト                            |
-| `reported_findings`            |             なし             |         **必須**          |             なし             |           なし            | 正式ID付き確定指摘リスト                                   |
-| `id_mappings`                  |             なし             |         **必須**          |             なし             |           なし            | 仮IDと正式IDの対応表                                       |
-| `resolution_commits`           |             なし             |           なし            |           **必須**           |           なし            | 修正コミットのリスト                                       |
-| `rechecked_findings`           |             なし             |           なし            |           **必須**           |           なし            | 再検証対象 Finding と合否                                  |
-| `diff_files`                   |             なし             |           なし            |             なし             |         **必須**          | 検証した差分ファイル一覧                                   |
-| `work_status`                  |           **必須**           |         **必須**          |           **必須**           |         **必須**          | 作業状態                                                   |
-| `verdict`                      |           **必須**           |         **必須**          |           **必須**           |         **必須**          | 品質判定                                                   |
-| `reviewed_by`                  |           **必須**           |         **必須**          |           **必須**           |         **必須**          | 実施エージェント/モデル                                    |
-| `proposed_at` / `completed_at` |   **必須** (`proposed_at`)   | **必須** (`completed_at`) |  **必須** (`completed_at`)   | **必須** (`completed_at`) | タイムスタンプ                                             |
+| 項目                           |  提出物 (`proposal.md`)  |    初回 (`result.md`)     | 再レビュー (`recheck-NN.md`) |   差分 (`delta-NN.md`)    | 用途                                                                                            |
+| :----------------------------- | :----------------------: | :-----------------------: | :--------------------------: | :-----------------------: | :---------------------------------------------------------------------------------------------- |
+| `campaign_id`                  |         **必須**         |         **必須**          |           **必須**           |         **必須**          | 所属する実施回                                                                                  |
+| `scope_id`                     |         **必須**         |         **必須**          |           **必須**           |         **必須**          | 対象論理 Scope                                                                                  |
+| `review_type`                  |        `proposal`        |         `initial`         |         `re-review`          |          `delta`          | レビュー種別の識別                                                                              |
+| `target_commit`                |         **必須**         |         **必須**          |           **必須**           |         **必須**          | 検証対象コミットSHA                                                                             |
+| `scope_tree_hash`              |         **必須**         |           任意            |             なし             |           なし            | Squash/Rebase時の構成ファイル複合ハッシュ (NEW-08, 16対応)                                      |
+| `base_commit`                  |         **必須**         |       任意 (null可)       |           **必須**           |         **必須**          | 比較元・分岐元コミットSHA (NEW-18対応)                                                          |
+| `source_branch`                |         **必須**         |           任意            |             なし             |           なし            | 提出元ブランチ名 (NEW-18対応)                                                                   |
+| `patch_id`                     |      任意 (null可)       |           任意            |             なし             |           なし            | 当該Scope差分のパッチID (補助情報)                                                              |
+| `pr_number`                    |      任意 (null可)       |           任意            |             任意             |           任意            | 関連 PR 番号（PR作成前提出時はnull許容、登録時に確定またはCLI指定）(NEW-18, NEW-25, NEW-27対応) |
+| `previous_result_ref`          |           なし           |           なし            |           **必須**           |           任意            | 前回の結果ファイル参照                                                                          |
+| `recheck_round`                |           なし           |           なし            |           **必須**           |           なし            | 再レビュー連番                                                                                  |
+| `provisional_findings`         |         **必須**         |           なし            |             なし             |           なし            | 仮ID・fingerprint付き指摘リスト                                                                 |
+| `reported_findings`            |           なし           |         **必須**          |             なし             |           なし            | 正式ID付き確定指摘リスト                                                                        |
+| `id_mappings`                  |           なし           |         **必須**          |             なし             |           なし            | 仮IDと正式IDの対応表                                                                            |
+| `resolution_commits`           |           なし           |           なし            |           **必須**           |           なし            | 修正コミットのリスト                                                                            |
+| `rechecked_findings`           |           なし           |           なし            |           **必須**           |           なし            | 再検証対象 Finding と合否                                                                       |
+| `diff_files`                   |           なし           |           なし            |             なし             |         **必須**          | 検証した差分ファイル一覧                                                                        |
+| `work_status`                  |         **必須**         |         **必須**          |           **必須**           |         **必須**          | 作業状態                                                                                        |
+| `verdict`                      |         **必須**         |         **必須**          |           **必須**           |         **必須**          | 品質判定                                                                                        |
+| `reviewed_by`                  |         **必須**         |         **必須**          |           **必須**           |         **必須**          | 実施エージェント/モデル                                                                         |
+| `proposed_at` / `completed_at` | **必須** (`proposed_at`) | **必須** (`completed_at`) |  **必須** (`completed_at`)   | **必須** (`completed_at`) | タイムスタンプ                                                                                  |
 
 ---
 
@@ -604,38 +606,50 @@ sequenceDiagram
     Note over Canonical: 正式登録コミットを作成・プッシュ
 ```
 
-#### 提出から正式登録までの詳細運用規則 (NEW-05, NEW-08, NEW-13, NEW-14対応)
+#### 提出から正式登録までの詳細運用規則 (NEW-05, NEW-08, NEW-13, NEW-14, NEW-26, NEW-27対応)
 
-1. **提出（Submit）と PR マージの順序関係**:
+1. **提出（Submit）と PR マージの順序関係 (NEW-27対応)**:
    - **標準運用（PRマージ後確定方式: Post-Merge Promotion）**:
      - Reviewer は作業ブランチ上で `npm run review:submit-proposal -- --scope R001` を実行し、`campaigns/{CID}/{ScopeID}/proposal.md` をコミット・プッシュする。
+     - **PR 番号の記録タイミング (NEW-27)**:
+       - **PR 作成前の場合**: `proposal.md` の `pr_number` は未設定（`null`）のまま安全にコミット・プッシュできる。
+       - **PR 作成後の場合**: `gh pr view` 等で一意に PR 番号が特定できる場合は自動設定される。複数 PR 候補が存在する場合や未特定時は `null` のままとし、推測による自動選択は行わない。
      - コード変更と `proposal.md` は同一 PR 内でレビュー・承認され、**PR が管理ブランチへマージされた直後に正式登録を行う**。これにより「管理ブランチに提出物ファイルが存在する」状態が Git レベルで確実に成立する。
    - **任意運用（PRマージ前インポート方式: Pre-Merge Import）**:
      - 管理ブランチで先行して正式 Finding ID を確定したい場合、CLI コマンドに `--from-ref <branch>` オプションを指定することで、未マージブランチの `proposal.md` を直接インポートして登録することを可能とする。
-2. **登録可否判定とコード同一性・鮮度判定の明確な分離 (NEW-08, NEW-13, NEW-14, NEW-16, NEW-18, NEW-21, NEW-22, NEW-23, NEW-24, NEW-25対応)**:
+2. **登録可否判定とコード同一性・鮮度判定の明確な分離 (NEW-08, NEW-13, NEW-14, NEW-16, NEW-18, NEW-21, NEW-22, NEW-23, NEW-24, NEW-25, NEW-26, NEW-27対応)**:
    - CLI（`review:register`）は実行時、「レビュー対象の履歴正当性（Provenance）」「レビュー対象時点の整合性（Integrity）」「現在の HEAD に対する最新鮮度（Freshness）」を明確に区別し、以下の **3 段階の判定パイプライン** を厳格に適用する：
-     - **第 1 判定：レビュー対象の履歴正当性・真正性検証（登録可否判定 - NEW-16, NEW-18, NEW-21, NEW-22, NEW-24, NEW-25対応）**:
-       - **目的と原則 (NEW-18, NEW-22, NEW-23, NEW-24, NEW-25)**:
+     - **第 1 判定：レビュー対象の履歴正当性・真正性検証（登録可否判定 - NEW-16, NEW-18, NEW-21, NEW-22, NEW-24, NEW-25, NEW-26, NEW-27対応）**:
+       - **目的と原則 (NEW-18, NEW-22, NEW-23, NEW-24, NEW-25, NEW-26)**:
          提出されたレビューの `target_commit` が、管理ブランチに取り込まれた変更の正当な系譜（PR / ブランチ）に属しているかを客観的証跡に基づき検証し、無関係なコミットや別ブランチからの偽装提出・誤提出をブロックする。
          **本判定は「提出元の真正性（Provenance）」のみを検証する責務を持ち、コード変更内容やハッシュ一致を真正性の代替証明として使用することは厳格に禁止する（NEW-24）。現在のコードやマージ時点のコードとの差分の有無は、第 2 判定（整合性）・第 3 判定（鮮度）で扱う（NEW-23）**。
-         また、**本設計の目的は「すべての環境で必ず自動登録できること」ではなく、「誤ったレビュー結果を正当なものとして登録しないこと」である。証明不能時は推測を排して安全停止する（NEW-25）**。
+         また、**本設計の目的は「すべての環境で必ず自動登録できること」ではなく、「誤ったレビュー結果を正当なものとして登録しないこと」である。無関係な過去 PR の流用や取り込み元不整合を防ぎ、証明不能時は推測を排して安全停止する（NEW-25, NEW-26）**。
        - **通常 Merge / Fast-Forward**:
-         `git merge-base --is-ancestor <target_commit> HEAD` を実行し、対象コミットが管理ブランチの履歴グラフに含まれていることを直接確認する。
-       - **Squash / Rebase Merge（GitHub PR 正規証跡による Provenance 検証 - NEW-24, NEW-25）**:
+         `git merge-base --is-ancestor <target_commit> HEAD` を実行し、対象コミットが管理ブランチの履歴グラフに含まれていることを直接検証する。
+       - **Squash / Rebase Merge（GitHub PR 正規証跡による Provenance 検証 - NEW-24, NEW-25, NEW-26, NEW-27）**:
          コミット SHA が再生成されるため `--is-ancestor` は不成立となる。この場合、CLI は以下の客観的証跡に基づき真正性を検証する：
-         1. **方式 B（差分包含検証）の完全廃止 (NEW-24)**:
-            コード差分の包含関係（Sub-patch Containment）は同一変更の別コミットでも偶然成立し得るため提出元の真正性証明にはならず、Git に標準判定コマンドがなく独自パッチ解析エンジンが必要となるため、**真正性の合格条件から完全に削除**する。
-         2. **PR 番号のテキスト一致単独判定の厳格禁止 (NEW-22, NEW-25)**:
-            コミットメッセージに `#<pr_number>` が含まれることや、単に `refs/pull/<pr>/head` の先祖であることだけでは、そのコミットが実際に対象 PR を取り込んだことの客観的証明にならないため、これらを単独の合格条件とすることを禁止する。
-         3. **GitHub PR メタデータ照合による決定論的真正性証明手順 (NEW-25)**:
-            GitHub を利用する環境において、GitHub API（CI 環境の `GITHUB_TOKEN` を利用した REST API、または `gh pr view <pr_number> --json ...`）から信頼できる PR メタデータを取得し、以下の多層条件をすべて機械照合する：
+         1. **PR 番号の解決規則 (NEW-27)**:
+            対象 PR 番号は以下の優先順位で決定する：
+            a. `proposal.md` 内の `pr_number`（PR 作成後に設定されていた場合）
+            b. CLI 実行時引数 `--pr <number>`（PR 作成前提出時の明示指定）
+            c. 管理ブランチ取り込みコミット `C_import`（`git log -n 1 --format=%H -- campaigns/{CID}/{ScopeID}/proposal.md`）のコミットメッセージから PR 番号（`#<number>`）が一意に抽出できる場合
+            ※上記いずれでも一意に確定できない場合、または複数 PR 候補が存在する場合は、**推測による自動選択を厳格に禁止し、`--pr <number>` の明示指定を要求して終了コード 1（exit code 1）で安全停止**する。
+         2. **PR 番号テキスト一致や先祖関係単独判定の厳格禁止 (NEW-22, NEW-25, NEW-26)**:
+            コミットメッセージに `#<pr_number>` が含まれることや、単にマージコミットが HEAD の先祖であることだけでは、`proposal.md` が実際に対象 PR から取り込まれたことの証明にならない（過去 PR の誤認・流用リスク - NEW-26）。これらを単独の合格条件とすることを厳格に禁止する。
+         3. **GitHub PR メタデータ照合による決定論的真正性証明手順 (NEW-25, NEW-26)**:
+            GitHub API（CI 環境の `GITHUB_TOKEN` を利用した REST API、または `gh pr view <pr_number> --json ...`）から信頼できる PR メタデータを取得し、以下の多層条件をすべて機械照合する：
             - **対象リポジトリ・ベースブランチ照合**: PR のターゲットベースブランチ（`base.ref`）が現在の管理ブランチ（例: `main`）と一致し、対象リポジトリが正規リポジトリと一致すること。
-            - **PR マージ事実と取り込みコミットの結合検証**: PR のマージ状態が完了（`merged: true` / state: `closed`）であり、GitHub が記録するマージコミット SHA（`merge_commit_sha`）が管理ブランチ履歴上の当該提出物取り込みコミット `C_import`（`git log -n 1 --format=%H -- campaigns/{CID}/{ScopeID}/proposal.md`）と一致すること、または `git merge-base --is-ancestor <merge_commit_sha> HEAD` により管理ブランチの正当な履歴に含まれていることを確認する。
-            - **PR コミット群とレビュー対象コミットの包含検証**: 当該 PR のコミット一覧に対象の `target_commit` が含まれていること（`target_commit` が PR 内でレビュー対象となったコミットであることを確認）。
+            - **対象 PR のマージ完了事実検証**: PR のマージ状態が完了（`merged: true` / state: `closed`）であること。
+            - **レビュー対象コミットの PR 包含検証**: 当該 PR のコミット一覧に対象の `target_commit` が含まれていること。
+            - **`proposal.md` 取り込み元 PR の直接検証（PR Files Check - NEW-26）**:
+              当該 PR の変更ファイル一覧（Files API: `GET /repos/{owner}/{repo}/pulls/{pr_number}/files` または `gh pr view --json files`）を取得し、**当該 PR の変更ファイルに対象の `campaigns/{CID}/{ScopeID}/proposal.md` が含まれていること**を検証する。これにより、別 PR で取り込まれた proposal.md を過去 PR に偽装・誤紐付けする不正を 100% 確実に排除する。
+            - **マージコミットと取り込みコミットの直接結合検証 (NEW-26)**:
+              - **Squash Merge**: GitHub PR のマージコミット SHA（`merge_commit_sha`）が、管理ブランチ履歴上の当該提出物取り込みコミット `C_import`（`git log -n 1 --format=%H -- campaigns/{CID}/{ScopeID}/proposal.md`）と**完全一致（`merge_commit_sha == C_import`）**することを検証する。
+              - **Rebase Merge**: 当該 PR の Files に `proposal.md` が含まれ、かつ `C_import` の author/committer タイムスタンプおよびコミットツリーが PR 内の proposal 追加コミットと整合することを検証する。
          4. **PR マージ前インポート（`--from-ref <branch>`）時の検証**:
             未マージブランチから先行インポートする場合、指定ブランチ上で `git merge-base --is-ancestor <target_commit> <branch>` を検証する。
-         5. **検証不能時・オフライン環境における非推測安全停止（NEW-24, NEW-25）**:
-            オフライン環境、ネットワーク遮断、GitHub API 権限欠落、または上記 PR メタデータ照合が 1 つでも成立しない場合、CLI は**推測や曖昧なフォールバックによる登録を厳格に禁止**する。エラー詳細（例: 「Squash Merge 検出時、GitHub PR メタデータが取得できないため真正性を証明できません。オフライン環境または API 権限未設定のため安全停止します」）を出力し、**終了コード 1（exit code 1）で登録処理を安全に中断（安全停止）**する。
+         5. **検証不能時・オフライン環境における非推測安全停止（NEW-24, NEW-25, NEW-26）**:
+            オフライン環境、ネットワーク遮断、GitHub API 権限欠落、PR 情報不一致、または上記 PR メタデータ照合が 1 つでも成立しない場合、CLI は**推測や曖昧なフォールバックによる登録を厳格に禁止**する。エラー詳細（例: 「Squash Merge 検出時、GitHub PR メタデータと C_import の結合が証明できないため安全停止します」）を出力し、**終了コード 1（exit code 1）で登録処理を安全に中断（安全停止）**する。
      - **第 2 判定：レビュー対象時点の整合性確認（Integrity Check）**:
        - 目的: 提出されたレビューが、記録されたコミット SHA（`target_commit`）のコードに対して正しく実施されたことを確認する。
        - `target_commit` 時点における当該 Scope 構成ファイル群の複合ハッシュを算出し、`proposal.md` 内に記録された `scope_tree_hash` と照合する。
@@ -1119,10 +1133,10 @@ flowchart TD
    - `review:status`: リポジトリ全体の最新品質状態、Campaign 進捗、未解消 Finding を表示。
    - `review:freshness`: 全変更ファイル走査パイプラインに基づき、各 Scope の鮮度および未分類警告を出力。
 2. **作業ブランチ用コマンド（提出・中断）**:
-   - `review:submit-proposal`: レビュワーが作成した仮指摘を検証し、対象 Scope 構成ファイルの複合ハッシュ `scope_tree_hash` やコミットメタデータ（`base_commit`, `target_commit`, `source_branch`, Squash/Rebase 想定時の `pr_number` 等）を自動計算・記録した Git コミット対象の `campaigns/{CID}/{ScopeID}/proposal.md` を生成（NEW-01, NEW-05, NEW-08, NEW-21, NEW-25対応）。
+   - `review:submit-proposal`: レビュワーが作成した仮指摘を検証し、対象 Scope 構成ファイルの複合ハッシュ `scope_tree_hash` やコミットメタデータ（`base_commit`, `target_commit`, `source_branch`、および PR 作成後であれば `pr_number` 等）を自動計算・記録した Git コミット対象の `campaigns/{CID}/{ScopeID}/proposal.md` を生成（PR 作成前提出時は `pr_number: null` を許容し、推測による自動選択は行わない）（NEW-01, NEW-05, NEW-08, NEW-21, NEW-25, NEW-27対応）。
    - `review:pause`: レビュワーが 5 時間枠等で中断する際、`draft.md` を退避し、Campaign/全体 INDEX を `中断 (paused)` にアトミック更新（NEW-07, NEW-11対応、直接編集禁止）。
 3. **書き込み・修復専用コマンド（単一 Writer 集約・管理ブランチ実行・排他ロック制御）**:
-   - `review:register`: `proposal.md` を取り込み、決定論的 3 段階多層検証（第 1: 履歴正当性・真正性（Provenance）検証（通常 Merge は `--is-ancestor`、Squash/Rebase Merge 時は差分包含等の代替証明や PR 番号テキスト単独照合を廃止し、GitHub PR メタデータ照合（マージ完了事実と `C_import` の結合、PR コミット包含）により真正性を証明、オフライン・検証不能時は推測登録を厳格禁止し exit code 1 安全停止）、第 2: レビュー対象時点の整合性確認（`target_commit` 時点ハッシュと `scope_tree_hash` 照合）、第 3: 確定結果登録と現在の HEAD に対する鮮度決定（マージ時コード変更や先行変更があっても過去の確定結果として登録し、現在の HEAD と差分があれば即座に `要再検証 (stale)` へ遷移させて差分レビューを要求））を実行。正式 Finding ID を採番して `findings/EVENTS.md` と `result.md` を相互バインド生成し、台帳同期（fresh または stale）と提出物削除を実行（NEW-01, NEW-04, NEW-05, NEW-08, NEW-13, NEW-14, NEW-16, NEW-18, NEW-21, NEW-22, NEW-23, NEW-24, NEW-25対応）。
+   - `review:register`: `proposal.md` を取り込み、決定論的 3 段階多層検証（第 1: 履歴正当性・真正性（Provenance）検証（通常 Merge は `--is-ancestor`、Squash/Rebase Merge 時は差分包含判定等の代替証明を排し、PR 番号解決（Frontmatter 記載、CLI 引数 `--pr <number>`、または `C_import` メッセージからの一意抽出。未確定・複数候補時は安全停止）と GitHub PR メタデータ照合（PR Files API による `proposal.md` 取り込み元 PR の直接検証、`merge_commit_sha == C_import` の直接結合、PR コミット包含）により真正性を客観証明。オフライン・情報取得不能時は推測登録を厳格禁止し exit code 1 安全停止）、第 2: レビュー対象時点の整合性確認（`target_commit` 時点ハッシュと `scope_tree_hash` 照合）、第 3: 確定結果登録と現在の HEAD に対する鮮度決定（マージ時コード変更や先行変更があっても過去の確定結果として登録し、現在の HEAD と差分があれば即座に `要再検証 (stale)` へ遷移させて差分レビューを要求））を実行。正式 Finding ID を採番して `findings/EVENTS.md` と `result.md` を相互バインド生成し、台帳同期（fresh または stale）と提出物削除を実行（NEW-01, NEW-04, NEW-05, NEW-08, NEW-13, NEW-14, NEW-16, NEW-18, NEW-21, NEW-22, NEW-23, NEW-24, NEW-25, NEW-26, NEW-27対応）。
    - `review:finding-update`: Implementer による Finding ステータス更新（修正済み・再検証待ち）。追記前に操作意図ファイル（`findings/.pending-event.json`）をアトミック配置し、`findings/EVENTS.md` への追記および派生台帳（INDEX）の同期が完了した後にのみ一時ファイルを削除（NEW-02, NEW-12, NEW-15対応）。
    - `review:record-recheck`: 再レビュー結果から連番 `recheck-NN.md` を確定生成し、`findings/EVENTS.md` に追記の上、台帳同期（NEW-02, NEW-04対応）。
    - `review:sync-inbox`: 同一マシン環境におけるローカル一時バッファ（`.review-inbox`）からの直接同期（手動・補助用）。
@@ -1134,11 +1148,11 @@ flowchart TD
 ```mermaid
 timeline
     title 継続的レビュー品質管理基盤 導入ロードマップ
-    Phase 1 : 現状調査とアーキテクチャ設計 (本設計書) : レビュー指摘 REV-01〜04 および NEW-01〜25 反映完了
+    Phase 1 : 現状調査とアーキテクチャ設計 (本設計書) : レビュー指摘 REV-01〜04 および NEW-01〜27 反映完了
     Phase 2 : レビュー台帳・Node.js CLIの実装 : gray-matter検証 : 20Scope移行 : C001構造初期化 : Finding台帳・EVENTS.md作成 : review:check / rebuild / repair (一意根拠検証・非破壊停止) 実装
-    Phase 3 : レビューSkill連携 : repo-review Skill連携手順整備 : proposal提出物・register連携 (3段階多層検証・GitHub PR真正性証明・stale反映) : finding-update (全同期後Intent削除) : pause中断CLI
+    Phase 3 : レビューSkill連携 : repo-review Skill連携手順整備 : proposal提出物・register連携 (3段階多層検証・GitHub PR真正性・Files直接結合証明・stale反映) : finding-update (全同期後Intent削除) : pause中断CLI
     Phase 4 : レビュー鮮度管理 : 全件集計パイプライン (review:freshness) : 未登録ファイル検知 : 差分レビュー運用標準化
-    Phase 5 : 検証と運用整備 : 台帳整合性・正本間復旧・トリム前一意検証・非破壊停止・Intent全属性照合・ID重複テスト : 中断再開・Squash/GitHub PR真正性実機検証 : GitHub Actions連携 : 運用ドキュメント完成
+    Phase 5 : 検証と運用整備 : 台帳整合性・正本間復旧・トリム前一意検証・非破壊停止・Intent全属性照合・ID重複テスト : 中断再開・Squash/GitHub PR直接結合真正性実機検証 : GitHub Actions連携 : 運用ドキュメント完成
 ```
 
 #### Phase 2: レビュー台帳・Node.js CLIの実装
@@ -1154,10 +1168,10 @@ timeline
 
 #### Phase 3: レビューSkill連携
 
-- **Task 3.1 (REV-01, NEW-01, NEW-05反映)**: `.agents/skills/repo-review/SKILL.md` および `references.md` に、作業ブランチでの仮 ID 起草ルール、`proposal.md` 作成・コミット手順、PR マージ後の昇格手順、および台帳 CLI 連携手順を追記。
-- **Task 3.2 (NEW-01, NEW-04, NEW-05, NEW-08, NEW-13, NEW-14, NEW-16, NEW-18, NEW-21, NEW-22, NEW-23, NEW-24, NEW-25反映)**:
-  - `scripts/reviews/submit-proposal.js`（`review:submit-proposal`: `base_commit`, `target_commit`, `source_branch`, `scope_tree_hash` および Squash/Rebase 想定時の `pr_number` 自動算出・記録を含む提出物生成）の実装。
-  - `scripts/reviews/register.js`（`review:register`: 単一Writer・排他ロック・3段階多層検証（第1: 履歴正当性・真正性確認・通常Mergeの先祖判定、Squash/Rebase 時の差分包含判定等の代替証明廃止と GitHub PR メタデータ照合（マージ完了事実と `C_import` の結合、PR コミット包含）による真正性証明・オフライン/情報取得不能時の安全停止、第2: レビュー対象時点の整合性確認（`target_commit` と `scope_tree_hash` 照合）、第3: 確定結果登録と現在の HEAD に対する鮮度決定・マージ時コード変更の適切な stale 遷移）・相互バインド・`EVENTS.md` 追記・確定生成）の実装。
+- **Task 3.1 (REV-01, NEW-01, NEW-05, NEW-27反映)**: `.agents/skills/repo-review/SKILL.md` および `references.md` に、作業ブランチでの仮 ID 起草ルール、PR 作成前（`pr_number: null` 許容）および作成後の `proposal.md` 生成・コミット手順、PR マージ後の昇格手順、および台帳 CLI 連携手順を追記。
+- **Task 3.2 (NEW-01, NEW-04, NEW-05, NEW-08, NEW-13, NEW-14, NEW-16, NEW-18, NEW-21, NEW-22, NEW-23, NEW-24, NEW-25, NEW-26, NEW-27反映)**:
+  - `scripts/reviews/submit-proposal.js`（`review:submit-proposal`: `base_commit`, `target_commit`, `source_branch`, `scope_tree_hash` および PR 作成後であれば `pr_number` 自動設定、PR 作成前は `null` 許容を含む提出物生成）の実装。
+  - `scripts/reviews/register.js`（`review:register`: 単一Writer・排他ロック・3段階多層検証（第1: 履歴正当性・真正性確認・通常Mergeの先祖判定、Squash/Rebase 時の PR 番号解決（Frontmatter / CLI `--pr` / `C_import` メッセージ抽出）、GitHub PR メタデータ照合（PR Files API による `proposal.md` 取り込み元 PR の直接検証、`merge_commit_sha == C_import` 直接結合、PR コミット包含）による客観的真正性証明・オフライン/情報取得不能/結合不一致時の安全停止、第2: レビュー対象時点の整合性確認（`target_commit` と `scope_tree_hash` 照合）、第3: 確定結果登録と現在の HEAD に対する鮮度決定・マージ時コード変更の適切な stale 遷移）・相互バインド・`EVENTS.md` 追記・確定生成）の実装。
 - **Task 3.3 (REV-02, NEW-02, NEW-04, NEW-12, NEW-15反映)**:
   - `scripts/reviews/update-finding.js`（`review:finding-update`: 操作意図ファイル `.pending-event.json` のアトミック永続化、`EVENTS.md` 追記、派生台帳同期完了後の安全な一時ファイル削除）の実装。
   - `scripts/reviews/record-recheck.js`（`review:record-recheck`: `EVENTS.md` 追記・相互バインド・連番再レビュー確定生成）の実装。
@@ -1171,8 +1185,8 @@ timeline
 
 #### Phase 5: 検証と運用整備
 
-- **Task 5.1 (NEW-02, NEW-03, NEW-04, NEW-06, NEW-09, NEW-10, NEW-11, NEW-12, NEW-13, NEW-14, NEW-15, NEW-17, NEW-19, NEW-20, NEW-21, NEW-22, NEW-23, NEW-24, NEW-25反映)**: 台帳整合性テスト、ID重複防止テスト、正本間部分更新修復テスト（片方欠落からの自動修復）、トリム前期待値算出・一意根拠事前検証・復元根拠欠落/競合時の非破壊安全停止テスト、末尾破損トリム・Intent再追記テスト、未完了 Intent 残存時の全属性完全一致照合・同一ID内容不一致時安全停止・冪等復旧テスト（ケースD）、先祖関係成立時でもコード変更があれば stale に遷移するテスト、マージ時差分発生時の確定登録と stale 遷移テスト、オフライン時・PRメタデータ取得不能時の安全停止テスト、INDEX再生成復旧テスト（`EVENTS.md` リプレイおよび `draft.md` 走査による完全復旧検証）の自動化。
-- **Task 5.2 (NEW-01, NEW-05, NEW-07, NEW-08, NEW-13, NEW-14, NEW-16, NEW-18, NEW-21, NEW-22, NEW-23, NEW-24, NEW-25反映)**: 作業ブランチでの proposal 作成（`base_commit`, `target_commit`, `source_branch`, `scope_tree_hash`, `pr_number` 記録） → Squash Merge 模倣（マージ時追加修正差分を含むケース） → 管理ブランチでの register 確定（差分包含等の代替証明を排し、GitHub PR メタデータ照合によるマージコミット・PRコミット包含の客観的真正性証明、マージ時差分発生時の past-result 確定登録と stale 遷移を含む 3 段階多層検証通過） → オフライン時・API権限欠落時・偽装コミットSHA指定時の安全停止検証（exit code 1） → pause 中断・再開・再レビューの一連の実機モックシナリオ検証。
+- **Task 5.1 (NEW-02, NEW-03, NEW-04, NEW-06, NEW-09, NEW-10, NEW-11, NEW-12, NEW-13, NEW-14, NEW-15, NEW-17, NEW-19, NEW-20, NEW-21, NEW-22, NEW-23, NEW-24, NEW-25, NEW-26, NEW-27反映)**: 台帳整合性テスト、ID重複防止テスト、正本間部分更新修復テスト（片方欠落からの自動修復）、トリム前期待値算出・一意根拠事前検証・復元根拠欠落/競合時の非破壊安全停止テスト、末尾破損トリム・Intent再追記テスト、未完了 Intent 残存時の全属性完全一致照合・同一ID内容不一致時安全停止・冪等復旧テスト（ケースD）、先祖関係成立時でもコード変更があれば stale に遷移するテスト、マージ時差分発生時の確定登録と stale 遷移テスト、無関係な過去 PR マージコミット流用時の登録拒絶安全停止テスト、PR Files に proposal が含まれない場合の安全停止テスト、オフライン時・PRメタデータ取得不能時の安全停止テスト、INDEX再生成復旧テスト（`EVENTS.md` リプレイおよび `draft.md` 走査による完全復旧検証）の自動化。
+- **Task 5.2 (NEW-01, NEW-05, NEW-07, NEW-08, NEW-13, NEW-14, NEW-16, NEW-18, NEW-21, NEW-22, NEW-23, NEW-24, NEW-25, NEW-26, NEW-27反映)**: 作業ブランチでの proposal 作成（PR 作成前 `pr_number: null` 許容） → PR 作成・マージ（Squash Merge 模倣、マージ時追加修正差分を含むケース） → 管理ブランチでの register 確定（PR Files 検証および `merge_commit_sha == C_import` の直接結合による客観的真正性証明、マージ時差分発生時の past-result 確定登録と stale 遷移を含む 3 段階多層検証通過） → 過去 PR 偽装コミット指定時・取り込み元不整合時・オフライン時の安全停止検証（exit code 1） → pause 中断・再開・再レビューの一連の実機モックシナリオ検証。
 - **Task 5.3**: `docs/reviews/README.md` の運用マニュアル整備。
 - **Task 5.4**: PR 時に `npm run review:check` を実行する GitHub Actions ワークフローの追加。
 
@@ -1233,13 +1247,14 @@ timeline
 - **トレードオフ**:
   - 差分走査のステップが全件走査となるが、Git diff のファイル走査はミリ秒単位で完了するためパフォーマンス影響は皆無であり、安全性が最大化される。
 
-### 13.7 登録可否判定と鮮度判定の分離: 履歴正当性（Provenance証明）＋レビュー対象整合性＋鮮度格付けによる多層判定 vs 先祖関係単一判定・差分包含判定 (NEW-13, NEW-14, NEW-16, NEW-18, NEW-21, NEW-22, NEW-23, NEW-24, NEW-25)
+### 13.7 登録可否判定と鮮度判定の分離: 履歴正当性（Provenance証明・PR取り込み元直接結合）＋レビュー対象整合性＋鮮度格付けによる多層判定 vs 先祖関係単一判定・差分包含判定 (NEW-13, NEW-14, NEW-16, NEW-18, NEW-21, NEW-22, NEW-23, NEW-24, NEW-25, NEW-26, NEW-27)
 
-- **採用**: **第 1 判定（履歴正当性・真正性の証明による登録可否。通常 Merge は `--is-ancestor`、Squash/Rebase 時は差分包含判定等の代替証明や PR 番号テキスト単独照合を排し、GitHub PR メタデータ照合（マージ完了事実と `C_import` の結合、PR コミット包含）により提出元コミット真正性を証明、オフライン・検証不能時は推測登録を禁止し exit code 1 安全停止）、第 2 判定（`target_commit` と `scope_tree_hash` によるレビュー対象時点の整合性確認）、第 3 判定（確定結果登録と現在の HEAD に対する鮮度決定。マージ時コード変更や先行変更があっても過去の確定結果として登録し、現在の HEAD と差分があれば即座に `要再検証 (stale)` 格付け）を厳格に分離する決定論的多層パイプライン**。
+- **採用**: **第 1 判定（履歴正当性・真正性の証明による登録可否。通常 Merge は `--is-ancestor`、Squash/Rebase 時は差分包含判定等の代替証明や PR 番号テキスト単独照合を排し、PR 番号解決（Frontmatter / CLI `--pr` / `C_import` メッセージ抽出）と GitHub PR メタデータ照合（PR Files API による `proposal.md` 取り込み元 PR の直接検証、`merge_commit_sha == C_import` の直接結合、PR コミット包含）により提出元コミット真正性を証明、オフライン・検証不能・結合不一致時は推測登録を禁止し exit code 1 安全停止）、第 2 判定（`target_commit` と `scope_tree_hash` によるレビュー対象時点の整合性確認）、第 3 判定（確定結果登録と現在の HEAD に対する鮮度決定。マージ時コード変更や先行変更があっても過去の確定結果として登録し、現在の HEAD と差分があれば即座に `要再検証 (stale)` 格付け）を厳格に分離する決定論的多層パイプライン**。
 - **採用理由**:
   - 先祖関係（`--is-ancestor`）が成立しても、レビュー対象コミット以降に先行変更が入っている場合にコード同一性を誤認（見逃し）する重大リスクを排除できる。
   - コード差分の包含関係（Sub-patch Containment）は同一修正の別コミットでも偶然成立し得るため提出元の真正性証明にはならず、Git に判定コマンドが存在しないため独自パーサーの導入を回避して設計を簡素化できる（NEW-24）。
-  - コミットメッセージの PR 番号テキスト一致だけでは、そのコミットが実際に対象 PR を取り込んだことの客観的証明にならない課題に対し、GitHub PR メタデータ（`merge_commit_sha` と `C_import` の結合、PR コミット包含）により、無関係なコミットの誤指定や偽装提出を排除して真正性を決定論的に証明できる（NEW-25）。
+  - 単にマージコミットが HEAD の先祖であることだけを検証条件とすると、無関係な過去 PR のマージコミットを悪用・誤認して別 PR で取り込まれた proposal.md が不正通過する重大リスク（NEW-26）に対し、PR Files API で `proposal.md` が当該 PR の変更ファイルに含まれること、および `merge_commit_sha == C_import` を直接結合して検証することで、取り込み元 PR の真正性を 100% 決定論的に保証できる。
+  - PR 作成前の提出物生成（`pr_number: null` 許容）と PR 作成後の確定フローを整理し、未確定時や複数 PR 候補時は推測せず `--pr` オプション指定を要求することで、運用の柔軟性と安全性を両立できる（NEW-27）。
   - すべての環境で無理に自動登録を試みるのではなく、GitHub PR メタデータが取得できないオフライン環境や閉域環境では推測を排して安全停止（exit code 1）することで、誤ったレビュー結果の不正登録を完全に防止できる。
   - マージ時にコンフリクト解消等でコード変更が入った場合でも、過去の特定コミット時点における確定事実としての登録を不当に拒絶することなく、正常に登録した上で鮮度ステータスを即座に `stale` へ遷移させて差分レビューを要求する運用へと安全に引き継げる（NEW-23）。
 - **トレードオフ**:
@@ -1277,6 +1292,6 @@ timeline
 
 ## 14. 結論と次のステップ (Conclusion)
 
-本改訂設計により、外部レビュー指摘（REV-01〜REV-04 および NEW-01〜NEW-25）のすべてが完全に解消され、履歴の不変性、単一 Writer 方式、Git 経由の確実な受け渡しと昇格タイミング、Squash/Rebase Merge 時の提出元コミット真正性証明（差分包含判定の廃止、GitHub PR メタデータ照合によるマージコミット・PRコミット包含の客観的証明、PRメタデータ単独証明の禁止）と決定論的履歴検証およびオフライン・検証不能時の安全停止、登録可否判定・レビュー対象整合性確認・現在のHEADに対する鮮度判定の明確な分離、マージ時コード変更の past-result 確定登録と適切な stale 遷移、マージ方式によらない統一品質基準、操作意図ファイル（`.pending-event.json`）の全工程完了後削除と全属性完全一致照合・重複防止・同一ID衝突検知・冪等復旧、末尾破損検出時の期待値算出・一意根拠事前検証（曖昧復旧禁止）・非破壊安全停止、複数正本ファイル間の相互バインドと部分更新修復、状態変更イベントログの純粋追記不変性、中断時更新の単一 Writer 統一とドラフト永続化、読み取り専用検査と明示的修復の責務分離、鮮度判定の完全性、および実装ロードマップの整合性が確定した。
+本改訂設計により、外部レビュー指摘（REV-01〜REV-04 および NEW-01〜NEW-27）のすべてが完全に解消され、履歴の不変性、単一 Writer 方式、Git 経由の確実な受け渡しと昇格タイミング、Squash/Rebase Merge 時の提出元コミット真正性証明（差分包含判定の廃止、GitHub PR Files による取り込み元 PR 直接検証、マージコミット直接結合、PR番号解決規則、PRメタデータ単独証明の禁止）と決定論的履歴検証およびオフライン・検証不能時の安全停止、登録可否判定・レビュー対象整合性確認・現在のHEADに対する鮮度判定の明確な分離、マージ時コード変更の past-result 確定登録と適切な stale 遷移、マージ方式によらない統一品質基準、操作意図ファイル（`.pending-event.json`）の全工程完了後削除と全属性完全一致照合・重複防止・同一ID衝突検知・冪等復旧、末尾破損検出時の期待値算出・一意根拠事前検証（曖昧復旧禁止）・非破壊安全停止、複数正本ファイル間の相互バインドと部分更新修復、状態変更イベントログの純粋追記不変性、中断時更新の単一 Writer 統一とドラフト永続化、読み取り専用検査と明示的修復の責務分離、鮮度判定の完全性、および実装ロードマップの整合性が確定した。
 
 **本報告完了の時点で作業を停止し、利用者の確認と承認を待つ。承認を得るまで Phase 2 以降の実装、Git コミット、Git プッシュは実行しない。**
