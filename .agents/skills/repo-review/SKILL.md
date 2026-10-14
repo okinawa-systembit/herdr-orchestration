@@ -26,15 +26,33 @@ description: >-
 - **`--result-ref` はリポジトリ相対 1 パス**（例: `.review-inbox/review-response.md`）。
 - Herdr 操作: 公式 **herdr** Skill。`herdr agent prompt` は **1 行・ファイル参照のみ**（[references.md](references.md)）。sync handoff 成功時は不要。
 
-## 成果物（正本）
+## レビュー運用の責務境界と成果物（正本）
 
-| ファイル                           | 担当      | 用途                               |
-| ---------------------------------- | --------- | ---------------------------------- |
-| `.review-inbox/review-request.md`  | requester | 依頼本文（基準、差分、目的等）     |
-| `.review-inbox/review-response.md` | reviewer  | 指摘・判定・検証結果（先頭行固定） |
-| `.review-inbox/INDEX.md`           | reviewer  | ラウンド履歴                       |
+本リポジトリでは、運用の目的に応じて **「Herdr 内部レビュー」** と **「GitHub 管理対象レビュー」** を明確に区別する（設計書: [docs/reviews/CONTINUOUS_REVIEW_SIMPLIFIED_DESIGN.md](../../../docs/reviews/CONTINUOUS_REVIEW_SIMPLIFIED_DESIGN.md)）。
 
-テンプレ: `.review-inbox/*.example.md`。詳細形式・基準: [references.md](references.md)。
+### 1. Herdr 内部レビュー（エージェント間開発支援）
+
+- **対象**: リポジトリ内での日常的な実装支援、エージェント間の手戻り防止、sync handoff によるレビュー依頼と対応。
+- **正本・成果物**: ローカルの `.review-inbox/` ファイル群。
+  - `.review-inbox/review-request.md`: 依頼本文（基準、差分、目的等）
+  - `.review-inbox/review-response.md`: 指摘・判定・検証結果（先頭行固定）
+  - `.review-inbox/INDEX.md`: ラウンド履歴
+- **運用原則**: エージェント間で完結する閉じたローカルループであり、**Herdr 内部レビューのすべてを GitHub へ投稿する必要はない**。
+
+### 2. GitHub 管理対象レビュー（公開記録・追跡管理）
+
+- **対象**: 通常 Pull Request のレビュー、初回 20 Scope レビュー、および継続追跡する未解決指摘 Issue。
+- **正本**: **GitHub（Pull Request, Issues, Reviews）**。
+- **運用原則**: 明示的に GitHub 管理対象として依頼された場合のみ適用し、同一レビュー情報をリポジトリ内台帳と二重管理しない。
+
+| レビュー種別               | 正本（Source of Truth） | 格納場所・管理単位                  | 連携インターフェース               |
+| -------------------------- | ----------------------- | ----------------------------------- | ---------------------------------- |
+| **Herdr 内部レビュー**     | **ローカル Markdown**   | `.review-inbox/review-response.md`  | `herdr-orchestrator result-submit` |
+| **通常 PR レビュー**       | **GitHub Pull Request** | PR 会話タイムライン / Files Changed | `gh pr review --comment`           |
+| **初回 20 Scope レビュー** | **GitHub Issues**       | Scope 単位の個別 Issue（`#101` 等） | `gh issue comment`                 |
+| **継続追跡する指摘**       | **GitHub Issues**       | 指摘単位の個別 Issue（`#105` 等）   | `gh issue create`                  |
+
+※ いずれのレビュー種別であっても、適用する**レビュー品質基準（2段階レビュー、指摘分類、重大度判定、反証確認、未実施検証明記）は完全に共通**である。
 
 ---
 
@@ -173,6 +191,62 @@ herdr-orchestrator result-submit <task.id> \
 `--summary` は 200 字以内の簡潔な記録に留める（詳細は response ファイル側）。
 
 ---
+
+## GitHub 連携運用（PR レビュー & Scope レビュー）
+
+GitHub を正本とするコードレビュー運用では、以下の手順で GitHub CLI (`gh`) を用いて記録・連携する。  
+※ **適用範囲の明確化**: 本手順は、通常 PR や初回 20 Scope などの「GitHub 管理対象レビュー」として明示的に依頼された場合にのみ適用する。通常の Herdr 内部レビュー（エージェント間 handoff）では本手順は不要であり、`.review-inbox/` への出力と `result-submit` だけで完結する（不要な GitHub 投稿は行わない）。  
+※ レビュー品質基準（2 段階レビュー、指摘 3 分類、重大度 P0〜P3、反証確認、未実施検証の明示）は Herdr 連携時と完全に同一の基準を適用する。
+
+### A. 通常 Pull Request の継続的レビュー手順
+
+1. **差分とメタデータの確認**:
+   ```bash
+   gh pr view <pr_number> --json number,title,baseRefName,headRefOid,commits
+   gh pr diff <pr_number>
+   gh pr checks <pr_number>
+   ```
+2. **2段階レビューの実施**:
+   - `repo-review` 基準に沿って、第 1 段階（仕様・設計整合性）および第 2 段階（批判的不具合探索）を実施。
+   - 指摘事項（P0〜P3）、総合判定（GO / 要修正 / NO-GO）、未実施検証をまとめた Markdown 結果ファイルを生成。
+3. **レビュー結果の投稿**:
+   - 原則として `--comment` でレビュー結果を投稿する：
+     ```bash
+     gh pr review <pr_number> --comment -F review-result.md
+     ```
+   - ※ 運用ポリシーで許可されている場合のみ、Blocking 指摘時に `--request-changes` を使用可能。
+   - **安全制約**: AI エージェントによる `--approve` および `gh pr merge` は実行禁止。コード確認、正式なレビュー承認（Approve）、およびマージは人間が担当する。
+
+### B. 初回 20 Scope レビュー手順
+
+1. **対象 Scope Issue の確認**:
+   ```bash
+   gh issue view <issue_number>
+   ```
+2. **レビュー実施と結果記録**:
+   - 対象コミット SHA をチェックアウトして検証。
+   - レビュー結果を Scope Issue にコメント投稿：
+     ```bash
+     gh issue comment <issue_number> -F review-result.md
+     ```
+3. **未解決指摘の先行起票とクローズ (SIMP-01 順序厳守)**:
+   - 未解決指摘（P0〜P2）が存在する場合、**Scope Issue をクローズする前に**、独立した指摘 Issue を先行起票する：
+     ```bash
+     gh issue create \
+       --title "[Finding] <ScopeID>-<連番>: <指摘概要>" \
+       --body-file finding-detail.md \
+       --label "review-finding,severity:p2"
+     ```
+   - 起票した指摘 Issue 番号を Scope Issue のコメントに追記し、相互リンクを記録。
+   - 全指摘の起票・リンク完了を確認後、Scope Issue をクローズ：
+     ```bash
+     gh issue close <issue_number> --reason "completed"
+     ```
+   - ※ 途中で失敗した場合は Scope Issue を Open のまま残して安全停止する。
+
+### C. オフライン・API 障害時のフォールバック
+
+GitHub API の一時停止や認証エラー時は、ローカルの `.review-inbox/review-response.md` に標準フォーマットで結果を出力し、人間へ手動反映を依頼する。
 
 ## Requester — 「review-response.md を読め / レビュー対応」
 
