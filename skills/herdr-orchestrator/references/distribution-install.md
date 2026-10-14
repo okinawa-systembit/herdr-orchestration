@@ -357,7 +357,7 @@ jobs:
           gh release create "${VERSION}" \
               "${ARCHIVE_NAME}" \
               "${ARCHIVE_NAME}.sha256" \
-              --title "Release ${VERSION}" \
+              --title "${VERSION}" \
               --generate-notes
 ```
 
