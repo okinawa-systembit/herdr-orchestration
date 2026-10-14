@@ -16,6 +16,7 @@
 - **対象リポジトリ**: `okinawa-systembit/herdr-orchestration`
 - **対象ブランチ**: `main`
 - **初期基準コミットSHA**: `e527edc67866ffee5d7ec1527e1274b4ab395a9d` (v0.1.2)
+- **共通対象コミットSHA**: 初回全体レビュー開始時に確定した共通対象コミットSHA（全20 Scope原則同一。レビュー途中でmainが更新されても自動変更しない）
 - **Scope 総数**: 20 Scope（個別レビュー: 15 / 結合レビュー: 5）
 - **レビュー基準**:
   - [.agents/skills/repo-review/SKILL.md](../../.agents/skills/repo-review/SKILL.md)
@@ -64,24 +65,35 @@
 レビューによって検出された指摘事項（Finding）は、GitHub Finding Issue として起票・管理します。
 
 - **起票単位**: 原則として 1 指摘 = 1 Issue
-- **ラベル体系**:
-  - 種別: `finding`
-  - 重大度: `finding:p0`, `finding:p1`, `finding:p2`, `finding:p3`
-  - 判定属性: `finding:blocking`, `finding:non-blocking`
-  - 状態: `finding:open`, `finding:resolved`, `finding:dismissed`
-- **Scope Issue との紐付け**: Finding Issue の本文に対象 Scope Issue へのリンク（例: `Scope: #15`）を含め、Scope Issue 側からも検出指摘一覧としてリンクします。
+- **ラベル体系**（`scripts/setup-review-labels.sh` に定義）:
+  - 種別: `review-finding`
+  - 重大度: `severity:p0` (致命的), `severity:p1` (重大・Blocking), `severity:p2` (通常・Non-blocking), `severity:p3` (軽微・改善)
+  - 進行ステータス: `status:ready-to-fix` (修正待ち), `status:verified` (修正確認完了) ※レビュー中は `status:in-review`
+- **Scope Issue との紐付け**: Finding Issue の本文に対象 Scope Issue へのリンク（例: `Scope: #15`）を含め、Scope Issue 側からも検出指摘一覧として相互リンクします。
 
 ---
 
 ## 5. レビュー実施の流れ
 
 1. **着手**:
-   - 担当者は対象の [GitHub Scope Issue](https://github.com/okinawa-systembit/herdr-orchestration/labels/scope-review) を確認し、レビュー対象コミット（main HEAD等）を確定します。
+   - 初回全体レビューの共通対象コミットSHA（全 20 Scope 原則同一。レビュー期間中に `main` が更新されても自動追従せず固定検証）を確認します。
    - レビュー観点・主対象ファイル・テスト仕様は各 Scope の `request.md` を参照します。
 2. **レビュー実行**:
    - `repo-review` Skill の 2 段階レビュー（仕様整合性検証・批判的不具合探索）および反証確認を実施します。
 3. **結果記録**:
    - レビュー結果（総合判定、確認コミットSHA、検出指摘、未実施検証）を GitHub Scope Issue のコメントに投稿します。
-   - 指摘がある場合は GitHub Finding Issue を起票し、Scope Issue と相互リンクします。
-4. **Issue 完了**:
-   - 全体判定が `GO` で未解決の Blocking 指摘がない場合、Scope Issue を Close します。
+   - 未解決指摘がある場合は GitHub Finding Issue を起票し、Scope Issue と相互リンクします。
+4. **レビュー作業完了 (Scope Issue のクローズ)**:
+   - レビュー結果の記録と、未解決指摘がある場合の Finding Issue 起票・相互リンクが完了したら、レビュー作業完了として Scope Issue をクローズします（`gh issue close <number> --reason "completed"`）。
+   - **重要**: Scope Issue のクローズはレビュー作業（解析・判定・結果記録・指摘起票）の完了を示すものであり、未解決 Finding が存在しないことの証明ではありません。指摘事項の修正・解決状況は各 Finding Issue 側で独立して追跡・クローズします。
+
+---
+
+## 6. 全体完了判定 (Global GO Gate)
+
+リポジトリ全体の初回レビュー完了（Global GO）は、単一 Scope の完了ではなく、以下の条件をすべて満たした場合に下されます：
+
+- [ ] 全 20 の Scope Issue（R001〜R014, I001〜I005）がレビュー完了として Closed（総合判定 `GO`）であること。
+- [ ] 検出されたすべての Blocking 指摘（`severity:p0`, `severity:p1` の Finding Issue）が是正され、Closed（`status:verified`）であること。
+- [ ] Non-blocking 指摘（`severity:p2`, `severity:p3`）について、保留または採否が明確に合意されていること。
+- [ ] すべての Scope が同一の共通確定コミットSHA（および是正コミット）に対して検証されていること。

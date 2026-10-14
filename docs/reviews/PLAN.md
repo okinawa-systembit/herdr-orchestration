@@ -17,7 +17,8 @@ AIモデルの利用枠（5時間枠・週間枠）の制約下で品質を一�
 
 - **対象リポジトリ**: `okinawa-systembit/herdr-orchestration`
 - **対象ブランチ**: `main`
-- **対象基準コミットSHA**: `e527edc67866ffee5d7ec1527e1274b4ab395a9d`
+- **初期基準コミットSHA**: `e527edc67866ffee5d7ec1527e1274b4ab395a9d` (v0.1.2)
+- **共通対象コミットSHA**: 初回全体レビュー開始時に確定した共通対象コミットSHA（全 20 Scope で原則同一のコミットを検証。レビュー途中で main が更新されても自動変更せず固定検証する）
 - **実行環境**: WSL Ubuntu 24.04（WSL終了・電源断からの復旧保証は対象外、Windowsネイティブ・macOS対応確認は不要）
 - **レビュー基準**:
   - [.agents/skills/repo-review/SKILL.md](../../.agents/skills/repo-review/SKILL.md)
@@ -35,10 +36,10 @@ AIモデルの利用枠（5時間枠・週間枠）の制約下で品質を一�
 
 ### 1.4 全体完了条件
 
-1. 個別レビュータスク（R001〜R014）および結合レビュータスク（I001〜I005）の全 20 タスクが `完了` 状態であること。
-2. 全タスクの判定が `GO` であること。
-3. 検出された Blocking 指摘（P0 / P1、および例外的に Blocking 指定された P2）がすべて解決済みであること。
-4. すべてのタスクが同一のコミットSHA（または差分追従されたコミットSHA）に対して検証されていること。
+1. 全 20 の Scope Issue（R001〜R014, I001〜I005）のレビュー作業が完了し、総合判定が `GO` であること。
+2. 検出されたすべての Blocking 指摘（`severity:p0`, `severity:p1` の Finding Issue）が解決済み（Closed / `status:verified`）であること。
+3. Non-blocking 指摘（`severity:p2`, `severity:p3`）について、保留または採否が明確に合意されていること。
+4. すべてのタスクが同一の共通対象コミットSHA（および修正コミット）に対して検証されていること。
 
 ---
 
@@ -658,15 +659,23 @@ docs/reviews/
 検出された指摘事項は GitHub Finding Issue として起票・管理する。
 
 - 形式: 1 指摘 = 1 Issue
-- ラベル: `finding`, `finding:p0`〜`p3`, `finding:blocking` / `finding:non-blocking`
-- 追跡: Finding Issue 本文に対象 Scope Issue への参照リンクを含め、Scope Issue 側からも検出指摘一覧として相互リンクする。
+- ラベル体系（`scripts/setup-review-labels.sh` に定義）:
+  - 種別: `review-finding`
+  - 重大度: `severity:p0` (致命的), `severity:p1` (重大・Blocking), `severity:p2` (通常・Non-blocking), `severity:p3` (軽微・改善)
+  - 進行ステータス: `status:ready-to-fix` (修正待ち), `status:verified` (修正確認完了) ※レビュー中は `status:in-review`
+- 追跡: Finding Issue 本文に対象 Scope Issue への参照リンク（例: `Scope: #15`）を含め、Scope Issue 側からも検出指摘一覧として相互リンクする。
 
 ### 6.3 進捗ステータス管理
 
-各 Scope の進捗は GitHub Scope Issue のステータスおよびコメントで管理する：
+Scope Issue（レビュー作業の進捗）と Finding Issue（指摘事項の解決進捗）の責務を分離して管理する：
 
-- `Open`: レビュー未着手、またはレビュー実施中・指摘対応中
-- `Closed`: レビューが完了し、判定が `GO` で未解決 Blocking 指摘がない状態
+1. **Scope Issue**:
+   - `Open`: レビュー未着手、またはレビュー解析・結果記録が進行中
+   - `Closed`: レビュー解析、総合判定、結果コメント投稿、および未解決指摘がある場合の Finding Issue 起票・相互リンクが完了（レビュー作業完了）
+   - ※ Scope Issue のクローズはレビュー作業自体の完了を示すものであり、未解決 Finding が存在しないことの証明ではない。
+2. **Finding Issue**:
+   - `Open` (`status:ready-to-fix`): 指摘が受理され、修正作業中
+   - `Closed` (`status:verified`): 修正 PR がマージされ、再検証で解消を確認
 
 ### 6.4 中断と再開のプロトコル
 
@@ -674,15 +683,15 @@ docs/reviews/
    - 対象 GitHub Scope Issue のコメントに「中断理由」「確認完了範囲」「未確認ファイル/項目」を投稿する。
    - **中断タスクを GO と判定することは絶対に禁止する**。
 2. **再開時**:
-   - 前回のコメントの「未確認項目」からレビューを再開する。
-   - 対象コードのコミットSHAを確認し、変更がある場合は差分の再検証を含める。
+   - 初回全体レビューで確定した共通対象コミットSHAを維持し、前回のコメントの「未確認項目」からレビューを再開する。
+   - 修正対応後の再レビュー時は、変更前後のコミットSHAおよび差分の再検証範囲を記録する。
 
 ### 6.5 全体完了判定 (Global GO Gate)
 
-リポジトリ全体の初回レビュー完了判定は、以下のチェックリストをすべて満たした場合にのみ下される：
+リポジトリ全体の初回レビュー完了判定は、単一 Scope の完了ではなく、以下のチェックリストをすべて満たした場合にのみ下される：
 
-- [ ] 全 15 の個別レビュー Scope Issue（R001〜R014）が Closed（判定 `GO`）であること。
-- [ ] 全 5 の結合レビュー Scope Issue（I001〜I005）が Closed（判定 `GO`）であること。
-- [ ] 検出されたすべての Blocking 指摘（Finding Issue）が是正され、Closed となっていること。
-- [ ] Non-blocking 指摘（改善提案等）について、保留または採否が明確に合意されていること。
-- [ ] すべてのレビュー対象が整合した Git コミットSHAで検証されていること。
+- [ ] 全 15 の個別レビュー Scope Issue（R001〜R014）がレビュー完了として Closed（総合判定 `GO`）であること。
+- [ ] 全 5 の結合レビュー Scope Issue（I001〜I005）がレビュー完了として Closed（総合判定 `GO`）であること。
+- [ ] 検出されたすべての Blocking 指摘（`severity:p0`, `severity:p1` の Finding Issue）が是正され、Closed（`status:verified`）であること。
+- [ ] Non-blocking 指摘（`severity:p2`, `severity:p3`）について、保留または採否が明確に合意されていること。
+- [ ] すべてのレビュー対象が同一の共通確定コミットSHA（および是正コミット）に対して検証されていること。
