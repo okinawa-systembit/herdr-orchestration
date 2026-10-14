@@ -1,5 +1,10 @@
 # herdr-orchestration 継続的レビュー品質管理基盤 設計書 (Continuous Review Design)
 
+> [!NOTE]
+> **本書は過去の設計検討履歴（アーカイブ）です。**
+> 継続的コードレビュー運用の正本は、GitHub Issues 中心に簡素化した [CONTINUOUS_REVIEW_SIMPLIFIED_DESIGN.md](CONTINUOUS_REVIEW_SIMPLIFIED_DESIGN.md) を参照してください。
+> 本書に記載されているローカル台帳 CLI (`scripts/reviews/ledger.mjs`) やローカルファイルロック、未確定結果の一時バッファ等の複雑な機構は、二重管理防止と運用負荷低減のため採用されていません。
+
 本書は、`herdr-orchestration` リポジトリにおける継続的なコードレビューと品質管理を実現するための基盤設計書である。
 既存の分割レビュー計画（20タスク）、レビュー台帳、`repo-review` Skill を最大限に再利用し、単発の全体レビューにとどまらず、将来の変更・リリース・再レビューにおいても持続可能な品質管理アーキテクチャを定義する。
 

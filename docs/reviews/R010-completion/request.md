@@ -1,7 +1,9 @@
 # レビュー依頼: R010: Async Completion & リカバリー
 
 - **タスクID**: `R010-completion`
-- **対象コミットSHA**: `e527edc67866ffee5d7ec1527e1274b4ab395a9d`
+- **GitHub Scope Issue**: [#25](https://github.com/okinawa-systembit/herdr-orchestration/issues/25)
+- **初期基準コミットSHA**: `e527edc67866ffee5d7ec1527e1274b4ab395a9d` (v0.1.2)
+- **対象コミットSHA**: 初回全体レビュー開始時に確定した共通対象コミットSHA（全Scope原則同一。レビュー途中でmainが更新されても自動変更しない）
 - **推定負荷**: **中**
 - **依存タスク**: R002, R003, R006B, R008, R009
 - **レビュー基準**: [.agents/skills/repo-review/SKILL.md](../../../.agents/skills/repo-review/SKILL.md) / [references.md](../../../.agents/skills/repo-review/references.md) / [docs/herdr-agent-review-guidelines.md](../../../docs/herdr-agent-review-guidelines.md)
@@ -44,5 +46,7 @@
 3. **反証確認（必須）**:
    - 指摘候補について「既存処理で防がれていないか」「具体的な失敗条件が成立するか」を確認する。
 4. **結果の記録**:
-   - 初回レビュー結果は同ディレクトリの `result.md` に記録する。
-   - レビュー台帳 [../INDEX.md](../INDEX.md) を更新する。
+   - 初回レビュー結果（判定、対象コミットSHA、指摘事項、未実施検証）は対応する [GitHub Scope Issue #25](https://github.com/okinawa-systembit/herdr-orchestration/issues/25) のコメントに記録する。
+   - 未解決指摘が検出された場合は、GitHub Finding Issue（ラベル: `review-finding`, `severity:p*`）を起票し、Scope Issue と相互リンクする。
+   - レビュー結果の記録と必要な Finding Issue の起票・リンクが完了したら、レビュー作業完了として Scope Issue をクローズする（指摘事項の解決状況は Finding Issue 側で管理・追跡する）。
+   - ローカルの `result.md` や動的台帳への記録・更新は行わない（GitHub が正本）。
