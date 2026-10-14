@@ -82,14 +82,15 @@ if [ "$DRY_RUN" = true ]; then
   echo "※ DRY-RUN モードで実行しています（実際の Issue 作成は行われません）"
 fi
 
-# 既存 Issue の取得と確認 (P2-01: 重複起票防止)
+# 既存 Issue の取得と確認 (P2-01: 重複起票防止, P2-05: 取得件数拡張, P2-06: モック誤用防止)
 echo "既存の Scope Review Issue を確認中..."
 existing_titles=""
-if [ -n "${MOCK_EXISTING_SCOPE_ISSUES:-}" ]; then
-  # テスト用モック入力
-  existing_titles="$MOCK_EXISTING_SCOPE_ISSUES"
+if [ "$DRY_RUN" = true ] && [ -n "${TEST_MOCK_EXISTING_SCOPE_ISSUES:-}" ]; then
+  # テスト専用モック入力（dry-run かつテスト指定時のみ有効）
+  echo "※ テスト用モックデータを使用して既存 Issue を照合します"
+  existing_titles="$TEST_MOCK_EXISTING_SCOPE_ISSUES"
 else
-  if ! existing_titles=$(gh issue list --label "scope-review" --state all --limit 100 --json title --jq '.[].title' 2>&1); then
+  if ! existing_titles=$(gh issue list --label "scope-review" --state all --limit 1000 --json title --jq '.[].title' 2>&1); then
     if [ "$DRY_RUN" = true ]; then
       echo "警告: 既存 Issue の取得に失敗しました: $existing_titles" >&2
       echo "※ dry-run モードのため、既存確認なしで予定コマンドを出力します。" >&2
