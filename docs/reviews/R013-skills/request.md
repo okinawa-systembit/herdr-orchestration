@@ -1,7 +1,9 @@
 # レビュー依頼: R013: Skills 定義 & 運用リファレンス
 
 - **タスクID**: `R013-skills`
-- **対象コミットSHA**: `e527edc67866ffee5d7ec1527e1274b4ab395a9d`
+- **GitHub Scope Issue**: [#28](https://github.com/okinawa-systembit/herdr-orchestration/issues/28)
+- **基準コミットSHA (初期基準点)**: `e527edc67866ffee5d7ec1527e1274b4ab395a9d` (v0.1.2)
+- **対象コミットSHA**: レビュー着手時に最新の対象コミット（main HEAD等）を確定・記録する
 - **推定負荷**: **中**
 - **依存タスク**: R011, R012
 - **レビュー基準**: [.agents/skills/repo-review/SKILL.md](../../../.agents/skills/repo-review/SKILL.md) / [references.md](../../../.agents/skills/repo-review/references.md) / [docs/herdr-agent-review-guidelines.md](../../../docs/herdr-agent-review-guidelines.md)
@@ -50,5 +52,6 @@
 3. **反証確認（必須）**:
    - 指摘候補について「既存処理で防がれていないか」「具体的な失敗条件が成立するか」を確認する。
 4. **結果の記録**:
-   - 初回レビュー結果は同ディレクトリの `result.md` に記録する。
-   - レビュー台帳 [../INDEX.md](../INDEX.md) を更新する。
+   - 初回レビュー結果（判定、指摘事項、未実施検証）は対応する [GitHub Scope Issue #28](https://github.com/okinawa-systembit/herdr-orchestration/issues/28) のコメントに記録する。
+   - 未解決指摘（P0〜P3）が検出された場合は、GitHub Finding Issue を起票し、Scope Issue と相互リンクする。
+   - ローカルの `result.md` や動的台帳への記録・更新は行わない（GitHub が正本）。
