@@ -12,10 +12,10 @@
 3. [推奨アーキテクチャと責務境界 (Architecture & Responsibilities)](#sec-3)
 4. [ディレクトリ構成 (Directory Structure)](#sec-4)
 5. [データモデル仕様 (Data Models)](#sec-5)
-6. [Finding ID 採番規則と競合防止（単一管理ブランチ・単一 Writer 方式）(Finding ID & Collision Prevention)](#sec-6)
+6. [Finding ID 採番規則と確定前受け渡し（単一管理ブランチ・単一 Writer 方式）(Finding ID, Proposals & Collision Prevention)](#sec-6)
 7. [レビュー状態管理と履歴の不変性 (State Lifecycle & Immutability)](#sec-7)
 8. [レビュー実行・中断・再開フロー (Execution, Pause & Resume Flow)](#sec-8)
-9. [再レビュー実行フローと台帳更新の原子性 (Re-review Flow & Atomicity)](#sec-9)
+9. [再レビュー実行フローと複数ファイル更新の整合性・障害復旧 (Re-review Flow, Consistency & Recovery)](#sec-9)
 10. [レビュー鮮度管理と変更影響判定パイプライン (Freshness & Impact Analysis Pipeline)](#sec-10)
 11. [既存ブランチからの移行計画 (Migration Plan)](#sec-11)
 12. [台帳管理 CLI 設計と Phase 2〜5 実装タスク (CLI Design & Roadmap)](#sec-12)
@@ -47,14 +47,17 @@
 
 ### 1.2 現行設計の課題と外部レビュー検出事項
 
-Phase 1 設計書の再レビューにおいて、継続的品質管理基盤としての堅牢性を確保するために以下の課題が特定された。
+Phase 1 設計書の外部レビュー（第2回および第3回）において、継続的品質管理基盤としての堅牢性を確保するために以下の課題が特定された。
 
-| 課題領域                | レビュー検出事項                                     |        重大度         | 継続運用におけるリスクと影響                                                                                                                     |
-| :---------------------- | :--------------------------------------------------- | :-------------------: | :----------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Finding ID 採番競合** | REV-01：Gitブランチ間の衝突解決と履歴不変性の矛盾    |   **P1 / Blocking**   | ブランチ間衝突時に確定済み結果ファイルの参照を書き換える方式は不変性原則と矛盾する。ローカルファイルロックでは異なるブランチ間の競合を防げない。 |
-| **単一Writerの形骸化**  | REV-02：再レビュー時に単一Writerを経由しない更新経路 |   **P2 / Blocking**   | 再レビュー時に Implementer が台帳を直接更新し、Reviewer が確定結果ファイルを直接作成する設計になっており、排他制御と整合しない。                 |
-| **鮮度判定の見落とし**  | REV-03：未分類ファイル検出による既知Scope評価の中断  |   **P2 / Blocking**   | 未分類ファイル検出時に早期終了するフローチャートになっており、同一コミットに含まれる既知Scopeの変更評価（stale判定）が見落とされる。             |
-| **依存導入の記述齟齬**  | REV-04：依存ライブラリ導入時期の記述不一致           | **P2 / Non-blocking** | `@11ty/gray-matter` は Phase 1 で既に追加済み（package.json/lockfile更新済み）であるにもかかわらず、設計書内でPhase 2作業と記述されていた。      |
+| 課題領域                 | レビュー検出事項                                           |        重大度         | 継続運用におけるリスクと影響                                                                                                                     |
+| :----------------------- | :--------------------------------------------------------- | :-------------------: | :----------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Finding ID 採番競合**  | REV-01：Gitブランチ間の衝突解決と履歴不変性の矛盾          |   **P1 / Blocking**   | ブランチ間衝突時に確定済み結果ファイルの参照を書き換える方式は不変性原則と矛盾する。ローカルファイルロックでは異なるブランチ間の競合を防げない。 |
+| **単一Writerの形骸化**   | REV-02：再レビュー時に単一Writerを経由しない更新経路       |   **P2 / Blocking**   | 再レビュー時に Implementer が台帳を直接更新し、Reviewer が確定結果ファイルを直接作成する設計になっており、排他制御と整合しない。                 |
+| **鮮度判定の見落とし**   | REV-03：未分類ファイル検出による既知Scope評価の中断        |   **P2 / Blocking**   | 未分類ファイル検出時に早期終了するフローチャートになっており、同一コミットに含まれる既知Scopeの変更評価（stale判定）が見落とされる。             |
+| **依存導入の記述齟齬**   | REV-04：依存ライブラリ導入時期の記述不一致                 | **P2 / Non-blocking** | `@11ty/gray-matter` は Phase 1 で既に追加済み（package.json/lockfile更新済み）であるにもかかわらず、設計書内でPhase 2作業と記述されていた。      |
+| **確定前結果の受け渡し** | NEW-01：確定前レビュー結果の永続化・受け渡し経路が不明確   |   **P2 / Blocking**   | Git管理外の `.review-inbox/` だけでは別作業ツリー・別マシン・別エージェントで管理ブランチ実行時に成果物が引き継がれず喪失・未登録となる。        |
+| **状態変更履歴の復旧**   | NEW-02：INDEX再生成だけではFindingの状態変更履歴を復旧不能 |   **P2 / Blocking**   | 初回確定結果のみでは Implementer の修正完了等の動的状態変更が失われ、INDEX破損時に最新状態を 100% 決定論的に復元できない。                       |
+| **複数ファイル更新**     | NEW-03：複数ファイルの原子的更新に関する説明が不正確       | **P2 / Non-blocking** | `fs.renameSync` はファイル単位の原子的操作であり複数ファイル間トランザクションではないため、クラッシュ時の部分不整合と復旧手順の明記が必要。     |
 
 ---
 
@@ -112,7 +115,7 @@ Phase 1 設計書の再レビューにおいて、継続的品質管理基盤と
 
 ### 3.1 3層分離データモデルの全体像
 
-継続的品質管理を実現するため、レビューの関心事を以下の 3 つの直交する層に分離する。
+継続的品質管理を実現するため、レビューの関心事を以下の 3 つの直交する層に分離する。さらに、NEW-01 および NEW-02 への対応として、確定前提出物（`proposal.md`）と永続的な状態変更イベントログ（`findings/EVENTS.md`）を明確に位置付ける。
 
 ```mermaid
 classDiagram
@@ -141,10 +144,11 @@ classDiagram
         +String work_status "未着手/実施中/中断/完了/検証不能"
         +String verdict "未判定/GO/要修正/NO-GO"
         +String target_commit_sha
-        +Path request_ref
+        +Path request_ref "レビュー依頼書"
         +Path draft_ref "中断・作業中一時状態"
-        +Path latest_result_ref "確定済み初回結果"
-        +List~Path~ recheck_refs "再レビュー連番履歴"
+        +Path proposal_ref "確定前提出物(Git管理・仮ID)"
+        +Path latest_result_ref "確定済み初回結果(不変正本)"
+        +List~Path~ recheck_refs "再レビュー連番履歴(不変正本)"
     }
 
     class ReviewFinding {
@@ -161,27 +165,43 @@ classDiagram
         +String verified_campaign_id
     }
 
+    class FindingEvent {
+        +String event_id "EVT-0001 etc."
+        +Date timestamp
+        +String finding_id
+        +String event_type "registered/status_update/rechecked"
+        +String from_status
+        +String to_status
+        +String commit_sha
+        +String source_ref
+        +String actor
+        +String summary
+    }
+
     ReviewScope "1" -- "0..*" CampaignScopeExecution : targets
     ReviewCampaign "1" -- "1..*" CampaignScopeExecution : contains
     ReviewScope "1" -- "0..*" ReviewFinding : generates
     CampaignScopeExecution "1" -- "0..*" ReviewFinding : reports / rechecks
+    ReviewFinding "1" -- "1..*" FindingEvent : tracked_by
 ```
 
 - **Review Scope (論理責務・不変)**: モジュールの論理的な責務や境界を表す静的資産（`scopes/` 配下）。
 - **Review Campaign (実施回・不変ログ)**: 特定のコミット群を対象としたレビュープロジェクト（`campaigns/` 配下）。確定結果は上書き不可。
-- **Review Finding (指摘事項・動的ライフサイクル)**: 発見された課題の永続エンティティ（`findings/INDEX.md`）。同一課題には永続的に同一 ID を維持。
+- **Review Finding (指摘事項・動的ライフサイクル)**: 発見された課題のエンティティ。
+  - **事実の正本 (Single Source of Truth)**: 確定レビュー結果（`result.md`, `recheck-NN.md`）および状態変更イベントログ（`findings/EVENTS.md`）。追記のみ可能で改変不可。
+  - **派生台帳 (Derived Views / Cache)**: 全体 INDEX、Campaign INDEX、および `findings/INDEX.md`。正本からいつでも 100% 決定論的に再生成可能。
 
 ### 3.2 責務境界（Herdr Orchestrator との分離）
 
 中央 Orchestrator の中核機能（配送・Registry）にリポジトリ固有のレビュー管理ロジックを一切混入させず、明確な境界を維持する。
 
-| コンポーネント            | 実行環境 / 配置場所                                                    | 主な責務                                                                                 | 扱うデータ                         |
-| :------------------------ | :--------------------------------------------------------------------- | :--------------------------------------------------------------------------------------- | :--------------------------------- |
-| **Herdr Orchestrator**    | `skills/herdr-orchestrator/` / `~/.agents/skills/herdr-orchestration/` | Agent間配送、タスク状態遷移（`dispatch`, `result`, `completion`）、排他制御              | Task Registry（`task.json`）       |
-| **repo-review Skill**     | `.agents/skills/repo-review/`                                          | レビュー作業の実行、批判的不具合探索、反証確認、重大度判定、仮指摘の起草                 | `.review-inbox/`（一時バッファ）   |
-| **Review Management CLI** | `scripts/reviews/` (Node.js)                                           | 正式 Finding ID 採番、台帳更新（単一Writer）、確定ファイル生成、鮮度判定、台帳整合性検証 | `docs/reviews/` 配下の Markdown 群 |
-| **Git**                   | リポジトリルート                                                       | コミットSHAによるレビュー対象の同一性保証、ファイル変更差分の提供                        | Git HEAD, Tree, Commit 履歴        |
-| **GitHub Actions**        | `.github/workflows/`                                                   | PR 時の台帳整合性自動チェック（ID重複・参照切れの防止）                                  | CI 実行ログ・検証ステータス        |
+| コンポーネント            | 実行環境 / 配置場所                                                    | 主な責務                                                                                             | 扱うデータ                                                 |
+| :------------------------ | :--------------------------------------------------------------------- | :--------------------------------------------------------------------------------------------------- | :--------------------------------------------------------- |
+| **Herdr Orchestrator**    | `skills/herdr-orchestrator/` / `~/.agents/skills/herdr-orchestration/` | Agent間配送、タスク状態遷移（`dispatch`, `result`, `completion`）、排他制御                          | Task Registry（`task.json`）                               |
+| **repo-review Skill**     | `.agents/skills/repo-review/`                                          | レビュー作業の実行、批判的不具合探索、反証確認、重大度判定、仮指摘の起草、`proposal.md` の作成       | `.review-inbox/`（一時バッファ）、`proposal.md`（Git管理） |
+| **Review Management CLI** | `scripts/reviews/` (Node.js)                                           | 正式 Finding ID 採番、EVENTS記録、台帳更新（単一Writer）、確定ファイル生成、鮮度判定、台帳整合性復旧 | `docs/reviews/` 配下の Markdown 群                         |
+| **Git**                   | リポジトリルート                                                       | コミットSHAによるレビュー対象の同一性保証、作業ブランチ間のレビュー提出物の確実な受け渡し            | Git HEAD, Tree, Commit 履歴                                |
+| **GitHub Actions**        | `.github/workflows/`                                                   | PR 時の台帳整合性自動チェック（ID重複・参照切れ・INDEX整合性の検証）                                 | CI 実行ログ・検証ステータス                                |
 
 ---
 
@@ -189,13 +209,13 @@ classDiagram
 
 ## 4. ディレクトリ構成 (Directory Structure)
 
-可読性、保守性、Git 管理の容易さを最優先し、以下のディレクトリ構成を採用する。確定結果と中断状態をディレクトリ内で明確に分離する。
+可読性、保守性、Git 管理の容易さを最優先し、以下のディレクトリ構成を採用する。確定結果、提出物、中断状態、およびイベントログを明確に分離する。
 
 ```text
 docs/reviews/
 ├── README.md                           # 継続的レビュー品質管理基盤の運用ガイド
 ├── CONTINUOUS_REVIEW_DESIGN.md         # 本設計書（アーキテクチャ・データモデル・鮮度管理）
-├── INDEX.md                            # リポジトリ全体の最新品質ダッシュボード（更新可能）
+├── INDEX.md                            # リポジトリ全体の最新品質ダッシュボード（派生キャッシュ・再生成可能）
 ├── PLAN.md                             # 20タスクの全体分割計画・負荷制御方針（正本）
 │
 ├── scopes/                             # 【Scope層】論理レビュー対象の静的定義（原則不変）
@@ -208,13 +228,14 @@ docs/reviews/
 │
 ├── campaigns/                          # 【Campaign層】レビュー実施回の履歴ログ（不変保存）
 │   ├── C001-initial-full-review/
-│   │   ├── INDEX.md                    # C001 の全Scope進捗・判定一覧（更新可能）
+│   │   ├── INDEX.md                    # C001 の全Scope進捗・判定一覧（派生キャッシュ・再生成可能）
 │   │   ├── R001-primitives/
 │   │   │   ├── request.md              # レビュー依頼書（不変）
 │   │   │   ├── draft.md                # 【中断・作業中一時状態】（作業中のみ存在・完了時削除）
-│   │   │   ├── result.md               # 【確定済み初回レビュー結果】（原則不変・確定後編集禁止）
-│   │   │   ├── recheck-01.md           # 【再レビュー結果 1回目】（不変・新規追加）
-│   │   │   └── recheck-02.md           # 【再レビュー結果 2回目】（不変・連番追加）
+│   │   │   ├── proposal.md             # 【確定前レビュー提出物】（作業ブランチでGit管理・正式登録後削除）
+│   │   │   ├── result.md               # 【確定済み初回レビュー結果】（事実の正本・原則不変・確定後編集禁止）
+│   │   │   ├── recheck-01.md           # 【再レビュー結果 1回目】（事実の正本・連番追加）
+│   │   │   └── recheck-02.md           # 【再レビュー結果 2回目】（事実の正本・連番追加）
 │   │   └── ... (全20タスク)
 │   │
 │   └── C002-followup-review/           # 将来の差分レビュー実施回
@@ -222,7 +243,8 @@ docs/reviews/
 │       └── ...
 │
 └── findings/                           # 【Finding層】指摘事項の永続ライフサイクル管理
-    └── INDEX.md                        # 全Findingの最新状態・履歴・修正追跡台帳（更新可能）
+    ├── EVENTS.md                       # 【状態変更イベントログ】（事実の正本・追記型永続履歴）
+    └── INDEX.md                        # 全Findingの最新状態集約台帳（派生キャッシュ・再生成可能）
 ```
 
 ---
@@ -287,7 +309,46 @@ updated_at: 2026-10-14T11:45:00+09:00
 ...
 ```
 
-### 5.3 確定済み初回レビュー結果モデル (`campaigns/{CID}/{ScopeID}/result.md`)
+### 5.3 確定前レビュー提出物モデル (`campaigns/{CID}/{ScopeID}/proposal.md`)
+
+指摘 NEW-01 への対応として、作業ブランチ上で作成され、Git 管理によって確実に管理ブランチへ引き継がれるレビュー提出物（Review Proposal）のスキーマを定義する。
+
+```markdown
+---
+campaign_id: C001
+scope_id: R001
+review_type: proposal
+target_commit: e527edc67866ffee5d7ec1527e1274b4ab395a9d
+work_status: proposed
+verdict: changes_requested # GO | changes_requested | NO-GO
+blocking_findings_count: 1
+non_blocking_findings_count: 1
+provisional_findings:
+  - temp_id: TEMP-01
+    title: "ベースディレクトリ解決時の境界値ガード不足"
+    target_location: "skills/herdr-orchestrator/scripts/orchestrator/paths.py:45-52"
+    category: 不具合 # 不具合 | 未確認リスク | 改善提案
+    severity: P1 # P0 | P1 | P2 | P3
+    is_blocking: true
+    fingerprint: 8f4e2a3c9b1d5e7f0a2c4e6a8b0d2f4e6a8b0d2f4e6a8b0d2f4e6a8b0d2f4e6a
+  - temp_id: TEMP-02
+    title: "エラー型名の命名規則の統一"
+    target_location: "skills/herdr-orchestrator/scripts/orchestrator/errors.py:12-15"
+    category: 改善提案
+    severity: P3
+    is_blocking: false
+    fingerprint: 1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b
+reviewed_by: Claude 3.7 Sonnet
+proposed_at: 2026-10-14T12:00:00+09:00
+---
+
+# レビュー提出物 (Proposal): C001 / R001
+
+（作業ブランチで Git コミットされ、管理ブランチでの正式登録 CLI 実行時に `result.md` へ昇格し削除される）
+...
+```
+
+### 5.4 確定済み初回レビュー結果モデル (`campaigns/{CID}/{ScopeID}/result.md`)
 
 ```markdown
 ---
@@ -306,6 +367,13 @@ reported_findings:
   - finding_id: R001-F002
     severity: P3
     is_blocking: false
+id_mappings: # 仮IDと正式IDの追跡対応マップ (NEW-01対応)
+  - temp_id: TEMP-01
+    finding_id: R001-F001
+    fingerprint: 8f4e2a3c9b1d5e7f0a2c4e6a8b0d2f4e6a8b0d2f4e6a8b0d2f4e6a8b0d2f4e6a
+  - temp_id: TEMP-02
+    finding_id: R001-F002
+    fingerprint: 1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b
 reviewed_by: Claude 3.7 Sonnet
 completed_at: 2026-10-14T12:30:00+09:00
 ---
@@ -316,7 +384,7 @@ completed_at: 2026-10-14T12:30:00+09:00
 ...
 ```
 
-### 5.4 再レビュー結果モデル (`campaigns/{CID}/{ScopeID}/recheck-NN.md`)
+### 5.5 再レビュー結果モデル (`campaigns/{CID}/{ScopeID}/recheck-NN.md`)
 
 ```markdown
 ---
@@ -348,7 +416,31 @@ completed_at: 2026-10-14T14:15:00+09:00
 ...
 ```
 
-### 5.5 差分レビュー結果モデル (`campaigns/{CID}/{ScopeID}/delta-NN.md`)
+### 5.6 Finding 状態変更イベントログモデル (`docs/reviews/findings/EVENTS.md`)
+
+指摘 NEW-02 への対応として、すべての Finding のライフサイクル状態変更を不可逆に記録する追記型（Append-only）イベントログの仕様を定義する。確定済み成果物および本イベントログが「動かすことのできない事実の正本（Single Source of Truth）」となる。
+
+```markdown
+---
+format_version: 1.0.0
+total_events: 3
+last_event_id: EVT-0003
+updated_at: 2026-10-14T14:15:00+09:00
+---
+
+# Finding 状態変更イベントログ (Finding Lifecycle Events)
+
+本書は、全 Finding の状態変更（登録、修正報告、再検証完了、保留等）の不可逆な履歴台帳である。
+各イベントは追記（Append-only）され、`review:rebuild-index` は本書と確定成果物から最新台帳を 100% 決定論的に復元する。
+
+| イベントID | 発生日時                  | 対象Finding | イベント種別    | 変更前状態             | 変更後状態               | 関連コミットSHA | 根拠成果物 / 参照                   | 実行者        | 変更理由・要約                  |
+| :--------- | :------------------------ | :---------- | :-------------- | :--------------------- | :----------------------- | :-------------- | :---------------------------------- | :------------ | :------------------------------ |
+| `EVT-0001` | 2026-10-14T12:30:00+09:00 | `R001-F001` | `registered`    | `null`                 | `未対応`                 | `e527edc6...`   | `campaigns/C001/R001/result.md`     | `Reviewer`    | 初回レビュー確定による新規登録  |
+| `EVT-0002` | 2026-10-14T13:45:00+09:00 | `R001-F001` | `status_update` | `未対応`               | `修正済み・再検証待ち`   | `a1b2c3d4...`   | `commit:a1b2c3d4`                   | `Implementer` | 境界値ガードの追加修正を完了    |
+| `EVT-0003` | 2026-10-14T14:15:00+09:00 | `R001-F001` | `rechecked`     | `修正済み・再検証待ち` | `対応済み（再検証完了）` | `a1b2c3d4...`   | `campaigns/C001/R001/recheck-01.md` | `Reviewer`    | 再レビュー Round 1 で解消を確認 |
+```
+
+### 5.7 差分レビュー結果モデル (`campaigns/{CID}/{ScopeID}/delta-NN.md`)
 
 ```markdown
 ---
@@ -376,76 +468,94 @@ completed_at: 2026-10-15T10:00:00+09:00
 ...
 ```
 
-### 5.6 各レビュー種別の Frontmatter 項目対応表
+### 5.8 各レビュー種別の Frontmatter 項目対応表
 
-| 項目                  | 初回 (`result.md`) | 再レビュー (`recheck-NN.md`) | 差分 (`delta-NN.md`) | 用途                      |
-| :-------------------- | :----------------: | :--------------------------: | :------------------: | :------------------------ |
-| `campaign_id`         |      **必須**      |           **必須**           |       **必須**       | 所属する実施回            |
-| `scope_id`            |      **必須**      |           **必須**           |       **必須**       | 対象論理 Scope            |
-| `review_type`         |     `initial`      |         `re-review`          |       `delta`        | レビュー種別の識別        |
-| `target_commit`       |      **必須**      |           **必須**           |       **必須**       | 検証対象コミットSHA       |
-| `base_commit`         |   任意 (null可)    |           **必須**           |       **必須**       | 比較元コミットSHA         |
-| `previous_result_ref` |        なし        |           **必須**           |         任意         | 前回の結果ファイル参照    |
-| `recheck_round`       |        なし        |           **必須**           |         なし         | 再レビュー連番            |
-| `resolution_commits`  |        なし        |           **必須**           |         なし         | 修正コミットのリスト      |
-| `rechecked_findings`  |        なし        |           **必須**           |         なし         | 再検証対象 Finding と合否 |
-| `diff_files`          |        なし        |             なし             |       **必須**       | 検証した差分ファイル一覧  |
-| `work_status`         |      **必須**      |           **必須**           |       **必須**       | 作業状態                  |
-| `verdict`             |      **必須**      |           **必須**           |       **必須**       | 品質判定                  |
-| `reviewed_by`         |      **必須**      |           **必須**           |       **必須**       | 実施エージェント/モデル   |
-| `completed_at`        |      **必須**      |           **必須**           |       **必須**       | 完了タイムスタンプ        |
+| 項目                           |  提出物 (`proposal.md`)  |    初回 (`result.md`)     | 再レビュー (`recheck-NN.md`) |   差分 (`delta-NN.md`)    | 用途                            |
+| :----------------------------- | :----------------------: | :-----------------------: | :--------------------------: | :-----------------------: | :------------------------------ |
+| `campaign_id`                  |         **必須**         |         **必須**          |           **必須**           |         **必須**          | 所属する実施回                  |
+| `scope_id`                     |         **必須**         |         **必須**          |           **必須**           |         **必須**          | 対象論理 Scope                  |
+| `review_type`                  |        `proposal`        |         `initial`         |         `re-review`          |          `delta`          | レビュー種別の識別              |
+| `target_commit`                |         **必須**         |         **必須**          |           **必須**           |         **必須**          | 検証対象コミットSHA             |
+| `base_commit`                  |           任意           |       任意 (null可)       |           **必須**           |         **必須**          | 比較元コミットSHA               |
+| `previous_result_ref`          |           なし           |           なし            |           **必須**           |           任意            | 前回の結果ファイル参照          |
+| `recheck_round`                |           なし           |           なし            |           **必須**           |           なし            | 再レビュー連番                  |
+| `provisional_findings`         |         **必須**         |           なし            |             なし             |           なし            | 仮ID・fingerprint付き指摘リスト |
+| `reported_findings`            |           なし           |         **必須**          |             なし             |           なし            | 正式ID付き確定指摘リスト        |
+| `id_mappings`                  |           なし           |         **必須**          |             なし             |           なし            | 仮IDと正式IDの対応表            |
+| `resolution_commits`           |           なし           |           なし            |           **必須**           |           なし            | 修正コミットのリスト            |
+| `rechecked_findings`           |           なし           |           なし            |           **必須**           |           なし            | 再検証対象 Finding と合否       |
+| `diff_files`                   |           なし           |           なし            |             なし             |         **必須**          | 検証した差分ファイル一覧        |
+| `work_status`                  |         **必須**         |         **必須**          |           **必須**           |         **必須**          | 作業状態                        |
+| `verdict`                      |         **必須**         |         **必須**          |           **必須**           |         **必須**          | 品質判定                        |
+| `reviewed_by`                  |         **必須**         |         **必須**          |           **必須**           |         **必須**          | 実施エージェント/モデル         |
+| `proposed_at` / `completed_at` | **必須** (`proposed_at`) | **必須** (`completed_at`) |  **必須** (`completed_at`)   | **必須** (`completed_at`) | タイムスタンプ                  |
 
 ---
 
 <a id="sec-6"></a>
 
-## 6. Finding ID 採番規則と競合防止（単一管理ブランチ・単一 Writer 方式）(Finding ID & Collision Prevention)
+## 6. Finding ID 採番規則と確定前受け渡し（単一管理ブランチ・単一 Writer 方式）(Finding ID, Proposals & Collision Prevention)
 
-指摘 REV-01（P1 / Blocking）への対応として、確定済み結果の履歴不変性を最優先とし、**正式 Finding ID の発行権限を「単一管理ブランチ」に集約**するアーキテクチャを確立する。
+指摘 REV-01（P1 / Blocking）および NEW-01（P2 / Blocking）への対応として、確定済み結果の履歴不変性を最優先とし、**作業ブランチから管理ブランチへの確実な受け渡しパイプライン**と、**正式 Finding ID の発行権限を「単一管理ブランチ」に集約するアーキテクチャ**を確立する。
 
 ### 6.1 ローカルファイルロックの適用限界の明示
 
 ローカルファイルロック（`docs/reviews/.review-lock`）は、**同一マシン・同一作業ツリー内で並行動作するプロセス間の排他制御**にのみ有効である。
 異なる Git ブランチ間、フォークリポジトリ間、または別マシンの作業環境間における同時採番の競合を防ぐことはできない。
-ブランチ間・環境間の一意性は、**Git のマージ規律および単一管理ブランチ集約方式**によって保証する。
+ブランチ間・環境間の一意性は、**Git のコミット履歴管理および単一管理ブランチ集約方式**によって保証する。
 
-### 6.2 単一管理ブランチ集約方式（Single Canonical Branch）
+### 6.2 単一管理ブランチ集約方式と確定前受け渡しパイプライン (NEW-01対応)
+
+指摘 NEW-01 で検出された通り、Git 管理外の `.review-inbox/` のみを受け渡し手段とすると、作業ツリー（git worktree）の切り替え、別マシンでの作業、あるいは別エージェントによる管理ブランチ操作時にレビュー結果が引き継がれず喪失する。
+これに対処するため、**Git 管理されたレビュー提出物（`proposal.md`）を用いた2層パイプライン**を導入する。
 
 ```mermaid
 sequenceDiagram
     autonumber
     actor Reviewer as レビュワー (作業ブランチ)
-    participant Inbox as .review-inbox/
+    participant Worktree as 作業ブランチ Gitツリー
     participant Canonical as 単一管理ブランチ (main 等)
     participant CLI as 台帳管理CLI (単一Writer)
-    participant Ledger as findings/INDEX.md & campaigns/
+    participant SSoT as 事実の正本 (EVENTS.md & result.md)
+    participant Views as 派生台帳 (INDEX群)
 
     Note over Reviewer: 作業ブランチ/PR レビュー中
-    Reviewer->>Reviewer: 不具合探索・反証確認
-    Reviewer->>Inbox: review-response.md 作成<br>※仮IDのみ使用 (TEMP-01, TEMP-02)
-    Note over Reviewer: この時点では確定 result.md を生成しない
+    Reviewer->>Reviewer: 2段階レビュー + 反証確認
+    Reviewer->>Worktree: proposal.md をコミット<br>(仮ID: TEMP-01, fingerprint付き)
+    Note over Reviewer,Worktree: Git管理により別マシン・別worktreeへ確実に共有
 
     Note over Canonical: 管理ブランチ統合時 / 単一Writer実行時
-    Canonical->>CLI: npm run review:sync-inbox -- --scope R001
+    Canonical->>CLI: npm run review:register -- --scope R001
     activate CLI
     Note over CLI: ローカル排他ロック取得 (.review-lock)
-    CLI->>CLI: 指摘ハッシュ (fingerprint) を計算
-    CLI->>Ledger: 重複チェック (同一fingerprintの有無)
-    CLI->>Ledger: 管理ブランチ上の最大連番 + 1 を正式採番 (R001-F001)
-    CLI->>Ledger: findings/INDEX.md に正式登録
-    CLI->>Ledger: campaigns/C001/{Scope}/result.md を確定生成 (不変)
-    CLI->>Ledger: draft.md を削除
-    CLI->>Ledger: 全体/Campaign INDEX を最新同期
+    CLI->>Worktree: proposal.md の構文・仮IDを検証 (Pre-validation)
+    CLI->>SSoT: 指摘 fingerprint を照合 (重複チェック・冪等性)
+    CLI->>CLI: 管理ブランチ上の最大連番 + 1 を正式採番 (R001-F001)
+    CLI->>SSoT: findings/EVENTS.md に登録イベント (EVT) を追記
+    CLI->>SSoT: campaigns/C001/{Scope}/result.md を確定生成<br>(id_mappings で仮IDとの対応を永続化)
+    CLI->>Views: findings/INDEX.md, Campaign/全体 INDEX をアトミック更新
+    CLI->>Worktree: proposal.md (および draft.md) をクリーンアップ
     deactivate CLI
 ```
 
-1. **作業ブランチにおける仮 ID 運用**:
-   - 各作業ブランチ（feature ブランチや PR ブランチ）でのレビュー実施中は、**正式 Finding ID を発行せず、仮 ID（`TEMP-01`, `TEMP-02` 等）のみを使用**する。
-   - レビュー結果は `.review-inbox/` や `draft.md` に保持し、作業ブランチ上で確定済みファイル（`result.md` 等）を直接生成してはならない。
-2. **正式 ID 発行権限の集約**:
-   - 正式 Finding ID（`{ScopeID}-F{3桁}`）の採番および `findings/INDEX.md` への書き込みは、**単一の管理対象ブランチ（`main` またはレビュー管理ブランチ）上でのみ実行**される。
-   - 管理ブランチへの統合時、または台帳管理担当（Ledger Writer）の単一実行環境において、CLI コマンド（`review:sync-inbox`）が正式 ID を払い出し、同時に確定成果物（`result.md`）を生成する。
-   - これにより、複数ブランチで独立に同一の正式 ID が発行される事態を原理的に排除する。
+#### 確実な受け渡しと重複登録防止の要件定義
+
+1. **作業ブランチにおける仮 ID 運用と Git 永続化**:
+   - 作業ブランチ（feature ブランチや PR ブランチ）でのレビュー実施中は、正式 Finding ID を発行せず、仮 ID（`TEMP-01`, `TEMP-02` 等）のみを使用する。
+   - レビュー完了時、レビュワーは `campaigns/{CID}/{ScopeID}/proposal.md` を作成し、Git コミットする。これにより成果物はコミットオブジェクトとして永続化され、PR の diff に含まれ、別マシン・別 worktree・別エージェント環境へ確実に引き継がれる。
+   - `.review-inbox/` は同一マシン内での一時バッファ・通知用として維持されるが、成果物の受け渡し正本は `proposal.md` とする。
+2. **正式 ID 発行権限の単一管理ブランチ集約**:
+   - 正式 Finding ID（`{ScopeID}-F{3桁}`）の採番および台帳登録は、**単一の管理対象ブランチ（`main` またはレビュー管理ブランチ）上の CLI（`review:register`）でのみ実行**される。
+3. **仮 ID と正式 ID の対応関係の保持**:
+   - 確定生成される `result.md` の Frontmatter に `id_mappings`（`temp_id`、`finding_id`、`fingerprint`）を記録し、作業ブランチ時の仮 ID と正式 ID の追跡性を永続保証する。
+4. **指摘ハッシュ (fingerprint) による重複登録防止と冪等性**:
+   - 各指摘の内容（Scope、対象ファイル、行範囲、カテゴリ、抜粋）から SHA-256 ハッシュ（fingerprint）を算出する。
+   - 仮に同じ `proposal.md` に対して登録コマンドが多重実行されても、既存の fingerprint と照合して二重採番を防止し、既存の正式 ID を再利用する（冪等性の確保）。
+5. **失敗時の再実行性と成果物の保護**:
+   - 正式登録処理（`review:register`）が異常終了した場合、`proposal.md` は削除されずにそのまま残るため、原因解決後に同一コマンドを再実行して安全に復旧できる。
+   - 正式登録の全ステップ（正本永続化と台帳更新）が成功するまで、元のレビュー提出物が失われることはない。
+6. **Orchestrator 本体の無変更**:
+   - 本受け渡しメカニズムは、Git の標準機能とリポジトリ側 Node.js CLI のみで実現され、Orchestrator 本体の配送ロジックや Task Registry には一切変更を加えない。
 
 ### 6.3 確定済みレビュー結果の不変性最優先とフェイルセーフ解決規則
 
@@ -469,15 +579,19 @@ sequenceDiagram
 
 ### 7.1 ファイル種別ごとの更新・不変性マトリクス
 
-| ファイル種別         | パス・配置場所                            | 更新方針                   | ライフサイクルとルール                                                       |
-| :------------------- | :---------------------------------------- | :------------------------- | :--------------------------------------------------------------------------- |
-| **確定済み初回結果** | `campaigns/{CID}/{ScopeID}/result.md`     | **原則不変（上書き禁止）** | 管理ブランチ上で確定出力。確定後は Git 履歴を含め一切の改変を禁止。          |
-| **作業中一時状態**   | `campaigns/{CID}/{ScopeID}/draft.md`      | **更新可能（作業中のみ）** | 中断時の進捗退避先。再開時に読み込まれ、確定完了時に削除される。             |
-| **再レビュー結果**   | `campaigns/{CID}/{ScopeID}/recheck-NN.md` | **新規追加（連番ログ）**   | 過去の `result.md` や `recheck-01.md` を上書きせず、連番で新規ファイル追加。 |
-| **差分レビュー結果** | `campaigns/{CID}/{ScopeID}/delta-NN.md`   | **新規追加（連番ログ）**   | コード変更後の差分追従結果を連番で新規ファイル追加。                         |
-| **Campaign 台帳**    | `campaigns/{CID}/INDEX.md`                | **更新可能（最新同期）**   | 当該 Campaign 内の各 Scope の最新状態（確定結果へのポインタ）を反映。        |
-| **全体統合台帳**     | `docs/reviews/INDEX.md`                   | **更新可能（最新同期）**   | リポジトリ全体の最新品質ダッシュボードとして常に最新状態を反映。             |
-| **Finding 台帳**     | `docs/reviews/findings/INDEX.md`          | **更新可能（状態遷移）**   | 指摘のライフサイクル（未対応→対応中→修正済み→対応済み）に応じて更新。        |
+NEW-01、NEW-02、および NEW-03 への対応として、ファイル種別を「**事実の正本（SSoT）**」「**確定前提出物・作業状態**」「**派生台帳（ビュー/キャッシュ）**」に明確に分類し、不変性ルールを定義する。
+
+| ファイル種別         | パス・配置場所                            | 分類                  | 更新方針                      | ライフサイクルとルール                                                                    |
+| :------------------- | :---------------------------------------- | :-------------------- | :---------------------------- | :---------------------------------------------------------------------------------------- |
+| **確定前提出物**     | `campaigns/{CID}/{ScopeID}/proposal.md`   | 確定前提出物          | **作業ブランチでGitコミット** | レビュワーが作業ブランチで作成。Git経由で管理ブランチへ受け渡され、正式登録完了時に削除。 |
+| **作業中一時状態**   | `campaigns/{CID}/{ScopeID}/draft.md`      | 作業状態              | **更新可能（作業中のみ）**    | 中断時の進捗退避先。再開時に読み込まれ、提出または完了時に削除される。                    |
+| **確定済み初回結果** | `campaigns/{CID}/{ScopeID}/result.md`     | **事実の正本 (SSoT)** | **原則不変（上書き禁止）**    | 管理ブランチ上で確定出力。仮IDとの対応表を保持。確定後は一切の改変を禁止。                |
+| **再レビュー結果**   | `campaigns/{CID}/{ScopeID}/recheck-NN.md` | **事実の正本 (SSoT)** | **新規追加（連番ログ）**      | 過去の成果物を上書きせず、連番で新規ファイル追加。確定後は改変禁止。                      |
+| **差分レビュー結果** | `campaigns/{CID}/{ScopeID}/delta-NN.md`   | **事実の正本 (SSoT)** | **新規追加（連番ログ）**      | コード変更後の差分追従結果を連番で新規ファイル追加。確定後は改変禁止。                    |
+| **状態変更ログ**     | `docs/reviews/findings/EVENTS.md`         | **事実の正本 (SSoT)** | **追記のみ (Append-only)**    | Findingの全ライフサイクル遷移（登録・修正・再検証）を不可逆に追記。改変・削除禁止。       |
+| **Finding 台帳**     | `docs/reviews/findings/INDEX.md`          | **派生台帳 (ビュー)** | **更新可能（再生成可能）**    | 全Findingの最新状態集約。確定成果物とEVENTS.mdから100%決定論的に再生成可能。              |
+| **Campaign 台帳**    | `campaigns/{CID}/INDEX.md`                | **派生台帳 (ビュー)** | **更新可能（再生成可能）**    | 当該Campaign内の全Scope最新進捗。確定成果物から100%決定論的に再生成可能。                 |
+| **全体統合台帳**     | `docs/reviews/INDEX.md`                   | **派生台帳 (ビュー)** | **更新可能（再生成可能）**    | リポジトリ全体の最新品質ダッシュボード。全正本から100%決定論的に再生成可能。              |
 
 ### 7.2 直交する 3 つの状態軸
 
@@ -504,9 +618,11 @@ sequenceDiagram
     participant Inbox as .review-inbox/
     participant Orchestrator as Herdr Orchestrator
     actor Reviewer as レビュワーAgent
+    participant Worktree as 作業ブランチ Gitツリー
+    participant Canonical as 単一管理ブランチ (main 等)
     participant CLI as 台帳管理CLI (単一Writer)
-    participant CampaignDir as campaigns/C001/{Scope}/
-    participant Ledger as docs/reviews/
+    participant SSoT as 事実の正本 (EVENTS.md & result.md)
+    participant Views as 派生台帳 (INDEX群)
 
     Requester->>Inbox: review-request.md を作成
     Requester->>Orchestrator: handoff --mode sync --worker-role reviewer
@@ -514,13 +630,20 @@ sequenceDiagram
     Reviewer->>Inbox: request 読み込み
     Reviewer->>Reviewer: 2段階レビュー + 反証確認
     Reviewer->>Inbox: review-response.md 作成 (仮ID: TEMP-NN)
-    Reviewer->>CLI: npm run review:sync-inbox -- --scope R001
+    Reviewer->>Worktree: proposal.md をコミット (Git永続化・PR diffへ反映)
+    Note over Reviewer,Worktree: 別マシン・別worktreeでも確実に引き継がれる (NEW-01)
+
+    Note over Canonical: 管理ブランチ統合時 / 単一Writer実行時
+    Canonical->>CLI: npm run review:register -- --scope R001
     activate CLI
     Note over CLI: ファイル排他ロック取得 (.review-lock)
-    CLI->>CLI: 正式 Finding ID 採番・重複チェック
-    CLI->>CampaignDir: result.md を確定生成 (不変)
-    CLI->>CampaignDir: draft.md が存在すれば削除
-    CLI->>Ledger: INDEX.md / findings/INDEX.md を最新更新
+    CLI->>Worktree: proposal.md を検証 (Pre-validation)
+    CLI->>SSoT: fingerprint 重複チェック (冪等性)
+    CLI->>CLI: 正式 Finding ID 採番 (R001-F001)
+    CLI->>SSoT: findings/EVENTS.md に登録イベント追記 (NEW-02)
+    CLI->>SSoT: result.md を確定生成 (不変・id_mappings付き)
+    CLI->>Views: INDEX.md / findings/INDEX.md をアトミック更新
+    CLI->>Worktree: proposal.md (および draft.md) を削除
     deactivate CLI
     Reviewer->>Orchestrator: result-submit
     Orchestrator-->>Requester: sync 完了通知
@@ -549,9 +672,10 @@ AI モデルの 5 時間枠・週間枠やコンテキスト上限に近づい�
 
 <a id="sec-9"></a>
 
-## 9. 再レビュー実行フローと台帳更新の原子性 (Re-review Flow & Atomicity)
+## 9. 再レビュー実行フローと複数ファイル更新の整合性・障害復旧 (Re-review Flow, Consistency & Recovery)
 
 指摘 REV-02（P2 / Blocking）への対応として、Implementer および Reviewer による台帳・成果物ファイルの直接編集を禁止し、**すべての書き込みを台帳管理 CLI（単一 Writer）へ一元化**する。
+さらに、指摘 NEW-02（P2 / Blocking）および NEW-03（P2 / Non-blocking）への対応として、**イベントログによる状態変更履歴の完全復元性**と、**正本ファースト（Write SSoT First）による複数ファイル整合性・障害復旧設計**を確立する。
 
 ### 9.1 再レビュー実行フロー
 
@@ -562,40 +686,70 @@ sequenceDiagram
     actor Reviewer as レビュワーAgent
     participant Inbox as .review-inbox/
     participant CLI as 台帳管理CLI (単一Writer)
-    participant CampaignDir as campaigns/C001/{Scope}/
-    participant Ledger as docs/reviews/
+    participant SSoT as 事実の正本 (EVENTS.md & recheck-NN.md)
+    participant Views as 派生台帳 (INDEX群)
 
+    Note over Implementer: 指摘対応フェーズ
     Implementer->>Implementer: 指摘に基づきコード修正・テスト追加
     Implementer->>Implementer: 修正コミットを作成 (commit A, commit B)
-    Implementer->>CLI: npm run review:finding-update -- --id R001-F001 --status 修正済み・再検証待ち --commit <SHA>
+    Implementer->>CLI: npm run review:finding-update -- --id R001-F001 --status 修正済み・再検証待ち --commit <SHA> --summary "境界値ガード追加"
     activate CLI
-    CLI->>Ledger: findings/INDEX.md をアトミック更新
+    Note over CLI: 排他ロック取得 (.review-lock)
+    CLI->>SSoT: findings/EVENTS.md に status_update イベント (EVT) を追記
+    CLI->>Views: findings/INDEX.md をアトミック更新
     deactivate CLI
+    Note over SSoT,Views: INDEXが破損してもEVENTS.mdから修正済み状態を100%復元可能 (NEW-02)
+
+    Note over Reviewer: 再レビューフェーズ
     Implementer->>Reviewer: 再レビュー依頼 (対象コミットSHA, 修正コミット一覧)
-    Reviewer->>Ledger: 未解消 Finding (R001-F001) の内容を読み込み
+    Reviewer->>Views: 未解消 Finding (R001-F001) の内容を読み込み
     Reviewer->>Reviewer: (a) 指摘解消確認 (b) 回帰探索 (c) 修正自体の品質検証
     Reviewer->>Inbox: review-response.md に再レビュー結果を出力
     Reviewer->>CLI: npm run review:record-recheck -- --scope R001 --response .review-inbox/review-response.md
     activate CLI
-    Note over CLI: ファイル排他ロック取得 (.review-lock)
-    CLI->>CampaignDir: 連番を自動判定し recheck-01.md を確定生成 (不変)
-    CLI->>Ledger: findings/INDEX.md で F001 を「対応済み（再検証完了）」に更新
-    CLI->>CampaignDir: INDEX.md の判定を GO に更新
-    CLI->>Ledger: docs/reviews/INDEX.md を最新更新
+    Note over CLI: 排他ロック取得 (.review-lock)
+    CLI->>CLI: 前回の結果を参照し連番判定 (recheck-01.md)
+    CLI->>SSoT: campaigns/C001/{Scope}/recheck-01.md を確定生成 (不変正本)
+    CLI->>SSoT: findings/EVENTS.md に rechecked イベント (EVT) を追記
+    CLI->>Views: findings/INDEX.md で F001 を「対応済み（再検証完了）」に更新
+    CLI->>Views: campaigns/C001/INDEX.md の判定を GO に更新
+    CLI->>Views: docs/reviews/INDEX.md を最新更新
     deactivate CLI
 ```
 
-### 9.2 複数 Markdown ファイル更新の原子性と障害復旧
+### 9.2 複数 Markdown ファイル更新の整合性と障害復旧 (NEW-02, NEW-03 対応)
 
-台帳管理 CLI が複数のファイル（確定成果物、Campaign INDEX、全体 INDEX、Finding INDEX）を更新する際、クラッシュや電源断による台帳破損を防ぐため、以下のトランザクション設計を採用する。
+#### 1. 単一ファイル原子的置換と複数ファイル間トランザクションの区別 (NEW-03)
 
-1. **更新前バリデーション (Pre-validation)**:
-   - メモリ上で全ファイルの更新内容を事前に組み立て、構文エラー、ID 重複、リンク切れが存在しないことを確認する。
-2. **一時ファイル書き込みと原子的置換**:
-   - 各ファイルを一時ファイル（`.tmp`）として書き出し、`fs.renameSync`（原子的リネーム）で一括置換する。
-3. **事実の正本（Single Source of Truth）に基づく決定論的復旧**:
-   - 確定済み成果物（`result.md`、`recheck-NN.md`）を「**動かすことのできない事実の正本**」と位置付ける。
-   - 万が一更新途中で異常終了した場合、CLI コマンド `npm run review:rebuild-index` を実行することで、全確定成果物の Frontmatter を走査し、`findings/INDEX.md`、`campaigns/{CID}/INDEX.md`、`docs/reviews/INDEX.md` を**100% 決定論的に再生成・整合復旧**できる（冪等性の担保）。
+- **単一ファイルの原子性**:
+  Node.js / POSIX の `fs.renameSync` は、同一ファイルシステム内において**単一ファイル単位でのみ原子的（Atomic）**である。更新対象ファイルを一時ファイル（`.tmp`）として全内容をフラッシュ書き出しした上でリネーム置換することにより、ファイル途中での破損や中途半端な読み取りを完全に防止する。
+- **複数ファイル間の非トランザクション性**:
+  OS レベルでは複数ファイルを跨いだ単一トランザクション（All-or-Nothing）は提供されない。したがって、複数ファイルをシーケンシャルにリネーム置換する過程で異常終了（電源断、SIGKILL、プロセスクラッシュ）が発生した場合、「ファイル A は置換済みだがファイル B は未置換」という**部分更新状態（Partial Update）**が原理的に発生し得る。
+
+#### 2. 正本ファースト（Write SSoT First）原則と明確な更新順序
+
+部分更新による台帳破損を恒久的に防ぐため、台帳管理 CLI は以下の**厳格な 4 段階の更新パイプライン**に従って書き込みを行う。
+
+| 順序  | ステップ                                  | 対象                                                             | 操作内容                                                                    | 障害時の影響と安全性                                                            |
+| :---: | :---------------------------------------- | :--------------------------------------------------------------- | :-------------------------------------------------------------------------- | :------------------------------------------------------------------------------ |
+| **1** | **Pre-validation** (更新前検証)           | メモリ上                                                         | 全変更対象ファイルの構文、ID整合性、Frontmatter スキーマを検証。            | 1 件でもエラーがあればディスクへの書き込みを行わず即座に中断。安全。            |
+| **2** | **SSoT Persistence** (事実の正本の永続化) | 確定成果物 (`result.md` / `recheck-NN.md`)、`findings/EVENTS.md` | 一時ファイル書き出し後、各正本ファイルを `fs.renameSync` で不可逆に永続化。 | **ビジネスロジック上の「事実」が記録完了。** ここで落ちても事実は失われない。   |
+| **3** | **View Synchronization** (派生台帳の同期) | `findings/INDEX.md`、Campaign `INDEX.md`、全体 `INDEX.md`        | 正本から生成した最新ビューを一時ファイル経由で順次 `fs.renameSync`。        | 途中で落ちた場合、INDEX と正本にズレが生じるが、ステップ 2 の正本から復元可能。 |
+| **4** | **Cleanup** (一時作業ファイルの削除)      | `proposal.md`、`draft.md`                                        | 正本・台帳の全更新完了を確認後、作業ファイルを削除。                        | 完了確認前に削除されることはない。                                              |
+
+#### 3. クラッシュ検出と決定論的復旧メカニズム (`review:rebuild-index`) (NEW-02, NEW-03)
+
+万が一ステップ 3（派生台帳の同期）の途中でプロセスがクラッシュした場合の検出と復旧は、以下の手順で保証される。
+
+1. **クラッシュ検出**:
+   - `npm run review:check` および全台帳 CLI の起動時に、正本（確定成果物および `findings/EVENTS.md` の最新イベント）と各 INDEX 内のステータス・件数を自動照合する。
+   - 不整合（INDEX が古い、または未更新）が検知された場合、エラーを報告し、修復を促す。
+2. **決定論的完全復旧 (NEW-02完全解消)**:
+   - CLI コマンド `npm run review:rebuild-index` を実行する。
+   - 本コマンドは、確定成果物群（`result.md`、`recheck-NN.md`、`delta-NN.md`）と状態変更イベントログ（`findings/EVENTS.md`）の全イベントを時系列にリプレイ（再生）し、各 Finding の最新ステータス（未対応、修正済み・再検証待ち、対応済み等）および修正コミット SHA をメモリ上で完全に再現した上で、すべての INDEX ファイル（`findings/INDEX.md`、`campaigns/{CID}/INDEX.md`、`docs/reviews/INDEX.md`）を**100% 決定論的に再生成・整合復旧**する。
+   - これにより、確定成果物単独では復元できなかった動的な状態遷移（Implementer による修正完了報告など）も含め、台帳破損から完全に回復できる。
+3. **更新再実行の冪等性 (Idempotency)**:
+   - `review:register`、`review:finding-update`、`review:record-recheck` は、同一の引数や同一の指摘内容（fingerprint 照合）が再投入された場合、既存のイベントログと照合し、既に適用済みであれば多重書き込みを行わずに正常終了する。
 
 ---
 
@@ -729,7 +883,8 @@ flowchart TD
     "review:check": "node scripts/reviews/check.js",
     "review:status": "node scripts/reviews/status.js",
     "review:freshness": "node scripts/reviews/freshness.js",
-    "review:finding-register": "node scripts/reviews/register-finding.js",
+    "review:submit-proposal": "node scripts/reviews/submit-proposal.js",
+    "review:register": "node scripts/reviews/register.js",
     "review:finding-update": "node scripts/reviews/update-finding.js",
     "review:sync-inbox": "node scripts/reviews/sync-inbox.js",
     "review:record-recheck": "node scripts/reviews/record-recheck.js",
@@ -739,26 +894,28 @@ flowchart TD
 ```
 
 1. **読み取り専用コマンド（承認リスク低）**:
-   - `review:check`: 台帳の整合性、ID重複、参照切れ、Frontmatter スキーマを検証。
+   - `review:check`: 台帳の整合性、ID重複、参照切れ、EVENTS.md と INDEX の同期状態、Frontmatter スキーマを検証。
    - `review:status`: リポジトリ全体の最新品質状態、Campaign 進捗、未解消 Finding を表示。
    - `review:freshness`: 全変更ファイル走査パイプラインに基づき、各 Scope の鮮度および未分類警告を出力。
-2. **書き込み専用コマンド（単一 Writer 集約・排他ロック制御）**:
-   - `review:finding-register`: レビュー結果から正式 Finding ID を発行・台帳登録（管理ブランチ上でのみ実行）。
-   - `review:finding-update`: Implementer による Finding ステータス更新（修正済み・再検証待ち）。
-   - `review:sync-inbox`: `.review-inbox` の初回結果から `result.md` を確定生成し、ドラフトを破棄。
-   - `review:record-recheck`: 再レビュー結果から連番 `recheck-NN.md` を確定生成し、Finding 状態を同期。
-   - `review:rebuild-index`: 確定済み成果物を正本として全 INDEX 群を決定論的に再生成・復旧。
+2. **作業ブランチ用コマンド（提出物作成）**:
+   - `review:submit-proposal`: レビュワーが作成した仮指摘を検証し、Git コミット対象の `campaigns/{CID}/{ScopeID}/proposal.md` を生成（NEW-01対応）。
+3. **書き込み専用コマンド（単一 Writer 集約・管理ブランチ実行・排他ロック制御）**:
+   - `review:register`: `proposal.md` を取り込み、正式 Finding ID を採番し、`findings/EVENTS.md` に追記の上、確定成果物（`result.md`）と INDEX 群を生成・更新（NEW-01, NEW-02対応）。
+   - `review:finding-update`: Implementer による Finding ステータス更新（修正済み・再検証待ち）。`findings/EVENTS.md` にイベントを追記し、台帳同期（NEW-02対応）。
+   - `review:record-recheck`: 再レビュー結果から連番 `recheck-NN.md` を確定生成し、`findings/EVENTS.md` に追記の上、台帳同期（NEW-02対応）。
+   - `review:sync-inbox`: 同一マシン環境におけるローカル一時バッファ（`.review-inbox`）からの直接同期（手動・補助用）。
+   - `review:rebuild-index`: 確定済み成果物（`result.md`, `recheck-NN.md`, `delta-NN.md`）および状態変更イベントログ（`findings/EVENTS.md`）を正本として全 INDEX 群を 100% 決定論的に再生成・復旧（NEW-02, NEW-03対応）。
 
 ### 12.3 Phase 2〜5 の具体的ロードマップ
 
 ```mermaid
 timeline
     title 継続的レビュー品質管理基盤 導入ロードマップ
-    Phase 1 : 現状調査とアーキテクチャ設計 (本設計書) : レビュー指摘 REV-01〜04 反映完了
-    Phase 2 : レビュー台帳・Node.js CLIの実装 : gray-matter検証 : 20Scope移行 : C001構造初期化 : Finding台帳作成 : review:check / rebuild 実装
-    Phase 3 : レビューSkill連携 : repo-review Skill連携手順整備 : 一時バッファから永続台帳同期 (sync-inbox / record-recheck) : 単一Writer登録
+    Phase 1 : 現状調査とアーキテクチャ設計 (本設計書) : レビュー指摘 REV-01〜04 および NEW-01〜03 反映完了
+    Phase 2 : レビュー台帳・Node.js CLIの実装 : gray-matter検証 : 20Scope移行 : C001構造初期化 : Finding台帳・EVENTS.md作成 : review:check / rebuild 実装
+    Phase 3 : レビューSkill連携 : repo-review Skill連携手順整備 : proposal提出物・register連携 : 状態更新・再レビューイベントログ同期
     Phase 4 : レビュー鮮度管理 : 全件集計パイプライン (review:freshness) : 未登録ファイル検知 : 差分レビュー運用標準化
-    Phase 5 : 検証と運用整備 : 台帳整合性・ID重複テスト : 中断再開シナリオ実機検証 : GitHub Actions連携 : 運用ドキュメント完成
+    Phase 5 : 検証と運用整備 : 台帳整合性・ID重複・EVENTS復旧テスト : 中断再開シナリオ実機検証 : GitHub Actions連携 : 運用ドキュメント完成
 ```
 
 #### Phase 2: レビュー台帳・Node.js CLIの実装
@@ -766,14 +923,14 @@ timeline
 - **Task 2.1 (REV-04反映)**: Phase 1 で追加済みの `@11ty/gray-matter` の読み込み・Frontmatter パース動作検証およびパーサーユーティリティの実装。
 - **Task 2.2**: `docs/reviews/scopes/` 配下に 20 タスクの Scope 定義ファイルを生成（情報欠落ゼロ検証）。
 - **Task 2.3**: `docs/reviews/campaigns/C001-initial-full-review/` を初期化し、現行 20 タスクの `request.md` を再配置。
-- **Task 2.4**: `docs/reviews/findings/INDEX.md` および統合 `docs/reviews/INDEX.md` を作成。
-- **Task 2.5 (REV-02反映)**: `scripts/reviews/check.js`（`review:check`）および `scripts/reviews/rebuild-index.js`（`review:rebuild-index`）を実装。
+- **Task 2.4 (NEW-02反映)**: `docs/reviews/findings/INDEX.md`、`docs/reviews/findings/EVENTS.md`（初期空テンプレート）、および統合 `docs/reviews/INDEX.md` を作成。
+- **Task 2.5 (REV-02, NEW-02, NEW-03反映)**: `scripts/reviews/check.js`（`review:check`）および `scripts/reviews/rebuild-index.js`（`review:rebuild-index`: 確定成果物群 + `EVENTS.md` から全 INDEX を 100% 決定論的再生成）を実装。
 
 #### Phase 3: レビューSkill連携
 
-- **Task 3.1 (REV-01反映)**: `.agents/skills/repo-review/SKILL.md` および `references.md` に、作業ブランチでの仮 ID 起草ルールおよび台帳 CLI 連携手順を追記。
-- **Task 3.2 (REV-01, REV-02反映)**: `scripts/reviews/register-finding.js` および `scripts/reviews/update-finding.js`（単一Writer・排他ロック・指紋照合）の実装。
-- **Task 3.3 (REV-02反映)**: `scripts/reviews/sync-inbox.js`（初回結果確定）および `scripts/reviews/record-recheck.js`（再レビュー連番確定）の実装。
+- **Task 3.1 (REV-01, NEW-01反映)**: `.agents/skills/repo-review/SKILL.md` および `references.md` に、作業ブランチでの仮 ID 起草ルール、`proposal.md` 作成・コミット手順、および台帳 CLI 連携手順を追記。
+- **Task 3.2 (NEW-01, NEW-02反映)**: `scripts/reviews/submit-proposal.js`（`review:submit-proposal`）および `scripts/reviews/register.js`（`review:register`: 単一Writer・排他ロック・指紋照合・`EVENTS.md` 追記・確定生成）の実装。
+- **Task 3.3 (REV-02, NEW-02反映)**: `scripts/reviews/update-finding.js`（`review:finding-update`: `EVENTS.md` 追記・修正ステータス更新）および `scripts/reviews/record-recheck.js`（`review:record-recheck`: `EVENTS.md` 追記・連番再レビュー確定生成）の実装。
 - **Task 3.4**: 中断時（5時間枠到達）における `draft.md` 退避および再開手順のガイド作成。
 
 #### Phase 4: レビュー鮮度管理
@@ -784,8 +941,8 @@ timeline
 
 #### Phase 5: 検証と運用整備
 
-- **Task 5.1**: 台帳整合性テスト、ID重複防止テスト、INDEX再生成復旧テストの自動化。
-- **Task 5.2**: 中断・再開・再レビューの一連の実機モックシナリオ検証。
+- **Task 5.1 (NEW-02, NEW-03反映)**: 台帳整合性テスト、ID重複防止テスト、INDEX再生成復旧テスト（`EVENTS.md` リプレイによる完全復旧検証）の自動化。
+- **Task 5.2 (NEW-01反映)**: 作業ブランチでの proposal 作成 → 管理ブランチでの register 確定 → 中断・再開・再レビューの一連の実機モックシナリオ検証。
 - **Task 5.3**: `docs/reviews/README.md` の運用マニュアル整備。
 - **Task 5.4**: PR 時に `npm run review:check` を実行する GitHub Actions ワークフローの追加。
 
@@ -804,16 +961,33 @@ timeline
 - **トレードオフ**:
   - 作業ブランチ（PR レビュー中）の時点では仮 ID（`TEMP-01` 等）で対話する必要があるが、確定成果物の不変性と監査性の維持において圧倒的に優れる。
 
-### 13.2 台帳更新: 単一 Writer (CLI) による一元化 vs エージェント直接編集 (REV-02)
+### 13.2 確定前結果の受け渡し: Git管理 proposal.md vs 一時バッファ .review-inbox 単独 (NEW-01)
 
-- **採用**: **台帳および確定成果物の生成・更新を台帳管理 CLI（単一 Writer）に完全一元化する**。
+- **採用**: **作業ブランチで `proposal.md` を Git コミットし、管理ブランチで正式登録後に削除する2層パイプライン**。
 - **採用理由**:
-  - 複数エージェントが関与する環境下で、台帳競合、不整合、連番重複を完全に防止できる。
-  - 万が一クラッシュしても確定成果物を正本として INDEX を 100% 再生成・復旧できる。
+  - Git 管理外の一時バッファに依存せず、別 worktree・別マシン・別エージェントでも確実にレビュー成果物が共有される。
+  - 指摘ハッシュ（fingerprint）照合により、重複登録を防止し冪等性を確保できる。
 - **トレードオフ**:
-  - エージェントが手動で Markdown を書き換える自由度は制限されるが、チーム開発・自律エージェント運用におけるデータ整合性が保証される。
+  - 一時的に `proposal.md` が Git 履歴に現れるが、PR diff 上でレビュー指摘を直接確認できるメリットがあり、正式登録完了時に安全にクリーンアップされる。
 
-### 13.3 鮮度判定: 全件網羅集計パイプライン vs 早期終了判定 (REV-03)
+### 13.3 状態変更履歴の復元性: 追記型イベントログ (EVENTS.md) vs INDEX単独更新 (NEW-02)
+
+- **採用**: **すべての Finding 状態変更を `findings/EVENTS.md` に追記型で不可逆記録し、INDEX を再生成可能な派生ビューとする**。
+- **採用理由**:
+  - 初回確定結果（`result.md`）に記録されない動的状態変更（Implementer の修正報告など）も含め、INDEX 破損時に 100% 決定論的復旧が可能となる。
+  - 確定成果物の不変性を完全に保ちながら、完全な監査ログ（Audit Trail）を維持できる。
+- **トレードオフ**:
+  - イベント追記処理が加わるが、単一の Markdown 表またはブロックへの追記であり、オーバーヘッドは無視できるほど小さい。
+
+### 13.4 複数ファイル更新: 正本ファースト (Write SSoT First) vs 複雑なトランザクション機構 (NEW-03)
+
+- **採用**: **厳格な書き込み順序（Pre-validation → 正本永続化 → 派生台帳更新）と `review:rebuild-index` による修復**。
+- **採用理由**:
+  - POSIX / Node.js に存在しない複数ファイル間トランザクションを無理にエミュレートせず、事実の正本（SSoT）を先に確定させてビューを再生成可能とすることで、最も軽量かつ確実に整合性を維持できる。
+- **トレードオフ**:
+  - 更新途中で異常終了した場合に `rebuild-index` コマンドの実行が必要となるが、`review:check` による自動検知と決定論的復元が担保されているため運用リスクは極めて低い。
+
+### 13.5 鮮度判定: 全件網羅集計パイプライン vs 早期終了判定 (REV-03)
 
 - **採用**: **全変更ファイルを網羅走査・集計してから Scope 判定と未分類警告を独立して下すパイプライン**。
 - **採用理由**:
@@ -827,6 +1001,6 @@ timeline
 
 ## 14. 結論と次のステップ (Conclusion)
 
-本改訂設計により、外部レビュー指摘（REV-01〜REV-04）がすべて完全に解消され、履歴の不変性、単一 Writer 方式、鮮度判定の完全性、および実装ロードマップの整合性が確定した。
+本改訂設計により、外部レビュー指摘（REV-01〜REV-04 および NEW-01〜NEW-03）がすべて完全に解消され、履歴の不変性、単一 Writer 方式、Git 経由の確実な受け渡し、状態変更イベントログによる完全復元性、正本ファーストの障害復旧、鮮度判定の完全性、および実装ロードマップの整合性が確定した。
 
 **本報告完了の時点で作業を停止し、利用者の確認と承認を待つ。承認を得るまで Phase 2 以降の実装、Git コミット、Git プッシュは実行しない。**
