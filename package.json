@@ -9,6 +9,7 @@
     "verify:orchestrator": "bash scripts/verify-orchestrator.sh"
   },
   "devDependencies": {
+    "@11ty/gray-matter": "^3.0.0",
     "markdownlint-cli2": "^0.23.3",
     "prettier": "^3.9.9"
   }
