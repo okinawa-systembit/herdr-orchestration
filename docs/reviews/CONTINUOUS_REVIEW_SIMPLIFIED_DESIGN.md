@@ -126,10 +126,10 @@ gh pr diff <pr_number>
 # 4. CI（GitHub Actions）の実行状況・成否を確認
 gh pr checks <pr_number>
 
-# 5. レビュー結果の投稿（コメント / 変更要求 / 承認）
+# 5. レビュー結果の投稿（原則として --comment で判定・指摘を投稿）
 gh pr review <pr_number> --comment -F review-result.md
-gh pr review <pr_number> --request-changes -F review-result.md
-gh pr review <pr_number> --approve -F review-result.md
+# ※運用ポリシーで許可されている場合のみ、Blocking 指摘時に変更要求を使用可能
+# gh pr review <pr_number> --request-changes -F review-result.md
 ```
 
 #### B. Issue（Scope レビュー・指摘追跡）関連操作
@@ -158,14 +158,17 @@ gh issue create \
 
 AI エージェントの自律実行に伴う事故を防止するため、以下の安全境界を厳格に設定する。
 
-| 操作種別                                                         | 実行権限         | 安全制約・ガードレール                       |
-| ---------------------------------------------------------------- | ---------------- | -------------------------------------------- |
-| **読み取り** (`gh pr view`, `gh pr diff`, `gh issue list` 等)    | **完全自動**     | 自由に実行可能                               |
-| **レビュー投稿** (`gh pr review --comment`, `--request-changes`) | **自動実行可能** | 運用ポリシーに従い、結果フォーマットを遵守   |
-| **Issue 起票・コメント** (`gh issue create`, `gh issue comment`) | **自動実行可能** | 指定テンプレート・ラベル体系を遵守           |
-| **PR 承認** (`gh pr review --approve`)                           | **条件付き自動** | すべての Blocking 指摘が解消し CI 成功時のみ |
-| **PR マージ** (`gh pr merge`)                                    | **AI 実行厳禁**  | **人間の明示的承認・操作を必須とする**       |
-| **ブランチ削除** (`git push --delete`, `gh repo delete`)         | **AI 実行厳禁**  | **完全禁止**                                 |
+| 操作種別                                                         | 実行権限                        | 安全制約・ガードレール                                                          |
+| ---------------------------------------------------------------- | ------------------------------- | ------------------------------------------------------------------------------- |
+| **読み取り** (`gh pr view`, `gh pr diff`, `gh issue list` 等)    | **完全自動**                    | 自由に実行可能                                                                  |
+| **レビュー結果投稿** (`gh pr review --comment`)                  | **自動実行可能**                | 運用ポリシーに従い、指定の結果フォーマットを遵守                                |
+| **Issue 起票・コメント** (`gh issue create`, `gh issue comment`) | **自動実行可能**                | 指定テンプレート・ラベル体系を遵守                                              |
+| **変更要求** (`gh pr review --request-changes`)                  | **条件付き許可**                | 運用ポリシーで許可されている場合、Blocking 指摘時のみ使用                       |
+| **PR 承認** (`gh pr review --approve`)                           | **AI 実行対象外（人間が実行）** | **初期段階では AI による正式承認は除外。GitHub 上の正式承認は人間が行う**（※1） |
+| **PR マージ** (`gh pr merge`)                                    | **AI 実行厳禁**                 | **人間の明示的承認・操作を必須とする**                                          |
+| **ブランチ削除** (`git push --delete`, `gh repo delete`)         | **AI 実行厳禁**                 | **完全禁止**                                                                    |
+
+> ※1: GitHub では PR 作成者自身の承認は有効なレビュー承認として扱えず、また AI エージェントが開発者個人のアカウントで認証している場合、AI による承認と人間による承認を客観的に区別できない。そのため、AI は品質判定（GO / 要修正）の投稿に専念し、GitHub 上の正式承認（Approve）およびマージ（Merge）は人間が担当する。
 
 ---
 
@@ -196,10 +199,13 @@ sequenceDiagram
         Note over GH: Issue は Open のまま維持
     else レビュー作業完了時
         Agent->>GH: gh issue comment 101 (最終レビュー結果・判定を記録)
-        Agent->>GH: gh issue close 101 --reason "completed"
-        opt 未解決の指摘がある場合
-            Agent->>GH: gh issue create (指摘追跡用 Issue を独立起票)
+        opt 未解決の指摘がある場合 (P0〜P2)
+            Agent->>GH: gh issue create (指摘追跡用 Issue を起票、Scope #101 を明記)
+            Note over GH: Issue #105: [Finding] R001-F001
+            Agent->>GH: gh issue comment 101 (起票した指摘 Issue #105 へのリンクを追記)
         end
+        Note over Agent: 全指摘 Issue の起票・リンク完了を確認
+        Agent->>GH: gh issue close 101 --reason "completed"
     end
 ```
 
@@ -207,12 +213,16 @@ sequenceDiagram
 
 **「レビュー作業自体の完了」と「指摘された不具合の修正完了」を明確に区別する。**
 
-1. **レビュー作業の完了**:
-   - 対象コードに対する第 1 段階（仕様整合性）・第 2 段階（批判的不具合探索）の検証が完了した時点で、レビュー作業は完了とする。
-   - 指摘事項が残っていても（判定が「要修正」であっても）、レビュー結果を記録した上で当該 Scope Issue はクローズしてよい。
-2. **指摘事項の追跡**:
-   - 未解決の指摘事項（特に P0〜P2）は、個別の「指摘追跡 Issue（`review-finding`）」として切り出す。
-   - 指摘修正用の PR が作成され、マージされた時点で、当該指摘 Issue がクローズされる。
+1. **レビュー結果の記録と指摘 Issue の先行起票 (SIMP-01)**:
+   - レビュー検証が完了したら、まず Scope Issue に詳細なレビュー結果と判定（GO / 要修正 / NO-GO）をコメントとして投稿する。
+   - 未解決の指摘事項（特に P0〜P2）がある場合、**Scope Issue をクローズする前に**、個別の指摘追跡 Issue（`review-finding`）を `gh issue create` で起票する（本文内に `検出元: Scope Review #101` を記載）。
+   - 起票した指摘 Issue 番号（例: `#105`）を Scope Issue のコメントにリンク追記し、相互参照を成立させる。
+2. **安全な Scope Issue クローズ**:
+   - すべての未解決指摘について Issue の起票とリンクが完了したことを確認した上で、最後に Scope Issue を `gh issue close --reason "completed"` でクローズする。
+   - **途中失敗時の非破壊停止**: API 障害や通信断などで途中で失敗した場合は、Scope Issue を **Open のまま残して停止**する。これにより、未解決指摘の追跡漏れを防止する。
+   - **再実行時の重複防止運用**: 再実行時は、既に作成済みの指摘 Issue（タイトルやラベル）を `gh issue list --label review-finding` 等で確認し、未作成の指摘のみ起票した上で Scope Issue をクローズする（独自の復旧エンジンやトランザクション機構は導入せず、シンプルな確認運用とする）。
+3. **指摘事項の修正追跡**:
+   - クローズされた Scope Issue とは独立して、各指摘 Issue は Open のまま残り、修正 PR（`Fixes #105`）がマージされた時点で個別にクローズされる。
 
 ---
 
@@ -228,15 +238,16 @@ sequenceDiagram
    - 必要に応じてベースコミットおよびヘッドコミットのコードベースを確認。
    - `repo-review` Skill に従い、2 段階レビュー（仕様整合性 ＋ 批判的不具合探索）を実施。
 3. **レビュー結果投稿**:
-   - Blocking 指摘（P0/P1）が存在する場合: `gh pr review <pr> --request-changes -F result.md`
-   - Non-blocking 指摘（P2/P3）のみ、または指摘なしの場合: `gh pr review <pr> --comment -F result.md`
+   - AI エージェントは原則として `gh pr review <pr> --comment -F result.md` でレビュー結果（総合判定: GO / 要修正 / NO-GO、指摘一覧、未実施検証）を投稿する。
+   - 運用ポリシーで許可されている場合のみ、Blocking 指摘（P0/P1）存在時に `gh pr review <pr> --request-changes -F result.md` を使用可能とする。
 4. **開発者による修正対応**:
    - 開発者が修正コミットを追加プッシュ。
 5. **再レビュー**:
    - AI エージェントが前回の指摘事項に対する修正内容を確認。
-   - 指摘が適切に解消されていることを確認後、必要に応じて `gh pr review <pr> --approve` を投稿。
-6. **マージ**:
-   - CI チェック（自動テスト、静的解析）の全パス、および人間の最終確認を経てマージ。
+   - 指摘が適切に解消されていることを確認後、再レビュー判定（判定: GO）を `gh pr review <pr> --comment -F result.md` で投稿する（初期段階では AI による `--approve` は実行しない）。
+6. **人間の承認とマージ**:
+   - **人間がコード変更および AI レビュー結果（GO 判定）を確認した上で、GitHub 上で正式なレビュー承認（Approve）を行う**。
+   - CI チェック（自動テスト、静的解析）の全パス、およびリポジトリの保護ルール（Ruleset）が満たされていることを確認し、人間が PR をマージする（AI による自動マージは厳禁）。
 
 ### 5.2 PR 内で解決しない指摘の扱い
 
@@ -418,7 +429,7 @@ assignees: ""
 
 ### 8.1 既存レビュー品質基準の 100% 維持
 
-本アーキテクチャ刷新によって変更されるのは「レビュー結果の記録・管理方法」のみであり、[repo-review](.agents/skills/repo-review/SKILL.md) および [docs/herdr-agent-review-guidelines.md](docs/herdr-agent-review-guidelines.md) に定義された**レビュー品質基準は一切妥協せず 100% 維持**する。
+本アーキテクチャ刷新によって変更されるのは「レビュー結果の記録・管理方法」のみであり、[repo-review](../../.agents/skills/repo-review/SKILL.md) および [docs/herdr-agent-review-guidelines.md](../herdr-agent-review-guidelines.md) に定義された**レビュー品質基準は一切妥協せず 100% 維持**する。
 
 1. **2 段階レビューの完全義務化**:
    - **第 1 段階（仕様・設計整合性）**: 要求仕様・設計書との合致を確認。
@@ -483,16 +494,16 @@ flowchart TD
 
 ### 10.1 新旧アーキテクチャ比較表
 
-| 比較項目                    | 旧アーキテクチャ（CONTINUOUS_REVIEW_DESIGN）  | 新アーキテクチャ（SIMPLIFIED_DESIGN）       | 改善効果                               |
-| --------------------------- | --------------------------------------------- | ------------------------------------------- | -------------------------------------- |
-| **正本（Source of Truth）** | ローカル Markdown（`INDEX.md`, `EVENTS.md`）  | **GitHub（Pull Request, Issues, Reviews）** | 二重管理の完全排除、Web UI での可視化  |
-| **操作インターフェース**    | 独自 Node.js CLI（`review:register` 等）      | **標準 GitHub CLI（`gh`）**                 | CLI 開発・保守工数のゼロ化             |
-| **状態管理方式**            | 独自イベントソーシング（純粋追記ログ）        | **GitHub Issue / PR のネイティブ状態管理**  | 独自状態管理エンジンの撤廃             |
-| **排他制御・同時実行**      | 単一 Writer（`review-manager`）排他ロック     | **GitHub の並行処理・競合制御**             | ロック管理・デッドロックリスクの排除   |
-| **障害復旧・原子性**        | `.pending-event.json` トランザクション復旧    | **GitHub API のトランザクション性**         | 末尾破損トリム・ロールバック処理の撤廃 |
-| **履歴真正性検証**          | マージ方式別（Squash/Rebase）の多層検証       | **GitHub PR マージ追跡（コミットリンク）**  | 複雑な Git 履歴検証コードの撤廃        |
-| **レビュー鮮度判定**        | コミットハッシュ・差分比較による stale 格付け | **PR 差分追尾（GitHub ネイティブ機能）**    | 独自鮮度格付けエンジンの撤廃           |
-| **開発言語・依存関係**      | Node.js, `@11ty/gray-matter`, 自作パーサー    | **GitHub 標準機能, `gh` (Bash/CLI)**        | ランタイム依存の極小化                 |
+| 比較項目                    | 旧アーキテクチャ（CONTINUOUS_REVIEW_DESIGN）  | 新アーキテクチャ（SIMPLIFIED_DESIGN）                          | 改善効果                                   |
+| --------------------------- | --------------------------------------------- | -------------------------------------------------------------- | ------------------------------------------ |
+| **正本（Source of Truth）** | ローカル Markdown（`INDEX.md`, `EVENTS.md`）  | **GitHub（Pull Request, Issues, Reviews）**                    | 二重管理の完全排除、Web UI での可視化      |
+| **操作インターフェース**    | 独自 Node.js CLI（`review:register` 等）      | **標準 GitHub CLI（`gh`）**                                    | CLI 開発・保守工数のゼロ化                 |
+| **状態管理方式**            | 独自イベントソーシング（純粋追記ログ）        | **GitHub Issue / PR のネイティブ状態管理**                     | 独自状態管理エンジンの撤廃                 |
+| **排他制御・同時実行**      | 単一 Writer（`review-manager`）排他ロック     | **GitHub の並行処理・競合制御**                                | ロック管理・デッドロックリスクの排除       |
+| **障害復旧・原子性**        | `.pending-event.json` トランザクション復旧    | **各操作の成功確認と失敗時の安全停止（人間確認・再実行運用）** | 独自トランザクション機構・末尾トリムの撤廃 |
+| **履歴真正性検証**          | マージ方式別（Squash/Rebase）の多層検証       | **GitHub PR マージ追跡（コミットリンク）**                     | 複雑な Git 履歴検証コードの撤廃            |
+| **レビュー鮮度判定**        | コミットハッシュ・差分比較による stale 格付け | **PR 差分追尾（GitHub ネイティブ機能）**                       | 独自鮮度格付けエンジンの撤廃               |
+| **開発言語・依存関係**      | Node.js, `@11ty/gray-matter`, 自作パーサー    | **GitHub 標準機能, `gh` (Bash/CLI)**                           | ランタイム依存の極小化                     |
 
 ### 10.2 完全に廃止・削除できる独自実装一覧
 
