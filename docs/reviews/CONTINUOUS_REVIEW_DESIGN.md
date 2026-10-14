@@ -12,11 +12,11 @@
 3. [推奨アーキテクチャと責務境界 (Architecture & Responsibilities)](#sec-3)
 4. [ディレクトリ構成 (Directory Structure)](#sec-4)
 5. [データモデル仕様 (Data Models)](#sec-5)
-6. [Finding ID 採番規則と競合防止（単一 Writer 方式）(Finding ID & Collision Prevention)](#sec-6)
+6. [Finding ID 採番規則と競合防止（単一管理ブランチ・単一 Writer 方式）(Finding ID & Collision Prevention)](#sec-6)
 7. [レビュー状態管理と履歴の不変性 (State Lifecycle & Immutability)](#sec-7)
 8. [レビュー実行・中断・再開フロー (Execution, Pause & Resume Flow)](#sec-8)
-9. [再レビュー実行フローと指摘追跡 (Re-review & Finding Tracking)](#sec-9)
-10. [レビュー鮮度管理と変更影響判定 (Freshness & Impact Analysis)](#sec-10)
+9. [再レビュー実行フローと台帳更新の原子性 (Re-review Flow & Atomicity)](#sec-9)
+10. [レビュー鮮度管理と変更影響判定パイプライン (Freshness & Impact Analysis Pipeline)](#sec-10)
 11. [既存ブランチからの移行計画 (Migration Plan)](#sec-11)
 12. [台帳管理 CLI 設計と Phase 2〜5 実装タスク (CLI Design & Roadmap)](#sec-12)
 13. [リスク・未確定事項・トレードオフ (Risks & Trade-offs)](#sec-13)
@@ -45,17 +45,16 @@
 5. **`.review-inbox/`**:
    - Orchestrator 経由のレビュー受け渡し用の一時バッファ（Git管理外）。
 
-### 1.2 現行設計の課題とレビュー検出事項
+### 1.2 現行設計の課題と外部レビュー検出事項
 
-現行の分割レビュー計画および初期設計案には、継続的運用において以下の構造的課題およびレビュー指摘事項が存在する。
+Phase 1 設計書の再レビューにおいて、継続的品質管理基盤としての堅牢性を確保するために以下の課題が特定された。
 
-| 課題領域                 | レビュー指摘事項       | 継続運用におけるリスクと影響                                                                                                                                                            |
-| :----------------------- | :--------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Finding ID 採番競合**  | 指摘1（P1 / Blocking） | 各エージェントが既存の最大連番+1を自律採番する方式では、同一Scopeの並列レビューや複数Scopeの同時登録時にIDが重複する。またGitブランチ間で独立採番された場合の衝突解決策が欠如している。 |
-| **レビュー履歴の不変性** | 指摘2（P1 / Blocking） | 確定結果を不変ログとする方針と、中断・再開時に結果ファイルを直接更新する運用との間に矛盾がある。確定結果と暫定状態の分離、および中断中にコードが変更された場合の扱いが未定義である。    |
-| **再レビュー追跡性**     | 指摘3（P2 / Blocking） | 再レビュー結果のメタデータが不足しており、修正コミットが複数積まれた際に対象コードと判定の対応関係が機械的に追跡できない。                                                              |
-| **鮮度判定の安全性**     | 指摘4（P2 / Blocking） | Scope定義に未登録のファイル変更（新規追加、ルート直下、未分類ファイル）を見落とし、コード変更後も誤って過去のGO判定を有効（fresh）と判定してしまう重大な穴が存在する。                  |
-| **技術選定の混同**       | 設計レビュー確認事項   | Orchestrator配布パッケージの「Python標準ライブラリ制約」を開発用レビューツールに誤適用していた。既存のリポジトリ開発環境（Node.js）との整合が必要。                                     |
+| 課題領域                | レビュー検出事項                                     |        重大度         | 継続運用におけるリスクと影響                                                                                                                     |
+| :---------------------- | :--------------------------------------------------- | :-------------------: | :----------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Finding ID 採番競合** | REV-01：Gitブランチ間の衝突解決と履歴不変性の矛盾    |   **P1 / Blocking**   | ブランチ間衝突時に確定済み結果ファイルの参照を書き換える方式は不変性原則と矛盾する。ローカルファイルロックでは異なるブランチ間の競合を防げない。 |
+| **単一Writerの形骸化**  | REV-02：再レビュー時に単一Writerを経由しない更新経路 |   **P2 / Blocking**   | 再レビュー時に Implementer が台帳を直接更新し、Reviewer が確定結果ファイルを直接作成する設計になっており、排他制御と整合しない。                 |
+| **鮮度判定の見落とし**  | REV-03：未分類ファイル検出による既知Scope評価の中断  |   **P2 / Blocking**   | 未分類ファイル検出時に早期終了するフローチャートになっており、同一コミットに含まれる既知Scopeの変更評価（stale判定）が見落とされる。             |
+| **依存導入の記述齟齬**  | REV-04：依存ライブラリ導入時期の記述不一致           | **P2 / Non-blocking** | `@11ty/gray-matter` は Phase 1 で既に追加済み（package.json/lockfile更新済み）であるにもかかわらず、設計書内でPhase 2作業と記述されていた。      |
 
 ---
 
@@ -101,7 +100,7 @@
 ### 2.3 実装上の制約事項
 
 1. **成果物形式**: レビュー成果物を独立した JSON や YAML ファイルに変更しない。Markdown 正本を維持する。
-2. **依存管理**: 追加ライブラリは原則として `@11ty/gray-matter`（`devDependencies`）のみとする。バージョンは `package-lock.json` で厳密に固定する。
+2. **依存管理（REV-04反映）**: 追加ライブラリは原則として `@11ty/gray-matter`（`devDependencies`）のみとする。本ライブラリは Phase 1 において既に `package.json` および `package-lock.json` へ追加・固定されており、Phase 2 ではこれを用いた動作検証および CLI 実装を行う。
 3. **動的取得の禁止**: エージェント実行時に毎回 `npx` 等で動的ダウンロードを行う設計を禁止する。初期セットアップ時に `npm install` を完了させる。
 4. **配布物混入の防止**: 台帳管理コードや npm 設定が、`install.sh` やリリース配布アーカイブ（`.tar.gz`）に混入しない構成を徹底する。
 
@@ -176,13 +175,13 @@ classDiagram
 
 中央 Orchestrator の中核機能（配送・Registry）にリポジトリ固有のレビュー管理ロジックを一切混入させず、明確な境界を維持する。
 
-| コンポーネント            | 実行環境 / 配置場所                                                    | 主な責務                                                                    | 扱うデータ                         |
-| :------------------------ | :--------------------------------------------------------------------- | :-------------------------------------------------------------------------- | :--------------------------------- |
-| **Herdr Orchestrator**    | `skills/herdr-orchestrator/` / `~/.agents/skills/herdr-orchestration/` | Agent間配送、タスク状態遷移（`dispatch`, `result`, `completion`）、排他制御 | Task Registry（`task.json`）       |
-| **repo-review Skill**     | `.agents/skills/repo-review/`                                          | レビュー作業の実行、批判的不具合探索、反証確認、重大度判定、仮指摘の起草    | `.review-inbox/`（一時バッファ）   |
-| **Review Management CLI** | `scripts/reviews/` (Node.js)                                           | 正式 Finding ID 採番、台帳更新（単一Writer）、鮮度判定、台帳整合性検証      | `docs/reviews/` 配下の Markdown 群 |
-| **Git**                   | リポジトリルート                                                       | コミットSHAによるレビュー対象の同一性保証、ファイル変更差分の提供           | Git HEAD, Tree, Commit 履歴        |
-| **GitHub Actions**        | `.github/workflows/`                                                   | PR 時の台帳整合性自動チェック（ID重複・参照切れの防止）                     | CI 実行ログ・検証ステータス        |
+| コンポーネント            | 実行環境 / 配置場所                                                    | 主な責務                                                                                 | 扱うデータ                         |
+| :------------------------ | :--------------------------------------------------------------------- | :--------------------------------------------------------------------------------------- | :--------------------------------- |
+| **Herdr Orchestrator**    | `skills/herdr-orchestrator/` / `~/.agents/skills/herdr-orchestration/` | Agent間配送、タスク状態遷移（`dispatch`, `result`, `completion`）、排他制御              | Task Registry（`task.json`）       |
+| **repo-review Skill**     | `.agents/skills/repo-review/`                                          | レビュー作業の実行、批判的不具合探索、反証確認、重大度判定、仮指摘の起草                 | `.review-inbox/`（一時バッファ）   |
+| **Review Management CLI** | `scripts/reviews/` (Node.js)                                           | 正式 Finding ID 採番、台帳更新（単一Writer）、確定ファイル生成、鮮度判定、台帳整合性検証 | `docs/reviews/` 配下の Markdown 群 |
+| **Git**                   | リポジトリルート                                                       | コミットSHAによるレビュー対象の同一性保証、ファイル変更差分の提供                        | Git HEAD, Tree, Commit 履歴        |
+| **GitHub Actions**        | `.github/workflows/`                                                   | PR 時の台帳整合性自動チェック（ID重複・参照切れの防止）                                  | CI 実行ログ・検証ステータス        |
 
 ---
 
@@ -319,8 +318,6 @@ completed_at: 2026-10-14T12:30:00+09:00
 
 ### 5.4 再レビュー結果モデル (`campaigns/{CID}/{ScopeID}/recheck-NN.md`)
 
-指摘3の修正要件に基づき、再レビュー結果には追跡に必要な全項目を必須化する。
-
 ```markdown
 ---
 campaign_id: C001
@@ -402,68 +399,67 @@ completed_at: 2026-10-15T10:00:00+09:00
 
 <a id="sec-6"></a>
 
-## 6. Finding ID 採番規則と競合防止（単一 Writer 方式）(Finding ID & Collision Prevention)
+## 6. Finding ID 採番規則と競合防止（単一管理ブランチ・単一 Writer 方式）(Finding ID & Collision Prevention)
 
-指摘1（P1 / Blocking）への対応として、エージェントによる自律採番を廃止し、**Reviewer と台帳管理担当（Ledger Writer）の責務分離** および **単一 Writer 方式** を導入する。
+指摘 REV-01（P1 / Blocking）への対応として、確定済み結果の履歴不変性を最優先とし、**正式 Finding ID の発行権限を「単一管理ブランチ」に集約**するアーキテクチャを確立する。
 
-### 6.1 責務の明確な分離
+### 6.1 ローカルファイルロックの適用限界の明示
+
+ローカルファイルロック（`docs/reviews/.review-lock`）は、**同一マシン・同一作業ツリー内で並行動作するプロセス間の排他制御**にのみ有効である。
+異なる Git ブランチ間、フォークリポジトリ間、または別マシンの作業環境間における同時採番の競合を防ぐことはできない。
+ブランチ間・環境間の一意性は、**Git のマージ規律および単一管理ブランチ集約方式**によって保証する。
+
+### 6.2 単一管理ブランチ集約方式（Single Canonical Branch）
 
 ```mermaid
 sequenceDiagram
     autonumber
-    actor Reviewer as レビュワーAgent
-    participant Inbox as .review-inbox/review-response.md
+    actor Reviewer as レビュワー (作業ブランチ)
+    participant Inbox as .review-inbox/
+    participant Canonical as 単一管理ブランチ (main 等)
     participant CLI as 台帳管理CLI (単一Writer)
-    participant Ledger as docs/reviews/findings/INDEX.md
+    participant Ledger as findings/INDEX.md & campaigns/
 
+    Note over Reviewer: 作業ブランチ/PR レビュー中
     Reviewer->>Reviewer: 不具合探索・反証確認
-    Note over Reviewer: 正式IDを発行せず仮IDで起草<br>(TEMP-01, TEMP-02 等)
-    Reviewer->>Inbox: review-response.md 作成
-    Reviewer->>CLI: npm run review:finding-register -- --response <path>
+    Reviewer->>Inbox: review-response.md 作成<br>※仮IDのみ使用 (TEMP-01, TEMP-02)
+    Note over Reviewer: この時点では確定 result.md を生成しない
+
+    Note over Canonical: 管理ブランチ統合時 / 単一Writer実行時
+    Canonical->>CLI: npm run review:sync-inbox -- --scope R001
     activate CLI
-    Note over CLI: ファイル排他ロック取得<br>(.review-lock)
-    CLI->>CLI: 指摘内容ハッシュ(fingerprint)計算
+    Note over CLI: ローカル排他ロック取得 (.review-lock)
+    CLI->>CLI: 指摘ハッシュ (fingerprint) を計算
     CLI->>Ledger: 重複チェック (同一fingerprintの有無)
-    CLI->>Ledger: Scope別最大連番 + 1 を正式採番 (R001-F001)
-    CLI->>Ledger: findings/INDEX.md にアトミック書き込み
-    CLI-->>Reviewer: 正式 Finding ID リストを返却
+    CLI->>Ledger: 管理ブランチ上の最大連番 + 1 を正式採番 (R001-F001)
+    CLI->>Ledger: findings/INDEX.md に正式登録
+    CLI->>Ledger: campaigns/C001/{Scope}/result.md を確定生成 (不変)
+    CLI->>Ledger: draft.md を削除
+    CLI->>Ledger: 全体/Campaign INDEX を最新同期
     deactivate CLI
-    Note over Reviewer: 確定結果 result.md に<br>正式 Finding ID を反映
 ```
 
-1. **Reviewer（検査担当）**:
-   - 正式な Finding ID を自己採番しない。
-   - `review-response.md` には仮ID（`TEMP-01`, `TEMP-02` 等）または指摘のローカル連番を記載して報告する。
-2. **台帳管理CLI（単一 Writer / 登録担当）**:
-   - 正式な Finding ID の発行および `findings/INDEX.md` への書き込みは、台帳管理CLI（`npm run review:finding-register`）が一元的に担う。
+1. **作業ブランチにおける仮 ID 運用**:
+   - 各作業ブランチ（feature ブランチや PR ブランチ）でのレビュー実施中は、**正式 Finding ID を発行せず、仮 ID（`TEMP-01`, `TEMP-02` 等）のみを使用**する。
+   - レビュー結果は `.review-inbox/` や `draft.md` に保持し、作業ブランチ上で確定済みファイル（`result.md` 等）を直接生成してはならない。
+2. **正式 ID 発行権限の集約**:
+   - 正式 Finding ID（`{ScopeID}-F{3桁}`）の採番および `findings/INDEX.md` への書き込みは、**単一の管理対象ブランチ（`main` またはレビュー管理ブランチ）上でのみ実行**される。
+   - 管理ブランチへの統合時、または台帳管理担当（Ledger Writer）の単一実行環境において、CLI コマンド（`review:sync-inbox`）が正式 ID を払い出し、同時に確定成果物（`result.md`）を生成する。
+   - これにより、複数ブランチで独立に同一の正式 ID が発行される事態を原理的に排除する。
 
-### 6.2 単一 Writer 方式と排他制御・リトライ
+### 6.3 確定済みレビュー結果の不変性最優先とフェイルセーフ解決規則
 
-1. **ファイルロックによる排他制御**:
-   - CLI 実行時、`docs/reviews/.review-lock` に対して Node.js の `node:fs`（`flag: 'wx'`）による原子的ファイル作成ロックを取得する。
-   - 処理完了時、または例外終了時に必ずロックを解除する（`try...finally`）。
-2. **同時書き込み時の再試行（Exponential Backoff）**:
-   - ロック取得に失敗した場合は、ランダムなバックオフ（100ms〜500ms）を挟んで最大 10 回再試行する。
-3. **重複登録防止（Fingerprint による同一性判定）**:
-   - 指摘の「対象ファイル相対パス」「該当行」「問題の要約」から SHA-256 ハッシュ（fingerprint）を生成する。
-   - `findings/INDEX.md` 内に同一 fingerprint の未解消指摘が既に存在する場合は、新規 ID を発行せず既存の Finding ID を返却する（冪等性の保証）。
-
-### 6.3 Git ブランチ間での ID 衝突防止と解決方針
-
-異なる Git ブランチで並行して同一 Scope に対する Finding が登録され、PR マージ時に ID 重複（コンフリクト）が発生した場合の解決ルールを定める。
-
-1. **衝突の機械的検出**:
-   - CI および `npm run review:check` は、リポジトリ内の全 Finding ID の重複を厳密に検査する。重複が存在する場合は exit code 1 でビルドを失敗させる。
-2. **解決方針（マージ側ブランチのリナンバリング）**:
-   - 後からマージするブランチ側の Finding ID を、現在のベースブランチ（`main`）の最新空き番号へリナンバリングする。
-   - CLI コマンド `npm run review:finding-renumber -- --from R001-F003 --to R001-F005` を提供し、`findings/INDEX.md` および該当 Campaign 内の結果ファイルの参照を一括更新する。
-3. **終態 Finding の不変保護**:
-   - すでに `対応済み（再検証完了）` または `誤検知・不採用` でクローズされた過去の Finding ID の番号変更は一切禁止する。
+1. **確定済み成果物の ID 変更禁止（原則不変）**:
+   - 一度確定生成された `result.md`、`recheck-NN.md`、`delta-NN.md` 内に記録された Finding ID は、後から変更することを**厳格に禁止**する。過去の結果ファイルを一括置換するようなリナンバリング運用は行わない。
+2. **万一の衝突検出時の解決規則（フェイルセーフ）**:
+   - 管理ブランチ外で誤って正式 ID が発行されたり、予期せぬマージによって ID 重複が発生した場合、CI および `npm run review:check` がこれを即座に検知し、マージをブロック（exit code 1）する。
+   - **解決手順**:
+     - 確定済み成果物を手動改変するのではなく、衝突を引き起こした側の未マージブランチにおいて確定結果を破棄し、ドラフト状態（仮 ID）に戻す。
+     - 管理ブランチの最新 HEAD を取り込み、最新の空き番号から改めて正式 ID を再発行して確定結果を再生成する。
 
 ### 6.4 再レビュー時の ID 継続利用
 
-再レビューにおいて、過去に起票された指摘を再検証する際は、**絶対に新しい Finding ID を発行してはならない**。
-Reviewer は `recheck-NN.md` において必ず元の Finding ID（例: `R001-F001`）を指定して合否を記録し、台帳管理 CLI はその Finding のステータスを遷移させる。
+同一指摘の再レビューでは、必ず初回に発行された正式 Finding ID（例: `R001-F001`）を引き継ぎ、新しい Finding ID を絶対に発行しない。
 
 ---
 
@@ -471,14 +467,12 @@ Reviewer は `recheck-NN.md` において必ず元の Finding ID（例: `R001-F0
 
 ## 7. レビュー状態管理と履歴の不変性 (State Lifecycle & Immutability)
 
-指摘2（P1 / Blocking）への対応として、ファイル種別ごとの更新方針を明確に分離し、確定結果の完全な不変性と作業状態の更新性を両立させる。
-
 ### 7.1 ファイル種別ごとの更新・不変性マトリクス
 
 | ファイル種別         | パス・配置場所                            | 更新方針                   | ライフサイクルとルール                                                       |
 | :------------------- | :---------------------------------------- | :------------------------- | :--------------------------------------------------------------------------- |
-| **確定済み初回結果** | `campaigns/{CID}/{ScopeID}/result.md`     | **原則不変（上書き禁止）** | レビュー完了時に確定出力。確定後は Git 履歴を含め一切の改変を禁止。          |
-| **作業中一時状態**   | `campaigns/{CID}/{ScopeID}/draft.md`      | **更新可能（作業中のみ）** | 中断時の進捗退避先。再開時に読み込まれ、レビュー完了時に確定・削除される。   |
+| **確定済み初回結果** | `campaigns/{CID}/{ScopeID}/result.md`     | **原則不変（上書き禁止）** | 管理ブランチ上で確定出力。確定後は Git 履歴を含め一切の改変を禁止。          |
+| **作業中一時状態**   | `campaigns/{CID}/{ScopeID}/draft.md`      | **更新可能（作業中のみ）** | 中断時の進捗退避先。再開時に読み込まれ、確定完了時に削除される。             |
 | **再レビュー結果**   | `campaigns/{CID}/{ScopeID}/recheck-NN.md` | **新規追加（連番ログ）**   | 過去の `result.md` や `recheck-01.md` を上書きせず、連番で新規ファイル追加。 |
 | **差分レビュー結果** | `campaigns/{CID}/{ScopeID}/delta-NN.md`   | **新規追加（連番ログ）**   | コード変更後の差分追従結果を連番で新規ファイル追加。                         |
 | **Campaign 台帳**    | `campaigns/{CID}/INDEX.md`                | **更新可能（最新同期）**   | 当該 Campaign 内の各 Scope の最新状態（確定結果へのポインタ）を反映。        |
@@ -487,16 +481,13 @@ Reviewer は `recheck-NN.md` において必ず元の Finding ID（例: `R001-F0
 
 ### 7.2 直交する 3 つの状態軸
 
-「作業進捗」「品質合否」「指摘対応状況」は完全に独立した軸として管理する。
-
 1. **レビュー作業状態 (Work Status)**: `未着手 (not_started)` / `実施中 (in_progress)` / `中断 (paused)` / `完了 (completed)` / `検証不能 (unverifiable)`
 2. **レビュー品質判定 (Verdict)**: `未判定 (unassessed)` / `GO` / `要修正 (changes_requested)` / `NO-GO`
 3. **指摘状態 (Finding Status)**: `未対応` / `対応中` / `修正済み・再検証待ち` / `対応済み（再検証完了）` / `部分対応` / `誤検知・不採用` / `保留 (Non-blockingのみ)`
 
 ### 7.3 監査追跡性（Audit Trail）の保証
 
-過去の `result.md`（要修正）を残したまま、修正コミット後に `recheck-01.md`（GO）が追加されるため、Git 履歴を遡らなくても成果物ディレクトリを閲覧するだけで、
-「**いつ、どのコミットに対してどのような指摘が出され、どの修正コミットを経て解消し GO に至ったか**」の全経緯が 100% 透過的に追跡可能となる。
+過去の `result.md`（要修正）を残したまま、修正コミット後に `recheck-01.md`（GO）が追加されるため、Git 履歴を遡らなくても成果物ディレクトリを閲覧するだけで、修正・解消の全経緯が 100% 透過的に追跡可能である。
 
 ---
 
@@ -513,7 +504,7 @@ sequenceDiagram
     participant Inbox as .review-inbox/
     participant Orchestrator as Herdr Orchestrator
     actor Reviewer as レビュワーAgent
-    participant CLI as 台帳管理CLI
+    participant CLI as 台帳管理CLI (単一Writer)
     participant CampaignDir as campaigns/C001/{Scope}/
     participant Ledger as docs/reviews/
 
@@ -523,11 +514,14 @@ sequenceDiagram
     Reviewer->>Inbox: request 読み込み
     Reviewer->>Reviewer: 2段階レビュー + 反証確認
     Reviewer->>Inbox: review-response.md 作成 (仮ID: TEMP-NN)
-    Reviewer->>CLI: npm run review:sync-inbox
-    CLI->>CLI: 正式 Finding ID 採番と登録
+    Reviewer->>CLI: npm run review:sync-inbox -- --scope R001
+    activate CLI
+    Note over CLI: ファイル排他ロック取得 (.review-lock)
+    CLI->>CLI: 正式 Finding ID 採番・重複チェック
     CLI->>CampaignDir: result.md を確定生成 (不変)
     CLI->>CampaignDir: draft.md が存在すれば削除
     CLI->>Ledger: INDEX.md / findings/INDEX.md を最新更新
+    deactivate CLI
     Reviewer->>Orchestrator: result-submit
     Orchestrator-->>Requester: sync 完了通知
 ```
@@ -555,7 +549,9 @@ AI モデルの 5 時間枠・週間枠やコンテキスト上限に近づい�
 
 <a id="sec-9"></a>
 
-## 9. 再レビュー実行フローと指摘追跡 (Re-review & Finding Tracking)
+## 9. 再レビュー実行フローと台帳更新の原子性 (Re-review Flow & Atomicity)
+
+指摘 REV-02（P2 / Blocking）への対応として、Implementer および Reviewer による台帳・成果物ファイルの直接編集を禁止し、**すべての書き込みを台帳管理 CLI（単一 Writer）へ一元化**する。
 
 ### 9.1 再レビュー実行フロー
 
@@ -564,38 +560,52 @@ sequenceDiagram
     autonumber
     actor Implementer as 実装者Agent
     actor Reviewer as レビュワーAgent
-    participant CLI as 台帳管理CLI
+    participant Inbox as .review-inbox/
+    participant CLI as 台帳管理CLI (単一Writer)
     participant CampaignDir as campaigns/C001/{Scope}/
     participant Ledger as docs/reviews/
 
     Implementer->>Implementer: 指摘に基づきコード修正・テスト追加
-    Implementer->>Implementer: 修正コミットを作成 (例: commit A, commit B)
-    Implementer->>Ledger: findings/INDEX.md を「修正済み・再検証待ち」に更新
+    Implementer->>Implementer: 修正コミットを作成 (commit A, commit B)
+    Implementer->>CLI: npm run review:finding-update -- --id R001-F001 --status 修正済み・再検証待ち --commit <SHA>
+    activate CLI
+    CLI->>Ledger: findings/INDEX.md をアトミック更新
+    deactivate CLI
     Implementer->>Reviewer: 再レビュー依頼 (対象コミットSHA, 修正コミット一覧)
     Reviewer->>Ledger: 未解消 Finding (R001-F001) の内容を読み込み
     Reviewer->>Reviewer: (a) 指摘解消確認 (b) 回帰探索 (c) 修正自体の品質検証
-    Reviewer->>CampaignDir: recheck-01.md を新規作成 (連番ログ)
-    Reviewer->>CLI: npm run review:update-status
+    Reviewer->>Inbox: review-response.md に再レビュー結果を出力
+    Reviewer->>CLI: npm run review:record-recheck -- --scope R001 --response .review-inbox/review-response.md
+    activate CLI
+    Note over CLI: ファイル排他ロック取得 (.review-lock)
+    CLI->>CampaignDir: 連番を自動判定し recheck-01.md を確定生成 (不変)
     CLI->>Ledger: findings/INDEX.md で F001 を「対応済み（再検証完了）」に更新
     CLI->>CampaignDir: INDEX.md の判定を GO に更新
     CLI->>Ledger: docs/reviews/INDEX.md を最新更新
+    deactivate CLI
 ```
 
-### 9.2 複数修正コミットの追跡性保証
+### 9.2 複数 Markdown ファイル更新の原子性と障害復旧
 
-実装者が複数のコミットに分けて修正を行った場合でも、`recheck-NN.md` の Frontmatter に `resolution_commits` として全コミットハッシュと対応内容を配列で記録するため、どのコミットがどの指摘を解決したのかを機械的に追跡可能である。
+台帳管理 CLI が複数のファイル（確定成果物、Campaign INDEX、全体 INDEX、Finding INDEX）を更新する際、クラッシュや電源断による台帳破損を防ぐため、以下のトランザクション設計を採用する。
+
+1. **更新前バリデーション (Pre-validation)**:
+   - メモリ上で全ファイルの更新内容を事前に組み立て、構文エラー、ID 重複、リンク切れが存在しないことを確認する。
+2. **一時ファイル書き込みと原子的置換**:
+   - 各ファイルを一時ファイル（`.tmp`）として書き出し、`fs.renameSync`（原子的リネーム）で一括置換する。
+3. **事実の正本（Single Source of Truth）に基づく決定論的復旧**:
+   - 確定済み成果物（`result.md`、`recheck-NN.md`）を「**動かすことのできない事実の正本**」と位置付ける。
+   - 万が一更新途中で異常終了した場合、CLI コマンド `npm run review:rebuild-index` を実行することで、全確定成果物の Frontmatter を走査し、`findings/INDEX.md`、`campaigns/{CID}/INDEX.md`、`docs/reviews/INDEX.md` を**100% 決定論的に再生成・整合復旧**できる（冪等性の担保）。
 
 ---
 
 <a id="sec-10"></a>
 
-## 10. レビュー鮮度管理と変更影響判定 (Freshness & Impact Analysis)
+## 10. レビュー鮮度管理と変更影響判定パイプライン (Freshness & Impact Analysis Pipeline)
 
-指摘4（P2 / Blocking）への対応として、Scope 未登録ファイルの変更検知、ファイル追加・削除・リネーム追跡、ブランチ分岐を考慮した安全側の鮮度判定を定義する。
+指摘 REV-03（P2 / Blocking）への対応として、未登録ファイルが存在しても既知 Scope の変更評価（`stale` 判定）を中断せず、**全変更ファイルを漏れなく走査・集計してから最終判定するパイプライン**を確立する。
 
 ### 10.1 レビュー鮮度ステータス (Freshness Status)
-
-各 Scope に対し、現在の HEAD コミットに対する鮮度状態を厳密に定義する。
 
 | 鮮度ステータス                    | 定義                                                     | 判定条件                                                                                    |
 | :-------------------------------- | :------------------------------------------------------- | :------------------------------------------------------------------------------------------ |
@@ -603,42 +613,64 @@ sequenceDiagram
 | **要再検証 (stale)**              | コード変更により過去の判定が無効化された状態             | 対象 Scope の構成ファイル、または直接・推移的依存関係に変更が存在する                       |
 | **差分追従済み (delta_verified)** | 変更後に差分レビューが実施され GO が確認された状態       | 差分レビュー（`delta-NN.md`）が実施され、回帰や保証喪失がないことが確認されている           |
 | **未確認 (unverified)**           | 当該コードに対するレビューが一度も実施されていない       | レビュー結果ファイルが存在しない                                                            |
-| **要確認 (review_needed)**        | 未分類のファイル変更等が存在し、安全側に倒して確認が必要 | Scope 未登録の新規・修正ファイルが検出された場合                                            |
+| **要確認 (review_needed)**        | 未分類のファイル変更等が存在し、安全側に倒して確認が必要 | Scope 未登録の新規・修正ファイルが検出された場合（リポジトリ全体警告）                      |
 | **対象外 (out_of_scope)**         | 品質管理対象外の独立ファイル                             | ドキュメントの誤字修正など、事前に合意された対象外変更                                      |
 
-### 10.2 変更影響判定アルゴリズム（未登録ファイル・リネーム・削除の検知）
+### 10.2 変更影響判定アルゴリズム（全件走査・集計パイプライン）
 
 ```mermaid
 flowchart TD
-    Start[Git 変更コミットの発生] --> GetDiff[git diff -M --name-status base..head]
-    GetDiff --> DetectUnscoped{いずれの Scope 定義<br>にも含まれない変更があるか？}
-    DetectUnscoped -- Yes --> MarkWarning[未分類変更検出警告を発行<br>全体を「要確認 (review_needed)」に指定]
-    DetectUnscoped -- No --> CheckRenames{削除・リネーム<br>が存在するか？}
-    CheckRenames -- Yes --> HandleRename[旧ファイル・新ファイル双方の<br>関連 Scope を「要再検証 (stale)」に指定]
-    CheckRenames -- No --> CheckDirect{変更ファイルが<br>primary_files に含まれるか？}
-    CheckDirect -- Yes --> MarkDirect[当該 Scope を「要再検証 (stale)」に指定]
-    CheckDirect -- No --> CheckTransitive{変更ファイルが<br>reference_files または依存 Scope か？}
-    CheckTransitive -- Yes --> MarkTransitive[依存 Scope を「要再検証 (stale)」に指定]
-    CheckTransitive -- No --> CheckGlobal{基盤・共通設定・CI<br>の変更か？}
-    CheckGlobal -- Yes --> MarkAll[波及する全 Scope を「要再検証」に指定]
-    CheckGlobal -- No --> KeepFresh[fresh を維持]
-    MarkWarning --> Output[要再検証・確認対象 Scope リストを出力]
-    HandleRename --> Output
-    MarkDirect --> Output
-    MarkTransitive --> Output
-    MarkAll --> Output
+    Start[Git 差分の取得<br>git diff -M --name-status base..head] --> Init[集計バッファの初期化<br>direct = {}, transitive = {}, global = {}, unclassified = []]
+    Init --> ScanLoop[全変更ファイルの網羅走査]
+
+    subgraph FileScanPipeline["ファイル走査パイプライン（全件評価）"]
+        ScanLoop --> CheckDirect{primary_files に含まれる？}
+        CheckDirect -- Yes --> MarkDirect[該当 Scope を direct リストへ記録]
+        CheckDirect -- No --> CheckTrans{reference_files / 依存Scope？}
+        CheckTrans -- Yes --> MarkTrans[該当 Scope を transitive リストへ記録]
+        CheckTrans -- No --> CheckGlobal{基盤・共通設定・CI？}
+        CheckGlobal -- Yes --> MarkGlobal[波及する全 Scope を global リストへ記録]
+        CheckGlobal -- No --> CheckKnown{合意済みの対象外ファイル？}
+        CheckKnown -- Yes --> MarkIgnored[対象外リストへ記録]
+        CheckKnown -- No --> MarkUnscoped[未分類変更リストへ記録]
+    end
+
+    MarkDirect --> CheckMore{全変更ファイルを走査完了？}
+    MarkTrans --> CheckMore
+    CheckMore -- No --> ScanLoop
+    MarkGlobal --> CheckMore
+    MarkIgnored --> CheckMore
+    MarkUnscoped --> CheckMore
+
+    CheckMore -- Yes --> FinalAggregation[全件集計後の最終判定ステップ]
+
+    subgraph FinalDecision["最終判定・レポート出力"]
+        FinalAggregation --> EvaluateScopes[各 Scope の鮮度確定<br>優先度: stale > delta_verified > fresh > unverified]
+        FinalAggregation --> EvaluateUnscoped{未分類変更リストが<br>1件以上存在するか？}
+        EvaluateUnscoped -- Yes --> RaiseWarning[未分類変更警告を発行<br>ダッシュボード全体状態を「要確認」に指定]
+        EvaluateUnscoped -- No --> NoWarning[警告なし]
+        EvaluateScopes --> CombineReport[統合鮮度レポートの出力]
+        RaiseWarning --> CombineReport
+        NoWarning --> CombineReport
+    end
 ```
 
-1. **未登録ファイル変更（Unscoped Changes）の検出**:
-   - `git diff` で検出された変更ファイルが、全20 Scope の `primary_files` / `reference_files` のいずれにも登録されていない場合（例: 新規モジュールの追加、設定ファイルの追加）、**推測で `fresh` と判定することを固く禁止する**。
-   - CLI は「未登録ファイルの変更が存在する」と警告し、ステータスを `要確認 (review_needed)` とする。
-2. **削除・リネームの追跡**:
-   - `git diff -M` を使用してリネームを追跡する。ファイルが削除またはリネームされた場合、旧パスが属していた Scope および新パスが属する Scope を即座に `要再検証 (stale)` とする。
-3. **Git ブランチ分岐・マージ時の判定規則**:
-   - 対象ブランチにマージコミットが含まれる場合、マージ元ブランチの全変更コミットを差分対象として走査する。
-   - 共通の祖先（Merge Base）からの累積差分を評価し、安全側に倒して判定する。
+### 10.3 集計パイプラインの詳細ステップ
 
-### 10.3 差分レビュー (Delta Review) の 6 大必須観点
+1. **ステップ 1: 変更ファイル一覧の取得**:
+   - `git diff -M --name-status base..head` を実行し、リネーム・追加・削除・修正を含む全変更ファイルを取得する。
+2. **ステップ 2: 全変更ファイルの網羅的分類（評価を中断しない）**:
+   - 未分類ファイルが見つかった場合でも処理を中断せず、すべての変更ファイルを走査する。
+   - 変更ファイルごとに該当する影響カテゴリ（直接、間接、基盤、未分類）をバッファに蓄積する。
+3. **ステップ 3: Scope 別鮮度の確定（優先順位の適用）**:
+   - 同一 Scope に対して複数の判定要素が存在する場合、以下の優先順位に従って最終ステータスを決定する：
+     **`要再検証 (stale)` ＞ `差分追従済み (delta_verified)` ＞ `最新 (fresh)` ＞ `未確認 (unverified)`**
+   - （`direct`、`transitive`、`global` のいずれかに該当する Scope は、無条件で `stale` となる）。
+4. **ステップ 4: 未分類変更警告の独立発行**:
+   - 未分類変更（unclassified）が 1 件でも存在する場合、各 Scope の鮮度判定結果（例: `R001` が `stale` であること）はそのまま維持した上で、**リポジトリ全体に対して「未分類ファイル変更警告」を発行し、全体サマリを `要確認 (review_needed)`** とする。
+   - これにより、既知 Scope の変更見落としと、新規ファイルの未分類見落としの双方を完全に防止する。
+
+### 10.4 差分レビュー (Delta Review) の 6 大必須観点
 
 差分レビュー（`delta-NN.md`）を実施する際は、以下の 6 項目を漏れなく検証しなければならない。
 
@@ -654,8 +686,6 @@ flowchart TD
 <a id="sec-11"></a>
 
 ## 11. 既存ブランチからの移行計画 (Migration Plan)
-
-現在 `docs/split-code-review-plan` ブランチに存在する 22 ファイルから、本基盤への安全な移行手順を定義する。
 
 ### 11.1 移行マッピング表
 
@@ -681,11 +711,9 @@ flowchart TD
 
 ### 12.1 台帳管理 CLI アーキテクチャ (Node.js)
 
-開発用・CI 用ツールとして、リポジトリルートに Node.js 製の軽量 CLI スクリプト群（`scripts/reviews/`）を整備する。
-
 1. **言語・ライブラリ**:
    - ランタイム: **Node.js** (v20以上)
-   - 依存ライブラリ: **`@11ty/gray-matter`**（Frontmatter パース・シリアライズ用、`devDependencies`）
+   - 依存ライブラリ: **`@11ty/gray-matter`**（Frontmatter パース・シリアライズ用、`devDependencies` に追加済み）
    - 標準モジュール: `node:fs`, `node:path`, `node:crypto`, `node:child_process`（Git コマンド呼び出し用）
 2. **Orchestrator 配布物との分離**:
    - `scripts/reviews/` 配下のスクリプトおよび `@11ty/gray-matter` はリポジトリの開発・管理環境でのみ使用する。
@@ -693,7 +721,7 @@ flowchart TD
 
 ### 12.2 コマンドの固定化と承認抑制設計
 
-エージェント（Antigravity, Cursor, Codex 等）の実行時に、**毎回任意のシェルコマンド実行承認を求められる運用負荷を抑制**するため、`package.json` の scripts に固定エントリーポイントを用意する。
+エージェント実行時の任意シェル承認ポップアップを抑制するため、`package.json` の scripts に固定エントリーポイントを用意する。
 
 ```json
 {
@@ -702,58 +730,61 @@ flowchart TD
     "review:status": "node scripts/reviews/status.js",
     "review:freshness": "node scripts/reviews/freshness.js",
     "review:finding-register": "node scripts/reviews/register-finding.js",
-    "review:sync-inbox": "node scripts/reviews/sync-inbox.js"
+    "review:finding-update": "node scripts/reviews/update-finding.js",
+    "review:sync-inbox": "node scripts/reviews/sync-inbox.js",
+    "review:record-recheck": "node scripts/reviews/record-recheck.js",
+    "review:rebuild-index": "node scripts/reviews/rebuild-index.js"
   }
 }
 ```
 
 1. **読み取り専用コマンド（承認リスク低）**:
-   - `npm run review:check`: 台帳の整合性、ID重複、参照切れ、Frontmatter スキーマを検証。
-   - `npm run review:status`: リポジトリ全体の最新品質状態、Campaign 進捗、未解消 Finding を表示。
-   - `npm run review:freshness`: 現在の Git 差分に基づき、各 Scope の鮮度（fresh / stale / review_needed）を出力。
-2. **書き込み専用コマンド（単一 Writer 集約）**:
-   - `npm run review:finding-register`: レビュー結果から正式 Finding ID を発行・台帳登録（排他ロック制御付き）。
-   - `npm run review:sync-inbox`: `.review-inbox` の結果を `campaigns/` 配下に確定保存し、ドラフトを破棄。
-3. **承認抑制のポイント**:
-   - エージェントが自由なインライン bash スクリプトを組み立てる必要をなくし、引数付きの固定 npm script 呼び出しに限定する。
-   - 動的 `npx` を排除し、環境構築時の 1 回の `npm install` で完結させる。
+   - `review:check`: 台帳の整合性、ID重複、参照切れ、Frontmatter スキーマを検証。
+   - `review:status`: リポジトリ全体の最新品質状態、Campaign 進捗、未解消 Finding を表示。
+   - `review:freshness`: 全変更ファイル走査パイプラインに基づき、各 Scope の鮮度および未分類警告を出力。
+2. **書き込み専用コマンド（単一 Writer 集約・排他ロック制御）**:
+   - `review:finding-register`: レビュー結果から正式 Finding ID を発行・台帳登録（管理ブランチ上でのみ実行）。
+   - `review:finding-update`: Implementer による Finding ステータス更新（修正済み・再検証待ち）。
+   - `review:sync-inbox`: `.review-inbox` の初回結果から `result.md` を確定生成し、ドラフトを破棄。
+   - `review:record-recheck`: 再レビュー結果から連番 `recheck-NN.md` を確定生成し、Finding 状態を同期。
+   - `review:rebuild-index`: 確定済み成果物を正本として全 INDEX 群を決定論的に再生成・復旧。
 
 ### 12.3 Phase 2〜5 の具体的ロードマップ
 
 ```mermaid
 timeline
     title 継続的レビュー品質管理基盤 導入ロードマップ
-    Phase 1 : 現状調査とアーキテクチャ設計 (本設計書) : レビュー指摘反映完了
-    Phase 2 : レビュー台帳・Node.js CLIの実装 : @11ty/gray-matter導入 : 20Scope移行 : C001構造初期化 : Finding台帳作成 : review:check実装
-    Phase 3 : レビューSkill連携 : repo-review Skill連携手順整備 : 一時バッファから永続台帳同期 (review:sync-inbox) : 単一Writer登録
-    Phase 4 : レビュー鮮度管理 : Git差分マッピング (review:freshness) : 未登録ファイル検知 : 差分レビュー運用標準化
+    Phase 1 : 現状調査とアーキテクチャ設計 (本設計書) : レビュー指摘 REV-01〜04 反映完了
+    Phase 2 : レビュー台帳・Node.js CLIの実装 : gray-matter検証 : 20Scope移行 : C001構造初期化 : Finding台帳作成 : review:check / rebuild 実装
+    Phase 3 : レビューSkill連携 : repo-review Skill連携手順整備 : 一時バッファから永続台帳同期 (sync-inbox / record-recheck) : 単一Writer登録
+    Phase 4 : レビュー鮮度管理 : 全件集計パイプライン (review:freshness) : 未登録ファイル検知 : 差分レビュー運用標準化
     Phase 5 : 検証と運用整備 : 台帳整合性・ID重複テスト : 中断再開シナリオ実機検証 : GitHub Actions連携 : 運用ドキュメント完成
 ```
 
 #### Phase 2: レビュー台帳・Node.js CLIの実装
 
-- **Task 2.1**: `package.json` の `devDependencies` に `@11ty/gray-matter` を追加し lockfile を更新。
+- **Task 2.1 (REV-04反映)**: Phase 1 で追加済みの `@11ty/gray-matter` の読み込み・Frontmatter パース動作検証およびパーサーユーティリティの実装。
 - **Task 2.2**: `docs/reviews/scopes/` 配下に 20 タスクの Scope 定義ファイルを生成（情報欠落ゼロ検証）。
 - **Task 2.3**: `docs/reviews/campaigns/C001-initial-full-review/` を初期化し、現行 20 タスクの `request.md` を再配置。
 - **Task 2.4**: `docs/reviews/findings/INDEX.md` および統合 `docs/reviews/INDEX.md` を作成。
-- **Task 2.5**: `scripts/reviews/check.js`（`npm run review:check`）を実装（ID重複、パス存在、Frontmatter検証）。
+- **Task 2.5 (REV-02反映)**: `scripts/reviews/check.js`（`review:check`）および `scripts/reviews/rebuild-index.js`（`review:rebuild-index`）を実装。
 
 #### Phase 3: レビューSkill連携
 
-- **Task 3.1**: `.agents/skills/repo-review/SKILL.md` および `references.md` に、仮ID起草および台帳CLI連携手順を追記。
-- **Task 3.2**: `scripts/reviews/register-finding.js`（単一Writer・排他ロック・指紋照合）の実装。
-- **Task 3.3**: `scripts/reviews/sync-inbox.js`（確定結果の `campaigns/` 永続化と `draft.md` 破棄）の実装。
+- **Task 3.1 (REV-01反映)**: `.agents/skills/repo-review/SKILL.md` および `references.md` に、作業ブランチでの仮 ID 起草ルールおよび台帳 CLI 連携手順を追記。
+- **Task 3.2 (REV-01, REV-02反映)**: `scripts/reviews/register-finding.js` および `scripts/reviews/update-finding.js`（単一Writer・排他ロック・指紋照合）の実装。
+- **Task 3.3 (REV-02反映)**: `scripts/reviews/sync-inbox.js`（初回結果確定）および `scripts/reviews/record-recheck.js`（再レビュー連番確定）の実装。
 - **Task 3.4**: 中断時（5時間枠到達）における `draft.md` 退避および再開手順のガイド作成。
 
 #### Phase 4: レビュー鮮度管理
 
-- **Task 4.1**: `scripts/reviews/freshness.js`（`npm run review:freshness`）の実装（Git差分解析、未登録ファイル変更検知、削除・リネーム追跡）。
+- **Task 4.1 (REV-03反映)**: `scripts/reviews/freshness.js`（全件集計パイプライン、Scope 優先順位、未登録ファイル変更検知、削除・リネーム追跡）の実装。
 - **Task 4.2**: コード変更時に `docs/reviews/INDEX.md` の鮮度ステータスを自動更新する手順の確立。
 - **Task 4.3**: 差分レビュー（`delta-NN.md`）の記録テンプレートおよび 6 大観点チェックリストの作成。
 
 #### Phase 5: 検証と運用整備
 
-- **Task 5.1**: 台帳整合性テスト、ID重複防止テスト、Gitブランチ競合解決テストの自動化。
+- **Task 5.1**: 台帳整合性テスト、ID重複防止テスト、INDEX再生成復旧テストの自動化。
 - **Task 5.2**: 中断・再開・再レビューの一連の実機モックシナリオ検証。
 - **Task 5.3**: `docs/reviews/README.md` の運用マニュアル整備。
 - **Task 5.4**: PR 時に `npm run review:check` を実行する GitHub Actions ワークフローの追加。
@@ -764,44 +795,31 @@ timeline
 
 ## 13. リスク・未確定事項・トレードオフ (Risks & Trade-offs)
 
-各設計判断における採用理由、代替案、トレードオフを以下に明示する。
+### 13.1 正式 ID 採番: 単一管理ブランチ集約 vs ブランチ間リナンバリング (REV-01)
 
-### 13.1 技術スタック: Node.js ＋ `@11ty/gray-matter` の採用
-
-- **採用**: **Node.js スクリプト ＋ `@11ty/gray-matter`**。
+- **採用**: **正式 ID 発行権限を「単一管理ブランチ」に集約し、作業ブランチでは仮 ID のみ使用する**。
 - **採用理由**:
-  - Python標準ライブラリ制約はOrchestrator本体のものであり、開発用ツールには適用されない。
-  - リポジトリ既存の `package.json`（Prettier, markdownlint）とツールチェーンを統一できる。
-  - Frontmatter の安全なパースとシリアライズが極めてシンプルに実現できる。
-- **代替案**: Python標準ライブラリ（`re` や手動文字列処理で Frontmatter をパース）。
+  - 確定済み成果物（`result.md`）に正式 ID を刻んだ後で ID を書き換える矛盾を完全に排除できる。
+  - Git マージ時に正式 ID の競合が原理的に発生しない。
 - **トレードオフ**:
-  - 代替案は外部 npm 依存を増やさない利点があるが、YAML パースの堅牢性に欠け、パーサー自体の不具合リスクが高まる。`@11ty/gray-matter` は `devDependencies` として lockfile で固定されるため、配布物に影響を与えず最大の安全性を得られる。
+  - 作業ブランチ（PR レビュー中）の時点では仮 ID（`TEMP-01` 等）で対話する必要があるが、確定成果物の不変性と監査性の維持において圧倒的に優れる。
 
-### 13.2 Finding ID 採番: 単一 Writer 方式と排他制御
+### 13.2 台帳更新: 単一 Writer (CLI) による一元化 vs エージェント直接編集 (REV-02)
 
-- **採用**: **Reviewer は仮IDを起草し、台帳CLI（単一Writer / ファイルロック）が正式採番**。
+- **採用**: **台帳および確定成果物の生成・更新を台帳管理 CLI（単一 Writer）に完全一元化する**。
 - **採用理由**:
-  - 並列レビュー時や同一Scopeの分担時におけるID重複を原理的に防止できる。
-- **代替案**: 各エージェントが自律採番し、Gitコミット時にコンフリクト解決する。
+  - 複数エージェントが関与する環境下で、台帳競合、不整合、連番重複を完全に防止できる。
+  - 万が一クラッシュしても確定成果物を正本として INDEX を 100% 再生成・復旧できる。
 - **トレードオフ**:
-  - 代替案はエージェント単独で完結するが、台帳の手動マージやID衝突解決のコストが極めて高い。単一 Writer 方式は CLI 呼び出しのステップが 1 つ増えるが、データ整合性と自動化の信頼性が圧倒的に高い。
+  - エージェントが手動で Markdown を書き換える自由度は制限されるが、チーム開発・自律エージェント運用におけるデータ整合性が保証される。
 
-### 13.3 鮮度管理: 安全側のアプローチ（未登録ファイル検知）
+### 13.3 鮮度判定: 全件網羅集計パイプライン vs 早期終了判定 (REV-03)
 
-- **採用**: **Scope 定義外の変更が 1 つでも存在する場合、推測で `fresh` にせず `要確認` に倒す**。
+- **採用**: **全変更ファイルを網羅走査・集計してから Scope 判定と未分類警告を独立して下すパイプライン**。
 - **採用理由**:
-  - ルート直下のファイル追加や新規スクリプトの追加など、Scope 漏れによる品質低下を完全に防ぐ。
-- **代替案**: Scope 登録ファイルのみを検査し、それ以外のファイル変更は無視する。
+  - 未登録ファイルが含まれていても、同一コミット内の既知 Scope（例: R001）の変更評価（stale 判定）が見落とされるリスクを完全に排除できる。
 - **トレードオフ**:
-  - 代替案は誤検知（過剰な要確認）が少ない反面、見落としリスクが大きい。安全側アプローチは一時的に「要確認」が増える可能性があるが、品質管理基盤としての信頼性を最優先する。
-
-### 13.4 CLI 承認抑制と透過性のバランス
-
-- **採用**: **固定 npm scripts ＋ 読み取り/書き込み分離**。
-- **採用理由**:
-  - エージェント実行時の承認ポップアップの頻度を抑え、自動化のスムーズな進行を可能にする。
-- **トレードオフ**:
-  - 柔軟なアドホック引数は制限されるが、固定コマンドによる再現性とセキュリティの向上が得られる。
+  - 差分走査のステップが全件走査となるが、Git diff のファイル走査はミリ秒単位で完了するためパフォーマンス影響は皆無であり、安全性が最大化される。
 
 ---
 
@@ -809,6 +827,6 @@ timeline
 
 ## 14. 結論と次のステップ (Conclusion)
 
-本改訂設計により、レビュー指摘事項（指摘1〜4）がすべて完全に解消され、Orchestrator 本体との責務分離を維持しながら、持続可能で堅牢な継続的品質管理基盤の設計が確定した。
+本改訂設計により、外部レビュー指摘（REV-01〜REV-04）がすべて完全に解消され、履歴の不変性、単一 Writer 方式、鮮度判定の完全性、および実装ロードマップの整合性が確定した。
 
 **本報告完了の時点で作業を停止し、利用者の確認と承認を待つ。承認を得るまで Phase 2 以降の実装、Git コミット、Git プッシュは実行しない。**
