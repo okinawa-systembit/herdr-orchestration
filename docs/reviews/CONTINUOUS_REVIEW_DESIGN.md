@@ -47,31 +47,34 @@
 
 ### 1.2 現行設計の課題と外部レビュー検出事項
 
-Phase 1 設計書の外部レビュー（第2回〜第7回）において、継続的品質管理基盤としての堅牢性を確保するために以下の課題が特定された。
+Phase 1 設計書の外部レビュー（第2回〜第8回）において、継続的品質管理基盤としての堅牢性を確保するために以下の課題が特定された。
 
-| 課題領域                   | レビュー検出事項                                            |        重大度         | 継続運用におけるリスクと影響                                                                                                                     |
-| :------------------------- | :---------------------------------------------------------- | :-------------------: | :----------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Finding ID 採番競合**    | REV-01：Gitブランチ間の衝突解決と履歴不変性の矛盾           |   **P1 / Blocking**   | ブランチ間衝突時に確定済み結果ファイルの参照を書き換える方式は不変性原則と矛盾する。ローカルファイルロックでは異なるブランチ間の競合を防げない。 |
-| **単一Writerの形骸化**     | REV-02：再レビュー時に単一Writerを経由しない更新経路        |   **P2 / Blocking**   | 再レビュー時に Implementer が台帳を直接更新し、Reviewer が確定結果ファイルを直接作成する設計になっており、排他制御と整合しない。                 |
-| **鮮度判定の見落とし**     | REV-03：未分類ファイル検出による既知Scope評価の中断         |   **P2 / Blocking**   | 未分類ファイル検出時に早期終了するフローチャートになっており、同一コミットに含まれる既知Scopeの変更評価（stale判定）が見落とされる。             |
-| **依存導入の記述齟齬**     | REV-04：依存ライブラリ導入時期の記述不一致                  | **P2 / Non-blocking** | `@11ty/gray-matter` は Phase 1 で既に追加済み（package.json/lockfile更新済み）であるにもかかわらず、設計書内でPhase 2作業と記述されていた。      |
-| **確定前結果の受け渡し**   | NEW-01：確定前レビュー結果の永続化・受け渡し経路が不明確    |   **P2 / Blocking**   | Git管理外の `.review-inbox/` だけでは別作業ツリー・別マシン・別エージェントで管理ブランチ実行時に成果物が引き継がれず喪失・未登録となる。        |
-| **状態変更履歴の復旧**     | NEW-02：INDEX再生成だけではFindingの状態変更履歴を復旧不能  |   **P2 / Blocking**   | 初回確定結果のみでは Implementer の修正完了等の動的状態変更が失われ、INDEX破損時に最新状態を 100% 決定論的に復元できない。                       |
-| **複数ファイル更新**       | NEW-03：複数ファイルの原子的更新に関する説明が不正確        | **P2 / Non-blocking** | `fs.renameSync` はファイル単位の原子的操作であり複数ファイル間トランザクションではないため、クラッシュ時の部分不整合と復旧手順の明記が必要。     |
-| **複数正本ファイル不整合** | NEW-04：複数正本ファイルの部分更新に対する復旧設計が不足    |   **P1 / Blocking**   | 確定成果物とEVENTS.mdの片方のみ更新された状態でクラッシュした場合、再実行時のfingerprint照合や正本間不整合により復旧できなくなる。               |
-| **提出・確定タイミング**   | NEW-05：proposal.mdの受け渡し・確定タイミングが不明確       |   **P2 / Blocking**   | PRマージ前後の登録タイミング、管理ブランチでの取得方法、対象SHA検証、コード先行変更時の扱いが曖昧。                                              |
-| **追記不変性とヘッダー**   | NEW-06：EVENTS.mdの追記型不変性とFrontmatter更新の関係曖昧  | **P2 / Non-blocking** | Frontmatter内の集計メタデータ（件数等）を更新する設計では、ファイル先頭の書き換えが発生し純粋な追記のみ（Append-only）と矛盾する。               |
-| **中断時の更新責務**       | NEW-07：中断時のINDEX直接更新が単一Writer原則と不整合       | **P2 / Non-blocking** | レビュワーが中断時にINDEXを直接更新する記述が残っており、台帳管理CLIによる単一Writer原則と矛盾する。                                             |
-| **マージ方式の差異**       | NEW-08：Squash Merge時にレビュー対象SHAの先祖関係検証失敗   |   **P1 / Blocking**   | Squash/Rebase MergeでPRコミットが圧縮・再生成されると先祖関係検証（`--is-ancestor`）が失敗し、正常な提出物が登録拒絶される。                     |
-| **イベント行途中書き込み** | NEW-09：EVENTS.md追記途中の異常終了時の復旧設計が未定義     |   **P2 / Blocking**   | `appendFileSync`途中でクラッシュした場合に末尾に残る破損・不完全なイベント行の検知・切り戻し（トリム）・安全な再処理方法が未定義。               |
-| **検証と修復の責務混在**   | NEW-10：`review:check`の読取専用責務と自動修復処理が矛盾    | **P2 / Non-blocking** | 読み取り専用であるべき`review:check`が修復書き込みを行う記述になっており、CIや静的検査で意図せぬファイル変更を引き起こす恐れがある。             |
-| **中断状態とINDEX再生成**  | NEW-11：中断状態の永続性とINDEX再生成の関係が不明確         | **P2 / Non-blocking** | `rebuild-index`時に確定成果物のみを参照すると、`draft.md`に退避された作業中・中断状態（`paused`）がINDEX上で未着手に巻き戻ってしまう。           |
-| **独立イベント消失リスク** | NEW-12：EVENTS.md末尾復旧で状態変更イベントを消失する可能性 |   **P1 / Blocking**   | 確定成果物を持たない独立イベント（`status_update`等）の追記途中でクラッシュした場合、末尾トリムにより状態変更履歴が恒久的に失われる。            |
-| **先祖判定でのコード見逃** | NEW-13：SHA先祖判定成功時にレビュー対象コードの変更見逃し   |   **P1 / Blocking**   | 先祖判定（`--is-ancestor`）成功時にコード同一性確認を省略すると、レビュー対象コミット以降にマージされた変更が存在しても`fresh`と誤判定される。   |
-| **SHA検証と鮮度判定矛盾**  | NEW-14：SHA検証のハイブリッド方式と鮮度判定方針が矛盾       | **P2 / Non-blocking** | ハッシュ不一致時の振る舞いについて、「登録ブロック」と「過去結果として登録し鮮度判定でstale遷移」という相反する方針が混在している。              |
-| **Intent削除時期と復旧**   | NEW-15：操作意図ファイルの削除時期による障害復旧の不完全さ  |   **P1 / Blocking**   | 追記完了判定の曖昧さやINDEX更新前のクラッシュ、再実行時のイベント二重追記リスク、未完了Intentの冪等処理が未定義。                                |
-| **Squash履歴アルゴリズム** | NEW-16：Squash/Rebase Merge時の履歴正当性検証が未確定       |   **P2 / Blocking**   | コミットSHAが変化するSquash/Rebaseにおいて、PRや管理ブランチ取り込みを証明する具体的Git走査手順や検証不能時の安全停止が未確定。                  |
-| **トリム前の復元根拠検証** | NEW-17：EVENTS.md末尾トリム前に復元可能性を未検証           | **P2 / Non-blocking** | 復元根拠（成果物やIntent）の有無を確認する前に破損行を切り戻すと、復元不能時に破損行の情報まで失われ手動復旧が困難になる。                       |
+| 課題領域                   | レビュー検出事項                                            |        重大度         | 継続運用におけるリスクと影響                                                                                                                          |
+| :------------------------- | :---------------------------------------------------------- | :-------------------: | :---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Finding ID 採番競合**    | REV-01：Gitブランチ間の衝突解決と履歴不変性の矛盾           |   **P1 / Blocking**   | ブランチ間衝突時に確定済み結果ファイルの参照を書き換える方式は不変性原則と矛盾する。ローカルファイルロックでは異なるブランチ間の競合を防げない。      |
+| **単一Writerの形骸化**     | REV-02：再レビュー時に単一Writerを経由しない更新経路        |   **P2 / Blocking**   | 再レビュー時に Implementer が台帳を直接更新し、Reviewer が確定結果ファイルを直接作成する設計になっており、排他制御と整合しない。                      |
+| **鮮度判定の見落とし**     | REV-03：未分類ファイル検出による既知Scope評価の中断         |   **P2 / Blocking**   | 未分類ファイル検出時に早期終了するフローチャートになっており、同一コミットに含まれる既知Scopeの変更評価（stale判定）が見落とされる。                  |
+| **依存導入の記述齟齬**     | REV-04：依存ライブラリ導入時期の記述不一致                  | **P2 / Non-blocking** | `@11ty/gray-matter` は Phase 1 で既に追加済み（package.json/lockfile更新済み）であるにもかかわらず、設計書内でPhase 2作業と記述されていた。           |
+| **確定前結果の受け渡し**   | NEW-01：確定前レビュー結果の永続化・受け渡し経路が不明確    |   **P2 / Blocking**   | Git管理外の `.review-inbox/` だけでは別作業ツリー・別マシン・別エージェントで管理ブランチ実行時に成果物が引き継がれず喪失・未登録となる。             |
+| **状態変更履歴の復旧**     | NEW-02：INDEX再生成だけではFindingの状態変更履歴を復旧不能  |   **P2 / Blocking**   | 初回確定結果のみでは Implementer の修正完了等の動的状態変更が失われ、INDEX破損時に最新状態を 100% 決定論的に復元できない。                            |
+| **複数ファイル更新**       | NEW-03：複数ファイルの原子的更新に関する説明が不正確        | **P2 / Non-blocking** | `fs.renameSync` はファイル単位の原子的操作であり複数ファイル間トランザクションではないため、クラッシュ時の部分不整合と復旧手順の明記が必要。          |
+| **複数正本ファイル不整合** | NEW-04：複数正本ファイルの部分更新に対する復旧設計が不足    |   **P1 / Blocking**   | 確定成果物とEVENTS.mdの片方のみ更新された状態でクラッシュした場合、再実行時のfingerprint照合や正本間不整合により復旧できなくなる。                    |
+| **提出・確定タイミング**   | NEW-05：proposal.mdの受け渡し・確定タイミングが不明確       |   **P2 / Blocking**   | PRマージ前後の登録タイミング、管理ブランチでの取得方法、対象SHA検証、コード先行変更時の扱いが曖昧。                                                   |
+| **追記不変性とヘッダー**   | NEW-06：EVENTS.mdの追記型不変性とFrontmatter更新の関係曖昧  | **P2 / Non-blocking** | Frontmatter内の集計メタデータ（件数等）を更新する設計では、ファイル先頭の書き換えが発生し純粋な追記のみ（Append-only）と矛盾する。                    |
+| **中断時の更新責務**       | NEW-07：中断時のINDEX直接更新が単一Writer原則と不整合       | **P2 / Non-blocking** | レビュワーが中断時にINDEXを直接更新する記述が残っており、台帳管理CLIによる単一Writer原則と矛盾する。                                                  |
+| **マージ方式の差異**       | NEW-08：Squash Merge時にレビュー対象SHAの先祖関係検証失敗   |   **P1 / Blocking**   | Squash/Rebase MergeでPRコミットが圧縮・再生成されると先祖関係検証（`--is-ancestor`）が失敗し、正常な提出物が登録拒絶される。                          |
+| **イベント行途中書き込み** | NEW-09：EVENTS.md追記途中の異常終了時の復旧設計が未定義     |   **P2 / Blocking**   | `appendFileSync`途中でクラッシュした場合に末尾に残る破損・不完全なイベント行の検知・切り戻し（トリム）・安全な再処理方法が未定義。                    |
+| **検証と修復の責務混在**   | NEW-10：`review:check`の読取専用責務と自動修復処理が矛盾    | **P2 / Non-blocking** | 読み取り専用であるべき`review:check`が修復書き込みを行う記述になっており、CIや静的検査で意図せぬファイル変更を引き起こす恐れがある。                  |
+| **中断状態とINDEX再生成**  | NEW-11：中断状態の永続性とINDEX再生成の関係が不明確         | **P2 / Non-blocking** | `rebuild-index`時に確定成果物のみを参照すると、`draft.md`に退避された作業中・中断状態（`paused`）がINDEX上で未着手に巻き戻ってしまう。                |
+| **独立イベント消失リスク** | NEW-12：EVENTS.md末尾復旧で状態変更イベントを消失する可能性 |   **P1 / Blocking**   | 確定成果物を持たない独立イベント（`status_update`等）の追記途中でクラッシュした場合、末尾トリムにより状態変更履歴が恒久的に失われる。                 |
+| **先祖判定でのコード見逃** | NEW-13：SHA先祖判定成功時にレビュー対象コードの変更見逃し   |   **P1 / Blocking**   | 先祖判定（`--is-ancestor`）成功時にコード同一性確認を省略すると、レビュー対象コミット以降にマージされた変更が存在しても`fresh`と誤判定される。        |
+| **SHA検証と鮮度判定矛盾**  | NEW-14：SHA検証のハイブリッド方式と鮮度判定方針が矛盾       | **P2 / Non-blocking** | ハッシュ不一致時の振る舞いについて、「登録ブロック」と「過去結果として登録し鮮度判定でstale遷移」という相反する方針が混在している。                   |
+| **Intent削除時期と復旧**   | NEW-15：操作意図ファイルの削除時期による障害復旧の不完全さ  |   **P1 / Blocking**   | 追記完了判定の曖昧さやINDEX更新前のクラッシュ、再実行時のイベント二重追記リスク、未完了Intentの冪等処理が未定義。                                     |
+| **Squash履歴アルゴリズム** | NEW-16：Squash/Rebase Merge時の履歴正当性検証が未確定       |   **P2 / Blocking**   | コミットSHAが変化するSquash/Rebaseにおいて、PRや管理ブランチ取り込みを証明する具体的Git走査手順や検証不能時の安全停止が未確定。                       |
+| **トリム前の復元根拠検証** | NEW-17：EVENTS.md末尾トリム前に復元可能性を未検証           | **P2 / Non-blocking** | 復元根拠（成果物やIntent）の有無を確認する前に破損行を切り戻すと、復元不能時に破損行の情報まで失われ手動復旧が困難になる。                            |
+| **提出元コミット正当性**   | NEW-18：C_importのハッシュ一致だけでは提出元正当性が不十分  |   **P1 / Blocking**   | ハッシュ一致は内容の一致しか証明せず、target_commitが実際にそのPRのレビュー対象であったか、そのPRを通じて取り込まれたかの履歴的正当性を保証できない。 |
+| **破損イベント根拠対応**   | NEW-19：破損イベントと復元根拠の対応検証不足                |   **P2 / Blocking**   | 末尾破損行の復旧時に、単に根拠ファイルが存在するだけでトリム・復元を行うと、無関係な過去成果物を誤認して別イベントを破損・誤トリムする恐れがある。    |
+| **Intent残存重複判定不足** | NEW-20：Intent残存時の重複判定が不十分                      | **P2 / Non-blocking** | event_idの一致だけで適用済みと判定すると、同一IDで別内容のイベントが存在した場合に状態変更が消失し、台帳不整合を引き起こす危険性がある。              |
 
 ---
 
@@ -458,12 +461,15 @@ completed_at: 2026-10-14T14:15:00+09:00
      - イベント ID が `EVT-0001` から 1 ずつ欠番・重複なく単調増加していること。
      - タイムスタンプが時系列順に単調増加していること。
      - Git コミット履歴を遡り、過去のコミットに存在したイベント行が削除・改変されていないこと（削除差分 `-` の不在検証）。
-3. **末尾破損行（途中書き込み）の検知・事前根拠検証・安全復旧規則 (NEW-09, NEW-12, NEW-15, NEW-17対応)**:
+3. **末尾破損行（途中書き込み）の検知・一意な根拠事前検証・安全復旧規則 (NEW-09, NEW-12, NEW-15, NEW-17, NEW-19対応)**:
    - 各イベント行は必ず `| EVT-\d{4} | ... |` の正規表現に完全合致し、改行コード（`\n`）で終端されていなければならない。
-   - `fs.appendFileSync` 実行途中の予期せぬプロセス終了（SIGKILL、電源断等）によって末尾に不完全な行（改行欠落、列数不足、文字途切れ）が残った場合、CLI（`review:repair` または `review:register` の前処理）は**トリム前に必ず復元根拠を検証し、以下の手順で安全に修復する**：
+   - `fs.appendFileSync` 実行途中の予期せぬプロセス終了（SIGKILL、電源断等）によって末尾に不完全な行（改行欠落、列数不足、文字途切れ）が残った場合、CLI（`review:repair` または `review:register` の前処理）は**トリム前に必ず復元根拠との一意な対応関係を検証し、以下の手順で安全に修復する**：
      - **破損検出と保全 (NEW-17対応)**: 最終行が改行終端されていない、または正規表現を満たさない不完全行を検出した際、**即座にファイルを切り戻さず、破損行文字列をメモリ上に退避保全**する。
-     - **復元根拠の事前検証と安全停止 (NEW-17対応)**: 確定成果物または操作意図ファイル (`docs/reviews/findings/.pending-event.json`) の存在を先に確認する。復元根拠が存在しない場合は**元ファイルを一切変更（トリム）せず、破損状態を保持したまま安全停止（exit code 1）**する（推測再生成の禁止と手動復旧情報の保全）。
-     - **末尾トリムと冪等な再追記 (NEW-15対応)**: 復元根拠を確認できた場合に限り、直前の健全な改行位置まで `fs.truncateSync` で切り戻す。独立イベントの場合、`.pending-event.json` の `event_id` と `EVENTS.md` を照合し、既に完全記録されていれば二重追記をスキップし、未記録の場合のみ再追記する。
+     - **期待イベントIDの算出と断片照合 (NEW-19対応)**: 直前の健全行の連番から、破損行が持つべき連番期待値 `expected_event_id`（`last_event_id + 1`）を数学的に一意に算出する。破損行文字列から抽出可能な断片（部分ID、Finding ID、イベント種別等）が期待値と矛盾しないことを検証する。
+     - **復元根拠の一意対応検証と安全停止 (NEW-17, NEW-19対応)**:
+       - 確定成果物（`result.md` / `recheck-NN.md` / `delta-NN.md`）または操作意図ファイル (`docs/reviews/findings/.pending-event.json`) の中から、`event_id` が `expected_event_id` と完全一致し、かつ `EVENTS.md` の健全行に未記録である根拠を探索する。
+       - 復元根拠が実体としてディスク上に存在しない場合、または成果物と Intent の双方が競合して一意に特定できない（曖昧な）場合、**元ファイルを一切変更（トリム）せず、破損状態を保持したまま安全停止（exit code 1）**する（推測再生成の禁止と手動復旧情報の保全）。
+     - **末尾トリムと冪等な再追記 (NEW-15, NEW-19対応)**: 一意な復元根拠を確認できた場合に限り、直前の健全な改行位置まで `fs.truncateSync` で安全に切り戻し、完全なイベントデータを再追記する。
      - **復旧後検証とIntent削除 (NEW-15対応)**: イベント ID 連番と状態遷移の完全性を検証し、派生台帳（INDEX）の同期が完了した後にのみ `.pending-event.json` を削除する。
 
 ```markdown
@@ -514,26 +520,29 @@ completed_at: 2026-10-15T10:00:00+09:00
 
 ### 5.8 各レビュー種別の Frontmatter 項目対応表
 
-| 項目                           |  提出物 (`proposal.md`)  |    初回 (`result.md`)     | 再レビュー (`recheck-NN.md`) |   差分 (`delta-NN.md`)    | 用途                                                   |
-| :----------------------------- | :----------------------: | :-----------------------: | :--------------------------: | :-----------------------: | :----------------------------------------------------- |
-| `campaign_id`                  |         **必須**         |         **必須**          |           **必須**           |         **必須**          | 所属する実施回                                         |
-| `scope_id`                     |         **必須**         |         **必須**          |           **必須**           |         **必須**          | 対象論理 Scope                                         |
-| `review_type`                  |        `proposal`        |         `initial`         |         `re-review`          |          `delta`          | レビュー種別の識別                                     |
-| `target_commit`                |         **必須**         |         **必須**          |           **必須**           |         **必須**          | 検証対象コミットSHA                                    |
-| `scope_tree_hash`              |         **必須**         |           任意            |             なし             |           なし            | Squash/Rebase時の構成ファイル複合ハッシュ (NEW-08対応) |
-| `base_commit`                  |           任意           |       任意 (null可)       |           **必須**           |         **必須**          | 比較元コミットSHA                                      |
-| `previous_result_ref`          |           なし           |           なし            |           **必須**           |           任意            | 前回の結果ファイル参照                                 |
-| `recheck_round`                |           なし           |           なし            |           **必須**           |           なし            | 再レビュー連番                                         |
-| `provisional_findings`         |         **必須**         |           なし            |             なし             |           なし            | 仮ID・fingerprint付き指摘リスト                        |
-| `reported_findings`            |           なし           |         **必須**          |             なし             |           なし            | 正式ID付き確定指摘リスト                               |
-| `id_mappings`                  |           なし           |         **必須**          |             なし             |           なし            | 仮IDと正式IDの対応表                                   |
-| `resolution_commits`           |           なし           |           なし            |           **必須**           |           なし            | 修正コミットのリスト                                   |
-| `rechecked_findings`           |           なし           |           なし            |           **必須**           |           なし            | 再検証対象 Finding と合否                              |
-| `diff_files`                   |           なし           |           なし            |             なし             |         **必須**          | 検証した差分ファイル一覧                               |
-| `work_status`                  |         **必須**         |         **必須**          |           **必須**           |         **必須**          | 作業状態                                               |
-| `verdict`                      |         **必須**         |         **必須**          |           **必須**           |         **必須**          | 品質判定                                               |
-| `reviewed_by`                  |         **必須**         |         **必須**          |           **必須**           |         **必須**          | 実施エージェント/モデル                                |
-| `proposed_at` / `completed_at` | **必須** (`proposed_at`) | **必須** (`completed_at`) |  **必須** (`completed_at`)   | **必須** (`completed_at`) | タイムスタンプ                                         |
+| 項目                           |  提出物 (`proposal.md`)  |    初回 (`result.md`)     | 再レビュー (`recheck-NN.md`) |   差分 (`delta-NN.md`)    | 用途                                                       |
+| :----------------------------- | :----------------------: | :-----------------------: | :--------------------------: | :-----------------------: | :--------------------------------------------------------- |
+| `campaign_id`                  |         **必須**         |         **必須**          |           **必須**           |         **必須**          | 所属する実施回                                             |
+| `scope_id`                     |         **必須**         |         **必須**          |           **必須**           |         **必須**          | 対象論理 Scope                                             |
+| `review_type`                  |        `proposal`        |         `initial`         |         `re-review`          |          `delta`          | レビュー種別の識別                                         |
+| `target_commit`                |         **必須**         |         **必須**          |           **必須**           |         **必須**          | 検証対象コミットSHA                                        |
+| `scope_tree_hash`              |         **必須**         |           任意            |             なし             |           なし            | Squash/Rebase時の構成ファイル複合ハッシュ (NEW-08, 16対応) |
+| `base_commit`                  |         **必須**         |       任意 (null可)       |           **必須**           |         **必須**          | 比較元・分岐元コミットSHA (NEW-18対応)                     |
+| `source_branch`                |         **必須**         |           任意            |             なし             |           なし            | 提出元ブランチ名 (NEW-18対応)                              |
+| `patch_id`                     |         **必須**         |           任意            |             なし             |           なし            | 当該Scope差分のパッチID (NEW-18対応)                       |
+| `pr_number`                    |           任意           |           任意            |             任意             |           任意            | 関連 PR 番号 (NEW-18対応)                                  |
+| `previous_result_ref`          |           なし           |           なし            |           **必須**           |           任意            | 前回の結果ファイル参照                                     |
+| `recheck_round`                |           なし           |           なし            |           **必須**           |           なし            | 再レビュー連番                                             |
+| `provisional_findings`         |         **必須**         |           なし            |             なし             |           なし            | 仮ID・fingerprint付き指摘リスト                            |
+| `reported_findings`            |           なし           |         **必須**          |             なし             |           なし            | 正式ID付き確定指摘リスト                                   |
+| `id_mappings`                  |           なし           |         **必須**          |             なし             |           なし            | 仮IDと正式IDの対応表                                       |
+| `resolution_commits`           |           なし           |           なし            |           **必須**           |           なし            | 修正コミットのリスト                                       |
+| `rechecked_findings`           |           なし           |           なし            |           **必須**           |           なし            | 再検証対象 Finding と合否                                  |
+| `diff_files`                   |           なし           |           なし            |             なし             |         **必須**          | 検証した差分ファイル一覧                                   |
+| `work_status`                  |         **必須**         |         **必須**          |           **必須**           |         **必須**          | 作業状態                                                   |
+| `verdict`                      |         **必須**         |         **必須**          |           **必須**           |         **必須**          | 品質判定                                                   |
+| `reviewed_by`                  |         **必須**         |         **必須**          |           **必須**           |         **必須**          | 実施エージェント/モデル                                    |
+| `proposed_at` / `completed_at` | **必須** (`proposed_at`) | **必須** (`completed_at`) |  **必須** (`completed_at`)   | **必須** (`completed_at`) | タイムスタンプ                                             |
 
 ---
 
@@ -598,30 +607,40 @@ sequenceDiagram
      - コード変更と `proposal.md` は同一 PR 内でレビュー・承認され、**PR が管理ブランチへマージされた直後に正式登録を行う**。これにより「管理ブランチに提出物ファイルが存在する」状態が Git レベルで確実に成立する。
    - **任意運用（PRマージ前インポート方式: Pre-Merge Import）**:
      - 管理ブランチで先行して正式 Finding ID を確定したい場合、CLI コマンドに `--from-ref <branch>` オプションを指定することで、未マージブランチの `proposal.md` を直接インポートして登録することを可能とする。
-2. **登録可否判定とコード同一性・鮮度判定の明確な分離 (NEW-08, NEW-13, NEW-14, NEW-16対応)**:
+2. **登録可否判定とコード同一性・鮮度判定の明確な分離 (NEW-08, NEW-13, NEW-14, NEW-16, NEW-18対応)**:
    - CLI（`review:register`）は実行時、「レビュー対象の履歴正当性」「現在の HEAD とのコード同一性」「最新鮮度」を混同せず、以下の **3 段階の判定パイプライン** を厳格に適用する：
-     - **第 1 判定：レビュー対象の履歴正当性検証（登録可否判定 - NEW-16対応）**:
-       - 目的: 提出されたレビューが管理ブランチの履歴に基づいているかを検証し、無関係なコミットや別ブランチからの誤提出をブロックする。
+     - **第 1 判定：レビュー対象の履歴正当性・真正性検証（登録可否判定 - NEW-16, NEW-18対応）**:
+       - **目的と原則 (NEW-18)**:
+         提出されたレビューが管理ブランチの履歴に基づいているかを検証し、無関係なコミットや別ブランチからの誤提出・偽装提出をブロックする。
+         **コード内容の同一性（ファイルハッシュ一致）と提出元コミットの履歴的正当性（Provenance）は厳格に区別**され、ハッシュが一致していても提出元との正当な取り込み関係が証明できないコミットは登録を許可しない。
        - **通常 Merge / Fast-Forward**:
          `git merge-base --is-ancestor <target_commit> HEAD` を実行し、対象コミットが管理ブランチの履歴に確実に含まれていることを確認する。
-       - **Squash / Rebase Merge（決定論的履歴検証アルゴリズム - NEW-16）**:
-         コミット SHA が再生成されるため `--is-ancestor` は不成立となる。この場合、CLI は以下の決定論的アルゴリズムによって取り込みの正当性を機械検証する：
+       - **Squash / Rebase Merge（決定論的履歴・証跡検証アルゴリズム - NEW-16, NEW-18）**:
+         コミット SHA が再生成されるため `--is-ancestor` は不成立となる。この場合、CLI は以下の決定論的手順によって取り込みコミットと提出元コミットの正当な関連付けを機械検証する：
          1. **取り込みコミット（`C_import`）の特定**:
             管理ブランチ履歴から、当該提出物を取り込んだ直近のコミット `C_import` を特定する：
             `git log -n 1 --format=%H -- campaigns/{CID}/{ScopeID}/proposal.md`
-         2. **取り込みコミット時点のハッシュ算出（`import_scope_hash`）**:
-            特定したコミット `C_import` 時点における当該 Scope 構成ファイル群の複合ハッシュを算出する：
-            `git ls-tree -r --name-only <C_import> -- <scope_primary_files>` で取得した各ファイルの内容から複合ハッシュ `import_scope_hash` を決定論的に算出する。
-         3. **ハッシュ照合による履歴正当性の確定**:
-            `proposal.md` 内に記録された `scope_tree_hash` と `import_scope_hash` を比較照合する。
-            - **一致**: PR が Squash / Rebase マージされた時点でレビュー対象コードと同一内容が管理ブランチに取り込まれたことが数学的に証明され、第 1 判定「合格（正当な取り込み）」と確定する。
-            - **不一致**: PR マージ時にコンフリクト解消や別修正が混入し、レビュー対象外のコードが取り込まれているため、正当な取り込みとみなさず安全停止する。
-       - **PR マージ前インポート（`--from-ref <branch>`）時の検証手順 (NEW-16)**:
+         2. **提出元コミットと `C_import` の関連付け検証（多層照合パイプライン - NEW-18）**:
+            外部 API に依存せず、Git 標準機能と提出物メタデータを用いて以下を検証する：
+            - **検証 A (パッチ同一性照合: `git patch-id` による変更内容の証明)**:
+              `target_commit` がローカル Git オブジェクト DB に存在する場合、提出元ブランチの分岐元 `base_commit` から `target_commit` への差分パッチ ID（`git diff <base_commit>..<target_commit> -- <scope_primary_files> | git patch-id`）を算出する。そして、取り込みコミット `C_import` の差分パッチ ID（`git diff C_import^..C_import -- <scope_primary_files> | git patch-id`）と照合する。パッチ ID が完全一致すれば、「`target_commit` で行われたコード変更」が「`C_import` で取り込まれた変更そのものである」ことが決定論的に証明される。
+            - **検証 B (PR 番号・コミットメッセージ照合)**:
+              `C_import` のコミットメッセージに PR 番号（例: `(#123)` または `Merge pull request #123`）が含まれている場合、`proposal.md` 内の `pr_number` と照合する。さらに GitHub PR 参照（`refs/pull/<pr_number>/head`）が存在する場合は、その参照先が `target_commit` を含むことを検証する。
+            - **検証 C (Squash 説明文内のコミットログ照合)**:
+              Squash Merge コミットの説明文（body）に記録されたコミットログに、`target_commit` の短縮 SHA またはタイトルが含まれているかを照合する。
+         3. **取り込みコミット時点のハッシュ算出（`import_scope_hash`）**:
+            特定したコミット `C_import` 時点における当該 Scope 構成ファイル群の複合ハッシュ `import_scope_hash` を算出し、`proposal.md` 内の `scope_tree_hash` と照合する。
+         4. **判定確定と合格基準**:
+            - **合格**: 提出元との関連付け（検証 A、B、C のいずれか）が証明され、かつ `import_scope_hash == scope_tree_hash` である場合、第 1 判定「合格（正当な取り込み）」と確定する。
+            - **不合格・安全停止（推測登録の厳格禁止 - NEW-16, NEW-18）**:
+              提出元コミットの関連付けが証明できない場合（無関係なコミット SHA の偽装指定等）、またはハッシュが不一致の場合は、**推測による登録を厳格に禁止**する。エラー詳細（対象コミットSHA、検出されたコミットSHA、期待パッチID、算出ハッシュ等）を出力し、**終了コード 1（exit code 1）で安全に登録を即座に中断（安全停止）**する。
+       - **PR マージ前インポート（`--from-ref <branch>`）時の検証手順 (NEW-16, NEW-18)**:
          未マージブランチから先行インポートする場合、以下を検証する：
          1. `git merge-base --is-ancestor <target_commit> <branch>` により、`target_commit` が指定ブランチの先祖または HEAD であることを確認。
          2. `<target_commit>` 時点における当該 Scope 構成ファイル複合ハッシュを算出し、`proposal.md` 内の `scope_tree_hash` と一致することを確認。
-       - **検証不能時の安全停止（推測登録の厳格禁止 - NEW-16）**:
-         コミット `C_import` が特定できない、または `import_scope_hash` が `scope_tree_hash` と一致しない（かつ `--is-ancestor` も成立しない）場合、CLI は**推測や曖昧なフォールバックによる登録を厳格に禁止**する。エラー詳細（対象コミットSHA、検出されたコミットSHA、期待ハッシュ、算出ハッシュ）を明示出力し、**終了コード 1（exit code 1）で安全に登録を即座に中断（安全停止）**する。
+         3. `base_commit` と `target_commit` から算出したパッチ ID が、`proposal.md` 内の `patch_id` と一致することを確認。
+       - **検証不能時の安全停止（推測登録の厳格禁止 - NEW-16, NEW-18）**:
+         コミット `C_import` が特定できない、または履歴正当性・パッチ同一性が証明できない（かつ `--is-ancestor` も成立しない）場合、CLI は**推測や曖昧なフォールバックによる登録を厳格に禁止**する。エラー詳細を明示出力し、**終了コード 1（exit code 1）で安全に登録を即座に中断（安全停止）**する。
      - **第 2 判定：コード内容の同一性確認（`scope_tree_hash` 照合 - NEW-13対応）**:
        - 目的: 管理ブランチ HEAD の現在のコードが、レビュー実施時点のコードと完全一致しているかを確認する（先祖判定の成否に関わらず独立して必ず実施する）。
        - 現在の管理ブランチ HEAD における当該 Scope 構成ファイル群から算出した複合ハッシュ（`current_scope_hash`）と、`proposal.md` 内に記録された `scope_tree_hash` を比較照合する。
@@ -888,38 +907,47 @@ Step 4: findings/.pending-event.json を削除 (unlinkSync)
   - **検出**: `findings/EVENTS.md` にイベント行が存在するが、`source_ref` が指す成果物ファイルが存在しない。
   - **修復（`review:repair`）**: 未完了トランザクションと判定。CLI は作業ツリーに残っている元の `proposal.md` から成果物ファイルを確定生成し、正本間の整合性を完了させる。
   - ※万一 `proposal.md` も存在しない致命的異常時は、修復コマンドは「成果物欠落エラー」を報告し、Git コミット履歴からの手動復元を促す。
-- **不整合ケース C（EVENTS.md 追記途中のクラッシュによる末尾破損行） (NEW-09, NEW-12, NEW-15, NEW-17対応)**:
+- **不整合ケース C（EVENTS.md 追記途中のクラッシュによる末尾破損行） (NEW-09, NEW-12, NEW-15, NEW-17, NEW-19対応)**:
   - **検出**: `findings/EVENTS.md` の最終行が改行（`\n`）で終端されていない、または列数が不足している・正規表現（`^\| EVT-\d{4} \|`）に合致しない不完全な行となっている。
   - **修復（`review:repair`）手順**:
     1. **破損行の検出とメモリ退避保全 (NEW-17)**:
        末尾の破損行文字列を検出した際、**直ちにディスク上のファイルをトリム（切り戻し）せず、破損行文字列をメモリ上に退避保全**する。
-    2. **復元根拠の事前検証（Pre-check Evidence - NEW-17）**:
-       末尾行を切り戻す前に、復元根拠が実体としてディスク上に存在するかを先に検証する：
-       - 確定成果物（`result.md` / `recheck-NN.md` / `delta-NN.md`）の `event_id`
-       - または操作意図ファイル（`findings/.pending-event.json`）の `event_id`
-    3. **復元根拠欠落時の非破壊安全停止 (NEW-17)**:
-       万一確定成果物も `.pending-event.json` も存在せず、復旧根拠データが確認できない場合、**元ファイルの切り戻し（トリム）を一切行わず、破損状態を保持したまま安全停止（exit code 1）**する。これにより、破損行に含まれるわずかな情報（イベント日時、対象FindingID、要約等）の消失を防ぎ、手動調査・手動復旧の可能性を最大限に保全する（推測による架空イベント再生成の厳格禁止）。
-    4. **末尾トリム（Truncation）**:
-       復元根拠の存在を確認できた場合に限り、直前の健全な改行位置（`\n`）まで `fs.truncateSync` で安全に切り戻す（破損文字の安全な除去）。
-    5. **イベント種別に応じた安全な再追記**:
+    2. **期待イベントIDの算出と破損行断片照合 (NEW-19)**:
+       直前の健全な最終イベント行の ID（例: `EVT-0004`）から、破損行が持つべき連番期待値 `expected_event_id`（例: `EVT-0005`）を数学的に一意に算出する。破損行文字列から抽出可能な断片（部分ID、Finding ID、イベント種別等）を正規表現で解析し、`expected_event_id` と矛盾しないかを検証する（破損行に別の ID が明記されている場合は重大な連番不整合として即座に安全停止）。
+    3. **復元根拠の一意対応検証（Exact & Exclusive Binding - NEW-19）**:
+       末尾行を切り戻す前に、`expected_event_id` に対応する復元根拠が「一意かつ排他的」に存在するかを以下の順序で検証する：
+       - **候補 A (未バインドの確定成果物 - ケース C-1)**:
+         確定成果物群（`result.md` / `recheck-NN.md` / `delta-NN.md`）の中から、Frontmatter に `event_id == expected_event_id` を持ち、かつ `EVENTS.md` の健全行にまだ登録されていない成果物を探索する。破損行に断片（Finding ID や成果物パス）が残っている場合はそれとも完全一致することを確認する。
+       - **候補 B (未完了の操作意図ファイル - ケース C-2)**:
+         `docs/reviews/findings/.pending-event.json` を読み込み、その中の `event_id` が `expected_event_id` と完全一致し、かつ `EVENTS.md` の健全行に未登録であることを確認する。破損行に断片が残っている場合はそれとも完全一致することを確認する。
+       - **曖昧性の排除と複数候補の禁止**:
+         候補 A と候補 B の双方が同時に存在する場合、あるいは同一の `expected_event_id` を主張する複数の成果物が存在する場合、**曖昧な推測による自動復旧は厳格に禁止**する。
+    4. **復元根拠欠落・競合時の非破壊安全停止 (NEW-17, NEW-19)**:
+       `expected_event_id` に一意に対応する完全な復元根拠が確認できない場合（根拠が存在しない、または複数競合している場合）、**元ファイル（EVENTS.md）を一切切り戻し（トリム）せず、破損状態を完全に保全したまま安全停止（exit code 1）**する。エラー詳細（破損行文字列、期待イベントID、探索結果、競合状況）を出力し、手動調査・手動復旧を促す（推測による架空イベント再生成の厳格禁止）。
+    5. **一意確定後の末尾トリム（Truncation）**:
+       復元根拠が一意に確定した場合に限り、直前の健全な改行位置（`\n`）まで `fs.truncateSync` で安全に切り戻す（破損文字の安全な除去）。
+    6. **イベント種別に応じた安全な再追記**:
        - **ケース C-1 (確定成果物対応イベント: `registered`, `rechecked`, `delta_verified`)**:
          確定成果物の Frontmatter に記録された `event_id`、Finding ID、fingerprint、target_commit 等から完全なイベント行を再構成し、末尾に再追記して相互バインドを成立させる。
        - **ケース C-2 (独立した状態変更イベント: `status_update` 等)**:
          操作意図ファイル (`docs/reviews/findings/.pending-event.json`) に記録された完全なイベントデータ（イベントID、日時、対象Finding、新旧ステータス、コミットSHA、実行者、要約）からイベント行を安全に再追記する。
-    6. **復旧後検証と派生台帳同期 (NEW-15)**:
+    7. **復旧後検証と派生台帳同期 (NEW-15)**:
        イベント ID の連番連続性（欠番・重複なし）、タイムスタンプ単調増加、状態遷移ルールを検証し、派生台帳（INDEX）を同期する。
-    7. **操作意図ファイルの安全な削除 (NEW-15)**:
+    8. **操作意図ファイルの安全な削除 (NEW-15)**:
        台帳同期まで全工程が正常完了した後にのみ、`.pending-event.json` を削除（unlinkSync）する。
-- **不整合ケース D（操作意図ファイル `.pending-event.json` の残存・未完了 Intent の復旧） (NEW-15対応)**:
+- **不整合ケース D（操作意図ファイル `.pending-event.json` の残存・未完了 Intent の復旧） (NEW-15, NEW-20対応)**:
   - **検出**: `docs/reviews/findings/.pending-event.json` がディスク上に残存している。
   - **修復（`review:repair` またはコマンド再実行時）**:
-    1. **重複照合（冪等性判定）**:
-       `.pending-event.json` に記録された `event_id` が、既に `findings/EVENTS.md` に完全な行として記録されているかを照合する。
-    2. **分岐 A (EVENTS.md に記録済みの場合)**:
-       イベント行の追記完了後、派生台帳の同期前または Intent 削除前にクラッシュしたと判定。`EVENTS.md` への多重追記（二重登録）は行わずスキップし、派生台帳（INDEX）の同期を実行した上で、`.pending-event.json` を削除（unlinkSync）する。
-    3. **分岐 B (EVENTS.md に未記録の場合)**:
-       イベント行の追記前にクラッシュしたと判定。`.pending-event.json` のデータから `findings/EVENTS.md` の末尾にイベント行を追記し、派生台帳（INDEX）を同期した上で、`.pending-event.json` を削除（unlinkSync）する。
-    - これにより、プロセスクラッシュがどのタイミング（追記前、追記中、台帳同期前）で発生しても、状態変更イベントが消失することなく、かつ二重追記されることもなく、100% 決定論的かつ安全に完全復旧される。
+    1. **重複照合と全属性完全一致検証 (NEW-20)**:
+       `.pending-event.json` に記録された `event_id` を持つイベント行が、既に `findings/EVENTS.md` に存在するかを走査する。
+       - 存在する場合、該当行をパースして全属性（`event_id`, `finding_id`, `event_type`, `from_status`, `to_status`, `commit_sha`, `actor`, `summary` 等）を抽出し、`.pending-event.json` の内容と**完全一致（Exact Content Match）**するか照合する。
+    2. **分岐 A (EVENTS.md に完全一致で記録済みの場合)**:
+       イベント行の追記完了後、派生台帳の同期前または Intent 削除前にクラッシュした正当な残存と判定。`EVENTS.md` への多重追記（二重登録）は行わずスキップし、派生台帳（INDEX）の同期を実行した上で、同期完了を確認して `.pending-event.json` を削除（unlinkSync）する。
+    3. **分岐 B (同一IDで内容が不一致の場合 - 重大異常 - NEW-20)**:
+       `event_id` は一致するが、Finding ID、ステータス変更、コミット SHA などの内容が異なる場合、**不正な ID 衝突または未知のデータ破壊**と判定。推測による処理や Intent の削除は**厳格に禁止**し、不一致詳細（Intent 側内容と EVENTS.md 側内容の差分）を明示出力して **終了コード 1（exit code 1）で安全に緊急停止**する。
+    4. **分岐 C (EVENTS.md に未記録の場合)**:
+       連番整合性を確認した上で、`.pending-event.json` のデータから `findings/EVENTS.md` の末尾にイベント行を追記し、派生台帳（INDEX）の同期を実行し、完了後に `.pending-event.json` を削除（unlinkSync）する。
+    - これにより、プロセスクラッシュがどのタイミングで発生しても、状態変更イベントが消失することなく、二重追記も内容の食い違いも 100% 決定論的かつ安全に完全防止される。
 - **検査と修復の厳格な責務分離 (NEW-10対応)**:
   - `npm run review:check` は純粋な**読み取り専用検査（Read-only）**であり、ディスク上のファイルに対する変更・書き込み・修復は一切行わない。CI や PR 検査で安全に利用できる。不整合や末尾破損を検知した場合は、不整合箇所の詳細と `npm run review:repair` の実行指示を出力し、終了コード 1 を返す。
   - `npm run review:repair` は**明示的修復コマンド**であり、排他ロック（`.review-lock`）を取得した上で上記ケース A/B/C/D の不整合を修復し、後述の台帳再生成（INDEX 再生成）を一貫して実行する。
@@ -1096,23 +1124,23 @@ flowchart TD
    - `review:submit-proposal`: レビュワーが作成した仮指摘を検証し、対象 Scope 構成ファイルの複合ハッシュ `scope_tree_hash` を自動計算して記録した Git コミット対象の `campaigns/{CID}/{ScopeID}/proposal.md` を生成（NEW-01, NEW-05, NEW-08対応）。
    - `review:pause`: レビュワーが 5 時間枠等で中断する際、`draft.md` を退避し、Campaign/全体 INDEX を `中断 (paused)` にアトミック更新（NEW-07, NEW-11対応、直接編集禁止）。
 3. **書き込み・修復専用コマンド（単一 Writer 集約・管理ブランチ実行・排他ロック制御）**:
-   - `review:register`: `proposal.md` を取り込み、3 段階検証（第 1: 履歴正当性（Squash/Rebase 時の `C_import` 特定と `import_scope_hash` 照合、検証不能時安全停止を含む）、第 2: HEAD との `scope_tree_hash` 同一性照合、第 3: 確定結果登録と鮮度格付け）を実行。正式 Finding ID を採番して `findings/EVENTS.md` と `result.md` を相互バインド生成し、台帳同期（fresh または stale）と提出物削除を実行（NEW-01, NEW-04, NEW-05, NEW-08, NEW-13, NEW-14, NEW-16対応）。
+   - `review:register`: `proposal.md` を取り込み、3 段階検証（第 1: 履歴正当性・真正性検証（Squash/Rebase 時の `C_import` 特定、パッチID照合/PR照合による提出元コミット関連付け証明、`import_scope_hash` 照合、検証不能時安全停止を含む）、第 2: HEAD との `scope_tree_hash` 同一性照合、第 3: 確定結果登録と鮮度格付け）を実行。正式 Finding ID を採番して `findings/EVENTS.md` と `result.md` を相互バインド生成し、台帳同期（fresh または stale）と提出物削除を実行（NEW-01, NEW-04, NEW-05, NEW-08, NEW-13, NEW-14, NEW-16, NEW-18対応）。
    - `review:finding-update`: Implementer による Finding ステータス更新（修正済み・再検証待ち）。追記前に操作意図ファイル（`findings/.pending-event.json`）をアトミック配置し、`findings/EVENTS.md` への追記および派生台帳（INDEX）の同期が完了した後にのみ一時ファイルを削除（NEW-02, NEW-12, NEW-15対応）。
    - `review:record-recheck`: 再レビュー結果から連番 `recheck-NN.md` を確定生成し、`findings/EVENTS.md` に追記の上、台帳同期（NEW-02, NEW-04対応）。
    - `review:sync-inbox`: 同一マシン環境におけるローカル一時バッファ（`.review-inbox`）からの直接同期（手動・補助用）。
    - `review:rebuild-index`: 確定済み成果物（`result.md`, `recheck-NN.md`, `delta-NN.md`）、状態変更イベントログ（`findings/EVENTS.md`）、および作業状態の正本（`draft.md`）を走査して全 INDEX 群を 100% 決定論的に再生成・復旧（NEW-02, NEW-03, NEW-11対応）。
-   - `review:repair`: 正本間の相互バインド欠落（ケースA, B）の自動補完、`findings/EVENTS.md` の末尾破損検出・メモリ退避保全、トリム前の復元根拠事前検証と根拠欠落時の非破壊安全停止（exit code 1）、復元根拠確認後の末尾破損行トリムおよび成果物／`.pending-event.json` からの安全な再追記（ケースC）、残存 `.pending-event.json` の重複照合・冪等同期（ケースD）、および全 INDEX の再生成を実行し、台帳全体の整合性を修復する明示的修復コマンド（NEW-09, NEW-10, NEW-12, NEW-15, NEW-17対応）。
+   - `review:repair`: 正本間の相互バインド欠落（ケースA, B）の自動補完、`findings/EVENTS.md` の末尾破損検出・メモリ退避保全、期待イベントID算出と破損行断片照合、復元根拠の一意対応検証（複数競合・曖昧自動復旧の禁止）と根拠欠落時の非破壊安全停止（exit code 1）、復元根拠一意確定後の末尾破損行トリムおよび成果物／`.pending-event.json` からの安全な再追記（ケースC）、残存 `.pending-event.json` の全属性完全一致照合・同一ID内容不一致時安全停止・冪等同期（ケースD）、および全 INDEX の再生成を実行し、台帳全体の整合性を修復する明示的修復コマンド（NEW-09, NEW-10, NEW-12, NEW-15, NEW-17, NEW-19, NEW-20対応）。
 
 ### 12.3 Phase 2〜5 の具体的ロードマップ
 
 ```mermaid
 timeline
     title 継続的レビュー品質管理基盤 導入ロードマップ
-    Phase 1 : 現状調査とアーキテクチャ設計 (本設計書) : レビュー指摘 REV-01〜04 および NEW-01〜17 反映完了
-    Phase 2 : レビュー台帳・Node.js CLIの実装 : gray-matter検証 : 20Scope移行 : C001構造初期化 : Finding台帳・EVENTS.md作成 : review:check / rebuild / repair (根拠事前検証・非破壊停止) 実装
-    Phase 3 : レビューSkill連携 : repo-review Skill連携手順整備 : proposal提出物 (scope_tree_hash)・register連携 (3段階検証・C_import検証) : finding-update (全同期後Intent削除) : pause中断CLI
+    Phase 1 : 現状調査とアーキテクチャ設計 (本設計書) : レビュー指摘 REV-01〜04 および NEW-01〜20 反映完了
+    Phase 2 : レビュー台帳・Node.js CLIの実装 : gray-matter検証 : 20Scope移行 : C001構造初期化 : Finding台帳・EVENTS.md作成 : review:check / rebuild / repair (一意根拠検証・非破壊停止) 実装
+    Phase 3 : レビューSkill連携 : repo-review Skill連携手順整備 : proposal提出物 (patch_id/メタデータ)・register連携 (3段階検証・パッチ同一性証明) : finding-update (全同期後Intent削除) : pause中断CLI
     Phase 4 : レビュー鮮度管理 : 全件集計パイプライン (review:freshness) : 未登録ファイル検知 : 差分レビュー運用標準化
-    Phase 5 : 検証と運用整備 : 台帳整合性・正本間復旧・トリム前検証・非破壊停止・Intent冪等復元・ID重複テスト : 中断再開・Squashマージ C_import 実機検証 : GitHub Actions連携 : 運用ドキュメント完成
+    Phase 5 : 検証と運用整備 : 台帳整合性・正本間復旧・トリム前一意検証・非破壊停止・Intent全属性照合・ID重複テスト : 中断再開・SquashパッチID実機検証 : GitHub Actions連携 : 運用ドキュメント完成
 ```
 
 #### Phase 2: レビュー台帳・Node.js CLIの実装
@@ -1121,17 +1149,17 @@ timeline
 - **Task 2.2**: `docs/reviews/scopes/` 配下に 20 タスクの Scope 定義ファイルを生成（情報欠落ゼロ検証）。
 - **Task 2.3**: `docs/reviews/campaigns/C001-initial-full-review/` を初期化し、現行 20 タスクの `request.md` を再配置。
 - **Task 2.4 (NEW-02, NEW-06反映)**: `docs/reviews/findings/INDEX.md`、`docs/reviews/findings/EVENTS.md`（静的Frontmatterテンプレート）、および統合 `docs/reviews/INDEX.md` を作成。
-- **Task 2.5 (REV-02, NEW-02, NEW-03, NEW-04, NEW-06, NEW-09, NEW-10, NEW-11, NEW-12, NEW-15, NEW-17反映)**:
+- **Task 2.5 (REV-02, NEW-02, NEW-03, NEW-04, NEW-06, NEW-09, NEW-10, NEW-11, NEW-12, NEW-15, NEW-17, NEW-19, NEW-20反映)**:
   - `scripts/reviews/check.js`（`review:check`: 読み取り専用検査、正本間バインド検証、EVENTS追記不変性・末尾破損検知含む）の実装。
   - `scripts/reviews/rebuild-index.js`（`review:rebuild-index`: 確定成果物群 + `EVENTS.md` + `draft.md` 走査から全 INDEX を 100% 決定論的再生成）の実装。
-  - `scripts/reviews/repair.js`（`review:repair`: トリム前の復元根拠事前検証、復元根拠欠落時の非破壊安全停止（exit code 1）、末尾破損トリム、成果物および `.pending-event.json` からの安全な再追記、残存 Intent の重複照合・冪等復旧（ケースD）、正本間欠落補完、および台帳再生成を実行する明示的修復コマンド）の実装。
+  - `scripts/reviews/repair.js`（`review:repair`: 期待イベントID算出、トリム前の復元根拠一意対応事前検証（曖昧復旧禁止）、復元根拠欠落・競合時の非破壊安全停止（exit code 1）、末尾破損トリム、成果物および `.pending-event.json` からの安全な再追記、残存 Intent の全属性完全一致照合・同一ID内容不一致時安全停止・冪等復旧（ケースD）、正本間欠落補完、および台帳再生成を実行する明示的修復コマンド）の実装。
 
 #### Phase 3: レビューSkill連携
 
 - **Task 3.1 (REV-01, NEW-01, NEW-05反映)**: `.agents/skills/repo-review/SKILL.md` および `references.md` に、作業ブランチでの仮 ID 起草ルール、`proposal.md` 作成・コミット手順、PR マージ後の昇格手順、および台帳 CLI 連携手順を追記。
-- **Task 3.2 (NEW-01, NEW-04, NEW-05, NEW-08, NEW-13, NEW-14, NEW-16反映)**:
-  - `scripts/reviews/submit-proposal.js`（`review:submit-proposal`: `scope_tree_hash` 自動算出を含む提出物生成）の実装。
-  - `scripts/reviews/register.js`（`review:register`: 単一Writer・排他ロック・3段階検証（第1: 履歴正当性確認・Squash/Rebase 時の `C_import` 特定と `import_scope_hash` 照合・検証不能時安全停止、第2: HEAD との `scope_tree_hash` 同一性照合、第3: 確定結果登録と鮮度決定）・相互バインド・`EVENTS.md` 追記・確定生成）の実装。
+- **Task 3.2 (NEW-01, NEW-04, NEW-05, NEW-08, NEW-13, NEW-14, NEW-16, NEW-18反映)**:
+  - `scripts/reviews/submit-proposal.js`（`review:submit-proposal`: `base_commit`, `source_branch`, `patch_id`（`git patch-id`）および `scope_tree_hash` 自動算出を含む提出物生成）の実装。
+  - `scripts/reviews/register.js`（`review:register`: 単一Writer・排他ロック・3段階検証（第1: 履歴正当性・真正性確認・Squash/Rebase 時の `C_import` 特定とパッチID照合/PR照合による提出元コミット関連付け・`import_scope_hash` 照合・検証不能時安全停止、第2: HEAD との `scope_tree_hash` 同一性照合、第3: 確定結果登録と鮮度決定）・相互バインド・`EVENTS.md` 追記・確定生成）の実装。
 - **Task 3.3 (REV-02, NEW-02, NEW-04, NEW-12, NEW-15反映)**:
   - `scripts/reviews/update-finding.js`（`review:finding-update`: 操作意図ファイル `.pending-event.json` のアトミック永続化、`EVENTS.md` 追記、派生台帳同期完了後の安全な一時ファイル削除）の実装。
   - `scripts/reviews/record-recheck.js`（`review:record-recheck`: `EVENTS.md` 追記・相互バインド・連番再レビュー確定生成）の実装。
@@ -1145,8 +1173,8 @@ timeline
 
 #### Phase 5: 検証と運用整備
 
-- **Task 5.1 (NEW-02, NEW-03, NEW-04, NEW-06, NEW-09, NEW-10, NEW-11, NEW-12, NEW-13, NEW-14, NEW-15, NEW-17反映)**: 台帳整合性テスト、ID重複防止テスト、正本間部分更新修復テスト（片方欠落からの自動修復）、トリム前事前検証・復元根拠欠落時の非破壊安全停止テスト、末尾破損トリム・Intent再追記テスト、未完了 Intent 残存時の重複防止・冪等復旧テスト（ケースD）、先祖関係成立時でもコード変更があれば stale に遷移するテスト、INDEX再生成復旧テスト（`EVENTS.md` リプレイおよび `draft.md` 走査による完全復旧検証）の自動化。
-- **Task 5.2 (NEW-01, NEW-05, NEW-07, NEW-08, NEW-13, NEW-14, NEW-16反映)**: 作業ブランチでの proposal 作成（`scope_tree_hash` 算出） → Squash Merge 模倣 → 管理ブランチでの register 確定（`C_import` 特定と `import_scope_hash` 照合を含む 3 段階検証通過） → 検証不能時の安全停止検証 → pause 中断・再開・再レビューの一連の実機モックシナリオ検証。
+- **Task 5.1 (NEW-02, NEW-03, NEW-04, NEW-06, NEW-09, NEW-10, NEW-11, NEW-12, NEW-13, NEW-14, NEW-15, NEW-17, NEW-19, NEW-20反映)**: 台帳整合性テスト、ID重複防止テスト、正本間部分更新修復テスト（片方欠落からの自動修復）、トリム前期待値算出・一意根拠事前検証・復元根拠欠落/競合時の非破壊安全停止テスト、末尾破損トリム・Intent再追記テスト、未完了 Intent 残存時の全属性完全一致照合・同一ID内容不一致時安全停止・冪等復旧テスト（ケースD）、先祖関係成立時でもコード変更があれば stale に遷移するテスト、INDEX再生成復旧テスト（`EVENTS.md` リプレイおよび `draft.md` 走査による完全復旧検証）の自動化。
+- **Task 5.2 (NEW-01, NEW-05, NEW-07, NEW-08, NEW-13, NEW-14, NEW-16, NEW-18反映)**: 作業ブランチでの proposal 作成（`base_commit`, `source_branch`, `patch_id` 記録） → Squash Merge 模倣 → 管理ブランチでの register 確定（`C_import` 特定、パッチID照合、`import_scope_hash` 照合を含む 3 段階検証通過） → 偽装コミットSHAや検証不能時の安全停止検証 → pause 中断・再開・再レビューの一連の実機モックシナリオ検証。
 - **Task 5.3**: `docs/reviews/README.md` の運用マニュアル整備。
 - **Task 5.4**: PR 時に `npm run review:check` を実行する GitHub Actions ワークフローの追加。
 
@@ -1207,25 +1235,25 @@ timeline
 - **トレードオフ**:
   - 差分走査のステップが全件走査となるが、Git diff のファイル走査はミリ秒単位で完了するためパフォーマンス影響は皆無であり、安全性が最大化される。
 
-### 13.7 登録可否判定と鮮度判定の分離: 履歴正当性＋ハッシュ照合による多層判定 vs 先祖関係単一判定 (NEW-13, NEW-14, NEW-16)
+### 13.7 登録可否判定と鮮度判定の分離: 履歴正当性（Provenance証明）＋ハッシュ照合による多層判定 vs 先祖関係単一判定 (NEW-13, NEW-14, NEW-16, NEW-18)
 
-- **採用**: **第 1 判定（履歴上の正当性確認による登録可否。Squash/Rebase 時は `C_import` 特定と `import_scope_hash` 照合、検証不能時は推測登録を禁止し exit code 1 安全停止）、第 2 判定（`scope_tree_hash` による現在の HEAD との同一性確認）、第 3 判定（登録完了後の fresh / stale 鮮度格付け）を厳格に分離する決定論的多層パイプライン**。
+- **採用**: **第 1 判定（履歴正当性・真正性の証明による登録可否。Squash/Rebase 時は `C_import` 特定、パッチID照合/PR照合による提出元コミット関連付け証明、`import_scope_hash` 照合、検証不能時は推測登録を禁止し exit code 1 安全停止）、第 2 判定（`scope_tree_hash` による現在の HEAD との同一性確認）、第 3 判定（登録完了後の fresh / stale 鮮度格付け）を厳格に分離する決定論的多層パイプライン**。
 - **採用理由**:
   - 先祖関係（`--is-ancestor`）が成立しても、レビュー対象コミット以降に先行変更が入っている場合にコード同一性を誤認（見逃し）する重大リスクを排除できる。
-  - コミット SHA が変わる Squash/Rebase Merge においても、`proposal.md` を取り込んだ直近コミット `C_import` 時点の構成ファイルハッシュと `scope_tree_hash` を照合することで、Git 単体・外部 API 非依存で履歴正当性を機械的に証明でき、検証不能時には推測登録を行わず安全停止できる。
+  - コミット SHA が変わる Squash/Rebase Merge において、ハッシュ一致（コード内容同一性）だけでは提出元コミットの履歴的正当性が証明できない課題に対し、パッチID（`git patch-id`）照合や PR メタデータ照合により、無関係なブランチからの誤提出や偽装提出を 100% 排除できる。
   - コード変更があっても「過去の特定コミット時点における確定事実」としての登録を不当に拒絶することなく、鮮度ステータスを即座に `stale` へ遷移させて差分レビューを要求する運用へと安全に引き継げる。
 - **トレードオフ**:
-  - 登録時の検証ステップが 3 段階となり、Git 走査処理が含まれるが、通常 Merge、Squash Merge、Rebase Merge のいずれにおいても同一の統一品質保証基準が適用される。
+  - 登録時の検証ステップが 3 段階となり、Git 差分照合処理が含まれるが、外部 API 非依存で決定論的に完結し、通常 Merge、Squash Merge、Rebase Merge のいずれにおいても同一の統一品質保証基準が適用される。
 
-### 13.8 独立状態変更の復旧とトリム前検証: 全工程完了後Intent削除＋トリム前事前検証・非破壊安全停止 vs 早期削除・即時トリム (NEW-09, NEW-12, NEW-15, NEW-17)
+### 13.8 独立状態変更の復旧とトリム前検証: 全工程完了後Intent削除＋一意根拠検証・非破壊安全停止＋全属性完全一致照合 vs 早期削除・即時トリム・ID単独照合 (NEW-09, NEW-12, NEW-15, NEW-17, NEW-19, NEW-20)
 
-- **採用**: **独立状態変更（`status_update` 等）の追記前に操作意図（`.pending-event.json`）を永続化し、派生台帳（INDEX）の同期まで全工程が正常完了した後にのみ削除する。末尾破損検知時は直ちに切り戻さず復元根拠を事前検証し、根拠欠落時はトリムせず非破壊で安全停止（exit code 1）する。残存 Intent は重複照合により冪等復旧する**。
+- **採用**: **独立状態変更（`status_update` 等）の追記前に操作意図（`.pending-event.json`）を永続化し、派生台帳（INDEX）の同期まで全工程が正常完了した後にのみ削除する。末尾破損検知時は直ちに切り戻さず、期待連番の算出と破損行断片照合により復元根拠が一意かつ排他的に存在するか事前検証し、根拠欠落時や複数競合・曖昧時はトリムせず非破壊で安全停止（exit code 1）する。残存 Intent は全属性完全一致照合を行い、同一ID内容不一致時は安全停止、正常一致時のみ安全に重複スキップする**。
 - **採用理由**:
   - 追記完了後・台帳同期前にクラッシュした場合でも、Intent が保持されているため再実行時・修復時に未完了状態から安全に復旧できる。
-  - 既に `EVENTS.md` に追記済みであれば再追記をスキップして多重登録（二重追記）を 100% 防止する。
-  - 復元根拠がない場合に破損行をトリムしてしまうと手動復元の手掛かりが失われるが、トリム前に検証して非破壊で停止することで、情報保全と推測再生成の排除を両立できる。
+  - 単に復元根拠が存在するだけで過去の成果物を誤認して別イベントを破損・誤トリムする事故を防止し、一意性が証明されない場合の推測再生成を排除して情報保全を徹底できる。
+  - 同一イベント ID で内容が異なる衝突を確実に検知し、データ破壊や状態消失を未然に防げる。
 - **トレードオフ**:
-  - Intent ファイルのライフサイクル管理とトリム前検証手順が厳格化されるが、障害発生時のデータ保全性と冪等性が飛躍的に向上する。
+  - Intent ファイルのライフサイクル管理とトリム前の一意検証手順が厳格化されるが、障害発生時のデータ保全性と冪等性が飛躍的に向上する。
 
 ### 13.9 検査と修復の責務分離: 読取専用 check と明示的 repair の分離 vs 自動修復混在 (NEW-10)
 
@@ -1249,6 +1277,6 @@ timeline
 
 ## 14. 結論と次のステップ (Conclusion)
 
-本改訂設計により、外部レビュー指摘（REV-01〜REV-04 および NEW-01〜NEW-17）のすべてが完全に解消され、履歴の不変性、単一 Writer 方式、Git 経由の確実な受け渡しと昇格タイミング、Squash/Rebase Merge 時の決定論的履歴検証（`C_import` 特定と `import_scope_hash` 照合）および検証不能時の安全停止、登録可否判定とコード同一性・鮮度判定の明確な分離、マージ方式によらない統一品質基準、操作意図ファイル（`.pending-event.json`）の全工程完了後削除と重複防止・冪等復旧、末尾破損検出時の事前根拠検証・非破壊安全停止、複数正本ファイル間の相互バインドと部分更新修復、状態変更イベントログの純粋追記不変性、中断時更新の単一 Writer 統一とドラフト永続化、読み取り専用検査と明示的修復の責務分離、鮮度判定の完全性、および実装ロードマップの整合性が確定した。
+本改訂設計により、外部レビュー指摘（REV-01〜REV-04 および NEW-01〜NEW-20）のすべてが完全に解消され、履歴の不変性、単一 Writer 方式、Git 経由の確実な受け渡しと昇格タイミング、Squash/Rebase Merge 時の提出元コミット関連付け証明（パッチID照合・PR照合）と決定論的履歴検証（`C_import` 特定と `import_scope_hash` 照合）および検証不能時の安全停止、登録可否判定とコード同一性・鮮度判定の明確な分離、マージ方式によらない統一品質基準、操作意図ファイル（`.pending-event.json`）の全工程完了後削除と全属性完全一致照合・重複防止・同一ID衝突検知・冪等復旧、末尾破損検出時の期待値算出・一意根拠事前検証（曖昧復旧禁止）・非破壊安全停止、複数正本ファイル間の相互バインドと部分更新修復、状態変更イベントログの純粋追記不変性、中断時更新の単一 Writer 統一とドラフト永続化、読み取り専用検査と明示的修復の責務分離、鮮度判定の完全性、および実装ロードマップの整合性が確定した。
 
 **本報告完了の時点で作業を停止し、利用者の確認と承認を待つ。承認を得るまで Phase 2 以降の実装、Git コミット、Git プッシュは実行しない。**
