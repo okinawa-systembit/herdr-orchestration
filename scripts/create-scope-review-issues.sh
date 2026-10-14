@@ -82,9 +82,10 @@ if [ "$DRY_RUN" = true ]; then
   echo "※ DRY-RUN モードで実行しています（実際の Issue 作成は行われません）"
 fi
 
-# 既存 Issue の取得と確認 (P2-01: 重複起票防止, P2-05: 取得件数拡張, P2-06: モック誤用防止)
+# 既存 Issue の取得と確認 (P2-01: 重複起票防止, P2-05: 取得件数拡張, P2-06: モック誤用防止, P2-07: 照合状態明示)
 echo "既存の Scope Review Issue を確認中..."
 existing_titles=""
+existing_check_failed=false
 if [ "$DRY_RUN" = true ] && [ -n "${TEST_MOCK_EXISTING_SCOPE_ISSUES:-}" ]; then
   # テスト専用モック入力（dry-run かつテスト指定時のみ有効）
   echo "※ テスト用モックデータを使用して既存 Issue を照合します"
@@ -95,6 +96,7 @@ else
       echo "警告: 既存 Issue の取得に失敗しました: $existing_titles" >&2
       echo "※ dry-run モードのため、既存確認なしで予定コマンドを出力します。" >&2
       existing_titles=""
+      existing_check_failed=true
     else
       echo "エラー: 既存 Issue の取得に失敗しました。重複作成防止のため処理を安全停止します。" >&2
       echo "詳細: $existing_titles" >&2
@@ -156,4 +158,8 @@ for scope_dir in "${SCOPES[@]}"; do
   created_count=$((created_count + 1))
 done
 
-echo "=== 処理完了 (対象: $((created_count + skipped_count)) 件 / 作成予定・完了: $created_count 件 / スキップ: $skipped_count 件) ==="
+if [ "$existing_check_failed" = true ]; then
+  echo "=== 処理完了 (対象: $((created_count + skipped_count)) 件 / 作成予定: $created_count 件 ※既存Issue照合未実施) ==="
+else
+  echo "=== 処理完了 (対象: $((created_count + skipped_count)) 件 / 作成予定・完了: $created_count 件 / スキップ: $skipped_count 件) ==="
+fi
