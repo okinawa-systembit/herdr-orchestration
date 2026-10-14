@@ -26,18 +26,33 @@ description: >-
 - **`--result-ref` はリポジトリ相対 1 パス**（例: `.review-inbox/review-response.md`）。
 - Herdr 操作: 公式 **herdr** Skill。`herdr agent prompt` は **1 行・ファイル参照のみ**（[references.md](references.md)）。sync handoff 成功時は不要。
 
-## 成果物（正本）と GitHub 連携
+## レビュー運用の責務境界と成果物（正本）
 
-レビュー情報は **GitHub（Pull Request, Issues, Reviews）を正本（Single Source of Truth）** として管理する（設計書: [docs/reviews/CONTINUOUS_REVIEW_SIMPLIFIED_DESIGN.md](../../../docs/reviews/CONTINUOUS_REVIEW_SIMPLIFIED_DESIGN.md)）。
+本リポジトリでは、運用の目的に応じて **「Herdr 内部レビュー」** と **「GitHub 管理対象レビュー」** を明確に区別する（設計書: [docs/reviews/CONTINUOUS_REVIEW_SIMPLIFIED_DESIGN.md](../../../docs/reviews/CONTINUOUS_REVIEW_SIMPLIFIED_DESIGN.md)）。
 
-| レビュー情報種別                     | 正本（Source of Truth）            | 格納場所・管理単位                  | 備考                             |
-| ------------------------------------ | ---------------------------------- | ----------------------------------- | -------------------------------- |
-| **通常 PR レビュー**                 | **GitHub Pull Request**            | PR 会話タイムライン / Files Changed | `gh pr review` で投稿            |
-| **初回 20 Scope レビュー**           | **GitHub Issues**                  | Scope 単位の個別 Issue（`#101` 等） | ラベル `scope-review`            |
-| **継続追跡する指摘**                 | **GitHub Issues**                  | 指摘単位の個別 Issue（`#105` 等）   | ラベル `review-finding`          |
-| **ローカル成果物（フォールバック）** | `.review-inbox/review-response.md` | リポジトリ内一時ファイル            | Herdr handoff またはオフライン時 |
+### 1. Herdr 内部レビュー（エージェント間開発支援）
 
-※ 同一レビュー情報を GitHub とリポジトリ内台帳で二重管理しない。ローカル `.review-inbox/` は Herdr sync handoff の連携バッファまたは GitHub 障害時のフォールバックとして使用する。
+- **対象**: リポジトリ内での日常的な実装支援、エージェント間の手戻り防止、sync handoff によるレビュー依頼と対応。
+- **正本・成果物**: ローカルの `.review-inbox/` ファイル群。
+  - `.review-inbox/review-request.md`: 依頼本文（基準、差分、目的等）
+  - `.review-inbox/review-response.md`: 指摘・判定・検証結果（先頭行固定）
+  - `.review-inbox/INDEX.md`: ラウンド履歴
+- **運用原則**: エージェント間で完結する閉じたローカルループであり、**Herdr 内部レビューのすべてを GitHub へ投稿する必要はない**。
+
+### 2. GitHub 管理対象レビュー（公開記録・追跡管理）
+
+- **対象**: 通常 Pull Request のレビュー、初回 20 Scope レビュー、および継続追跡する未解決指摘 Issue。
+- **正本**: **GitHub（Pull Request, Issues, Reviews）**。
+- **運用原則**: 明示的に GitHub 管理対象として依頼された場合のみ適用し、同一レビュー情報をリポジトリ内台帳と二重管理しない。
+
+| レビュー種別               | 正本（Source of Truth） | 格納場所・管理単位                  | 連携インターフェース               |
+| -------------------------- | ----------------------- | ----------------------------------- | ---------------------------------- |
+| **Herdr 内部レビュー**     | **ローカル Markdown**   | `.review-inbox/review-response.md`  | `herdr-orchestrator result-submit` |
+| **通常 PR レビュー**       | **GitHub Pull Request** | PR 会話タイムライン / Files Changed | `gh pr review --comment`           |
+| **初回 20 Scope レビュー** | **GitHub Issues**       | Scope 単位の個別 Issue（`#101` 等） | `gh issue comment`                 |
+| **継続追跡する指摘**       | **GitHub Issues**       | 指摘単位の個別 Issue（`#105` 等）   | `gh issue create`                  |
+
+※ いずれのレビュー種別であっても、適用する**レビュー品質基準（2段階レビュー、指摘分類、重大度判定、反証確認、未実施検証明記）は完全に共通**である。
 
 ---
 
@@ -180,6 +195,7 @@ herdr-orchestrator result-submit <task.id> \
 ## GitHub 連携運用（PR レビュー & Scope レビュー）
 
 GitHub を正本とするコードレビュー運用では、以下の手順で GitHub CLI (`gh`) を用いて記録・連携する。  
+※ **適用範囲の明確化**: 本手順は、通常 PR や初回 20 Scope などの「GitHub 管理対象レビュー」として明示的に依頼された場合にのみ適用する。通常の Herdr 内部レビュー（エージェント間 handoff）では本手順は不要であり、`.review-inbox/` への出力と `result-submit` だけで完結する（不要な GitHub 投稿は行わない）。  
 ※ レビュー品質基準（2 段階レビュー、指摘 3 分類、重大度 P0〜P3、反証確認、未実施検証の明示）は Herdr 連携時と完全に同一の基準を適用する。
 
 ### A. 通常 Pull Request の継続的レビュー手順

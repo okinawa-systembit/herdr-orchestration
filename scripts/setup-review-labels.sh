@@ -6,8 +6,8 @@ set -euo pipefail
 
 DRY_RUN=false
 
-for arg in "$@"; do
-  case "$arg" in
+while [[ $# -gt 0 ]]; do
+  case "$1" in
     --dry-run)
       DRY_RUN=true
       shift
@@ -16,6 +16,11 @@ for arg in "$@"; do
       echo "使用法: $0 [--dry-run]"
       echo "  --dry-run: 実際の作成を行わず、実行予定のコマンドを表示します"
       exit 0
+      ;;
+    *)
+      echo "エラー: 不明な引数です: $1" >&2
+      echo "使用法: $0 [--dry-run] [-h|--help]" >&2
+      exit 1
       ;;
   esac
 done

@@ -14,17 +14,23 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --scope)
+      if [[ $# -lt 2 || -z "$2" || "$2" == --* ]]; then
+        echo "エラー: --scope オプションには Scope ID（例: R001, I001）の指定が必要です" >&2
+        echo "使用法: $0 [--dry-run] [--scope <ScopeID>] [-h|--help]" >&2
+        exit 1
+      fi
       TARGET_SCOPE="$2"
       shift 2
       ;;
     -h|--help)
       echo "使用法: $0 [--dry-run] [--scope <ScopeID>]"
-      echo "  --dry-run: 実際の Issue 作成を行わず、コマンドを表示します"
+      echo "  --dry-run: 実際の Issue 作成を行わず、コマンド・スキップ予定を表示します"
       echo "  --scope <ScopeID>: 特定の Scope（例: R001, I001）のみを対象にします"
       exit 0
       ;;
     *)
-      echo "不明な引数: $1" >&2
+      echo "エラー: 不明な引数です: $1" >&2
+      echo "使用法: $0 [--dry-run] [--scope <ScopeID>] [-h|--help]" >&2
       exit 1
       ;;
   esac
@@ -54,12 +60,51 @@ SCOPES=(
   "I005-ecosystem"
 )
 
+# Scope ID のバリデーション (P2-02)
+if [ -n "$TARGET_SCOPE" ]; then
+  is_valid_scope=false
+  for s in "${SCOPES[@]}"; do
+    sid="${s%%-*}"
+    if [ "$sid" = "$TARGET_SCOPE" ]; then
+      is_valid_scope=true
+      break
+    fi
+  done
+  if [ "$is_valid_scope" = false ]; then
+    echo "エラー: 指定された Scope ID '$TARGET_SCOPE' は定義されていません。" >&2
+    echo "有効な Scope ID: R001..R014 (R006A, R006B), I001..I005" >&2
+    exit 1
+  fi
+fi
+
 echo "=== 初回 20 Scope レビュー Issue 起票支援スクリプト ==="
 if [ "$DRY_RUN" = true ]; then
   echo "※ DRY-RUN モードで実行しています（実際の Issue 作成は行われません）"
 fi
 
+# 既存 Issue の取得と確認 (P2-01: 重複起票防止)
+echo "既存の Scope Review Issue を確認中..."
+existing_titles=""
+if [ -n "${MOCK_EXISTING_SCOPE_ISSUES:-}" ]; then
+  # テスト用モック入力
+  existing_titles="$MOCK_EXISTING_SCOPE_ISSUES"
+else
+  if ! existing_titles=$(gh issue list --label "scope-review" --state all --limit 100 --json title --jq '.[].title' 2>&1); then
+    if [ "$DRY_RUN" = true ]; then
+      echo "警告: 既存 Issue の取得に失敗しました: $existing_titles" >&2
+      echo "※ dry-run モードのため、既存確認なしで予定コマンドを出力します。" >&2
+      existing_titles=""
+    else
+      echo "エラー: 既存 Issue の取得に失敗しました。重複作成防止のため処理を安全停止します。" >&2
+      echo "詳細: $existing_titles" >&2
+      exit 1
+    fi
+  fi
+fi
+
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+created_count=0
+skipped_count=0
 
 for scope_dir in "${SCOPES[@]}"; do
   # スコープID（例: R001, R006A, I001）を抽出
@@ -71,7 +116,20 @@ for scope_dir in "${SCOPES[@]}"; do
 
   req_file="$REPO_ROOT/docs/reviews/$scope_dir/request.md"
   if [ ! -f "$req_file" ]; then
-    echo "警告: $req_file が見つかりません。スキップします。" >&2
+    echo "エラー: リクエストファイルが存在しません: $req_file" >&2
+    exit 1
+  fi
+
+  # 既存 Issue の重複チェック (P2-01)
+  # タイトルに "[Scope Review] $scope_id:" が含まれるか確認
+  check_pattern="\[Scope Review\] ${scope_id}:"
+  if echo "$existing_titles" | grep -E -q "$check_pattern"; then
+    if [ "$DRY_RUN" = true ]; then
+      echo "[DRY-RUN: SKIP] Scope $scope_id の Issue は既に存在するためスキップします"
+    else
+      echo "スキップ: Scope $scope_id の Issue は既に存在します"
+    fi
+    skipped_count=$((skipped_count + 1))
     continue
   fi
 
@@ -94,6 +152,7 @@ for scope_dir in "${SCOPES[@]}"; do
     echo "Creating issue: $issue_title"
     gh issue create --title "$issue_title" --body-file "$req_file" --label "$labels"
   fi
+  created_count=$((created_count + 1))
 done
 
-echo "=== 処理完了 ==="
+echo "=== 処理完了 (対象: $((created_count + skipped_count)) 件 / 作成予定・完了: $created_count 件 / スキップ: $skipped_count 件) ==="
