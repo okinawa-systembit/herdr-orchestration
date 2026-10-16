@@ -54,6 +54,14 @@ def _require_live_pane_id(snap: Any, *, task_id: str) -> str:
     return pane_id
 
 
+def _requester_status_skip_reason(requester: Any) -> str | None:
+    if requester.agent_status in _SKIP_REQUESTER_STATES:
+        return f"requester_{requester.agent_status}"
+    if requester.agent_status not in _PROMPTABLE_REQUESTER:
+        return "requester_not_promptable"
+    return None
+
+
 def _finish_requester_completion(
     task_id: str,
     *,
@@ -98,20 +106,12 @@ def _execute_requester_completion(task_id: str) -> dict[str, Any]:
         doc = registry_ops.get_task(task_id)
         return _completion_payload(task_id, doc, prompt_sent=False)
 
-    if requester.agent_status in _SKIP_REQUESTER_STATES:
+    skip_reason = _requester_status_skip_reason(requester)
+    if skip_reason is not None:
         _finish_requester_completion(
             task_id,
             outcome="skipped",
-            reason=f"requester_{requester.agent_status}",
-        )
-        doc = registry_ops.get_task(task_id)
-        return _completion_payload(task_id, doc, prompt_sent=False)
-
-    if requester.agent_status not in _PROMPTABLE_REQUESTER:
-        _finish_requester_completion(
-            task_id,
-            outcome="skipped",
-            reason="requester_not_promptable",
+            reason=skip_reason,
         )
         doc = registry_ops.get_task(task_id)
         return _completion_payload(task_id, doc, prompt_sent=False)
@@ -123,6 +123,16 @@ def _execute_requester_completion(task_id: str) -> dict[str, Any]:
             task_id,
             outcome="skipped",
             reason="requester_context_mismatch",
+        )
+        doc = registry_ops.get_task(task_id)
+        return _completion_payload(task_id, doc, prompt_sent=False)
+
+    skip_reason = _requester_status_skip_reason(requester)
+    if skip_reason is not None:
+        _finish_requester_completion(
+            task_id,
+            outcome="skipped",
+            reason=skip_reason,
         )
         doc = registry_ops.get_task(task_id)
         return _completion_payload(task_id, doc, prompt_sent=False)
