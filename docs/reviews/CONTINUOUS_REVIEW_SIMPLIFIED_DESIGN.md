@@ -144,14 +144,14 @@ gh issue create \
 # 2. レビュー結果・進捗のコメント追記
 gh issue comment <issue_number> -F review-result.md
 
-# 3. レビュー完了による Issue クローズ
-gh issue close <issue_number> --reason "completed"
-
-# 4. 後続追跡が必要な未解決指摘の Issue 起票
+# 3. 未解決指摘がある場合は Scope Issue クローズ前に Finding Issue を起票 (review-finding Skill)
 gh issue create \
   --title "[Finding] R001-F001: パス解決境界値での例外未ハンドリング" \
   --body-file finding-detail.md \
-  --label "review-finding,severity:p2,blocking:no"
+  --label "review-finding,severity:p2"
+
+# 4. 指摘の起票・リンク完了後に Scope Issue を完了クローズ
+gh issue close <issue_number> --reason "completed"
 ```
 
 ### 3.3 実行権限と安全制約（Guardrails）
@@ -215,12 +215,17 @@ sequenceDiagram
 
 1. **レビュー結果の記録と指摘 Issue の先行起票 (SIMP-01)**:
    - レビュー検証が完了したら、まず Scope Issue に詳細なレビュー結果と判定（GO / 要修正 / NO-GO）をコメントとして投稿する。
-   - 未解決の指摘事項（特に P0〜P2）がある場合、**Scope Issue をクローズする前に**、個別の指摘追跡 Issue（`review-finding`）を `gh issue create` で起票する（本文内に `検出元: Scope Review #101` を記載）。
+   - 未解決の指摘事項（特に P0〜P2）がある場合、**Scope Issue をクローズする前に**、個別の指摘追跡 Issue（`review-finding`）を起票する（本文内に `検出元: Scope Review #101` を記載）。
+   - **`review-finding` Skill による起票前バリデーション**:
+     - 単に Issue を作成するのではなく、新規 `review-finding` Skill を経由して、重大度と Blocking 判定の論理整合性（P2 Blocking の理由明記、`blocking:yes` ラベル連動等）、是正完了条件チェックリスト（2項目以上）、回帰テスト条件、維持すべき既存保証の具体性を事前に検証する。
+     - 検出元 Scope Issue は実在すれば Closed であっても起票可能（再オープンは行わない）。
+     - 根拠不足や不整合がある場合は起票を保留し、レビュー担当へ差し戻す（独断の判定改変は禁止）。
+     - 多層検索（広域検索および対象パスでのキーワード絞り込み）により既存 Issue との重複を事前にチェックする。重複判定時は新規起票を中止・報告し、自動コメント追記は行わない。
    - 起票した指摘 Issue 番号（例: `#105`）を Scope Issue のコメントにリンク追記し、相互参照を成立させる。
 2. **安全な Scope Issue クローズ**:
-   - すべての未解決指摘について Issue の起票とリンクが完了したことを確認した上で、最後に Scope Issue を `gh issue close --reason "completed"` でクローズする。
+   - すべての未解決指摘について `review-finding` による Issue の起票とリンクが完了したことを確認した上で、最後に Scope Issue を `gh issue close --reason "completed"` でクローズする。
    - **途中失敗時の非破壊停止**: API 障害や通信断などで途中で失敗した場合は、Scope Issue を **Open のまま残して停止**する。これにより、未解決指摘の追跡漏れを防止する。
-   - **再実行時の重複防止運用**: 再実行時は、既に作成済みの指摘 Issue（タイトルやラベル）を `gh issue list --label review-finding` 等で確認し、未作成の指摘のみ起票した上で Scope Issue をクローズする（独自の復旧エンジンやトランザクション機構は導入せず、シンプルな確認運用とする）。
+   - **再実行時の重複防止運用**: 再実行時は、既に作成済みの指摘 Issue（タイトルやラベル）を `review-finding` の重複確認フローで検出し、未作成の指摘のみ起票した上で Scope Issue をクローズする。
 3. **指摘事項の修正追跡**:
    - クローズされた Scope Issue とは独立して、各指摘 Issue は Open のまま残り、修正 PR（`Fixes #105`）がマージされた時点で個別にクローズされる。
 
@@ -239,7 +244,7 @@ sequenceDiagram
    - `repo-review` Skill に従い、2 段階レビュー（仕様整合性 ＋ 批判的不具合探索）を実施。
 3. **レビュー結果投稿**:
    - AI エージェントは原則として `gh pr review <pr> --comment -F result.md` でレビュー結果（総合判定: GO / 要修正 / NO-GO、指摘一覧、未実施検証）を投稿する。
-   - 運用ポリシーで許可されている場合のみ、Blocking 指摘（P0/P1）存在時に `gh pr review <pr> --request-changes -F result.md` を使用可能とする。
+   - 運用ポリシーで許可されている場合のみ、Blocking 指摘（P0/P1 および例外的な P2 Blocking）が存在する際に `gh pr review <pr> --request-changes -F result.md` を使用可能とする。
 4. **開発者による修正対応**:
    - 開発者が修正コミットを追加プッシュ。
 5. **再レビュー**:
@@ -310,34 +315,69 @@ PR レビュー投稿時（`gh pr review -F`）に使用する標準 Markdown �
 
 ### 6.2 GitHub Issue（指摘追跡）形式
 
-PR 外で継続追跡する指摘事項を起票する標準 Markdown 形式。
+PR 外または Scope 完了後に継続追跡する指摘事項を起票する標準 Markdown 形式。  
+※ フォーマットの正本（Source of Truth）は [.agents/skills/review-finding/references.md](../../.agents/skills/review-finding/references.md) および [.github/ISSUE_TEMPLATE/review_finding.md](../../.github/ISSUE_TEMPLATE/review_finding.md) であり、起票・検証時は当該正本に従う。
 
 ```markdown
 ## 指摘概要
 
-[F-001] 状態更新時の排他ロック取得漏れ
+<!-- 指摘の簡潔なタイトル・要約（1〜2行） -->
 
 ## メタデータ
 
-- **検出元**: PR #123 (または Scope Review R001 #101)
-- **検出コミット**: `e5f6g7h`
-- **重大度**: P1 (Blocking)
-- **分類**: 競合条件
-- **対象ファイル**: `src/operations.py`
+- **検出元**: Scope Review # または PR #
+- **検出コミット**: <commit_sha>
+- **重大度**: P0 / P1 / P2 / P3
+- **Blocking 判定**: Yes (マージ前是正必須) / No (マージ後対応可)
+- **Blocking 理由**: <!-- Blocking: Yes の場合必須。なぜマージ前の修正が不可欠かを明記 -->
+- **分類**: 契約違反 / 競合条件 / リソースリーク / 境界値 / エラーハンドリング / 設計整合性 / セキュリティ / その他
+- **対象ファイル**: `path/to/file:L123`
 
-## 詳細内容
+## 詳細内容・発生条件
 
-（問題の具体的な再現手順、影響範囲、該当コード箇所）
+### 該当コード箇所
+
+\`\`\`language
+<!-- 該当箇所の抜粋コード -->
+
+\`\`\`
+
+### 発生条件
+
+<!-- どのような引数、状態、シーケンス、環境下で問題が発生するか具体的に記述 -->
+
+### 影響
+
+<!-- 問題が発生した場合に、具体的にどのような実害（クラッシュ、データ破壊、状態不整合等）が生じるか -->
+
+## 反証確認（8つの問い）
+
+1. 既存の処理や上位層で防止されていないか？ → ...
+2. 実際に失敗する具体的な条件が成立するか？ → ...
+3. 単なる実装方式や好みの違いではないか？ → ...
+4. 修正しなくても要求仕様を満たしているか？ → ...
+5. 推奨案は実際に問題を解消するか？ → ...
+6. 失われたと考える保証や機能は従来本当に存在・意図されていたものか？ → ...
+7. 別の仕組みや後続処理でその保証が実質的に維持されていないか？ → ...
+8. その保証は現在の仕様で本当に必要か？ → ...
 
 ## 推奨される対応方針
 
-（修正方針、修正案コード、参考情報）
+<!-- 修正案のコード、アルゴリズム、または方針 -->
 
 ## 是正完了条件
 
-- [ ] 該当箇所に適切な排他制御が導入されていること。
-- [ ] 並行テストを追加し、テストがパスすること。
-- [ ] 修正 PR が作成され、マージされていること。
+- [ ] <!-- 修正完了を客観的に検証できる条件1 -->
+- [ ] <!-- 修正完了を客観的に検証できる条件2 -->
+
+## 回帰テスト条件
+
+- **実行テスト**: `npm run test:orchestrator`
+- **新規テスト要件**: <!-- 今回の不具合の再発防止用に追加すべきテストケース -->
+
+## 維持すべき既存保証
+
+<!-- 修正によって損なわれてはならない既存動作・正常系仕様・パフォーマンス等の境界条件 -->
 ```
 
 ---
@@ -409,19 +449,20 @@ assignees: ""
 
 ### 7.3 推奨 GitHub ラベル体系
 
-| カテゴリ     | ラベル名              | カラー    | 用途                           |
-| ------------ | --------------------- | --------- | ------------------------------ |
-| **Scope**    | `scope-review`        | `#0E8A16` | 初回 20 Scope レビューの Issue |
-|              | `scope:unit`          | `#1D76DB` | 個別レビュー (R001〜R014)      |
-|              | `scope:integration`   | `#5319E7` | 結合レビュー (I001〜I005)      |
-| **Finding**  | `review-finding`      | `#B60205` | 継続追跡する指摘 Issue         |
-| **Severity** | `severity:p0`         | `#D93F0B` | P0 (致命的・即時修正)          |
-|              | `severity:p1`         | `#E99695` | P1 (重大・Blocking)            |
-|              | `severity:p2`         | `#FBCA04` | P2 (通常・Non-blocking)        |
-|              | `severity:p3`         | `#FEF2C0` | P3 (軽微・改善)                |
-| **Status**   | `status:in-review`    | `#EDEDED` | レビュー中                     |
-|              | `status:ready-to-fix` | `#C2E0C6` | 修正待ち                       |
-|              | `status:verified`     | `#0E8A16` | 修正確認完了                   |
+| カテゴリ     | ラベル名              | カラー    | 用途                                                              |
+| ------------ | --------------------- | --------- | ----------------------------------------------------------------- |
+| **Scope**    | `scope-review`        | `#0E8A16` | 初回 20 Scope レビューの Issue                                    |
+|              | `scope:unit`          | `#1D76DB` | 個別レビュー (R001〜R014)                                         |
+|              | `scope:integration`   | `#5319E7` | 結合レビュー (I001〜I005)                                         |
+| **Finding**  | `review-finding`      | `#B60205` | 継続追跡する指摘 Issue                                            |
+|              | `blocking:yes`        | `#B60205` | Global GOをブロックする未是正の指摘 (P0/P1または例外BlockingのP2) |
+| **Severity** | `severity:p0`         | `#D93F0B` | P0 (致命的・即時修正)                                             |
+|              | `severity:p1`         | `#E99695` | P1 (重大・Blocking)                                               |
+|              | `severity:p2`         | `#FBCA04` | P2 (通常・原則Non-blocking / 例外Blockingあり)                    |
+|              | `severity:p3`         | `#FEF2C0` | P3 (軽微・改善)                                                   |
+| **Status**   | `status:in-review`    | `#EDEDED` | レビュー中                                                        |
+|              | `status:ready-to-fix` | `#C2E0C6` | 修正待ち                                                          |
+|              | `status:verified`     | `#0E8A16` | 修正確認完了                                                      |
 
 ---
 

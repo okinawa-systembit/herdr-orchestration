@@ -37,8 +37,8 @@ AIモデルの利用枠（5時間枠・週間枠）の制約下で品質を一�
 ### 1.4 全体完了条件
 
 1. 全 20 の Scope Issue（R001〜R014, I001〜I005）のレビュー作業が完了し、Closed であること（各実施時点のレビュー判定・指摘が記録されていること）。
-2. 検出されたすべての Blocking 指摘（`severity:p0`, `severity:p1` の Finding Issue）が解決済み（Closed / `status:verified`）であること。
-3. Non-blocking 指摘（`severity:p2`, `severity:p3`）について、保留または採否が明確に合意されていること。
+2. 検出されたすべての Blocking Finding（`blocking:yes` ラベルが付与された P0/P1 および例外的な P2）が解決済み（Closed かつ `status:verified`）であること。
+3. Non-blocking 指摘（`blocking:yes` ラベルを持たない `severity:p2`, `severity:p3`）について、保留または採否が明確に合意されていること。
 4. 修正に伴う再レビューが行われた場合は、その再検証結果と対象 SHA が記録されていること。
 5. すべてのタスクが同一の共通対象コミットSHA（および修正コミット）に対して検証されていること。
 
@@ -662,7 +662,8 @@ docs/reviews/
 - 形式: 1 指摘 = 1 Issue
 - ラベル体系（`scripts/setup-review-labels.sh` に定義）:
   - 種別: `review-finding`
-  - 重大度: `severity:p0` (致命的), `severity:p1` (重大・Blocking), `severity:p2` (通常・Non-blocking), `severity:p3` (軽微・改善)
+  - Blocking: `blocking:yes` (Global GOをブロックする未是正の指摘。P0/P1または例外BlockingのP2)
+  - 重大度: `severity:p0` (致命的), `severity:p1` (重大・Blocking), `severity:p2` (通常・原則Non-blocking / 例外Blockingあり), `severity:p3` (軽微・改善)
   - 進行ステータス: `status:ready-to-fix` (修正待ち), `status:verified` (修正確認完了) ※レビュー中は `status:in-review`
 - 追跡: Finding Issue 本文に対象 Scope Issue への参照リンク（例: `Scope: #15`）を含め、Scope Issue 側からも検出指摘一覧として相互リンクする。
 
@@ -693,7 +694,9 @@ Scope Issue（レビュー作業の進捗）と Finding Issue（指摘事項の�
 
 - [ ] 全 15 の個別レビュー Scope Issue（R001〜R014）のレビュー作業が完了し、Closed であること（各実施時点のレビュー判定・指摘が記録されていること）。
 - [ ] 全 5 の結合レビュー Scope Issue（I001〜I005）のレビュー作業が完了し、Closed であること（各実施時点のレビュー判定・指摘が記録されていること）。
-- [ ] 検出されたすべての Blocking 指摘（`severity:p0`, `severity:p1` の Finding Issue）が是正・検証され、Closed（`status:verified`）であること。
-- [ ] Non-blocking 指摘（`severity:p2`, `severity:p3`）について、保留または採否が明確に合意されていること。
+- [ ] 検出されたすべての Blocking 指摘（`blocking:yes` ラベルが付与された Finding Issue、すなわち `severity:p0`, `severity:p1`、および例外的に Blocking 指定された `severity:p2`）が是正・検証され、Closed（`status:verified`）であること。
+  - **判定手順 1（未是正 Open 件数の全件確認）**: `gh api --paginate "repos/:owner/:repo/issues?labels=review-finding,blocking:yes&state=open&per_page=100" --jq '.[] | select(has("pull_request") | not) | "#\(.number): \(.title)"'` の実行結果が 0 件（出力行なし、終了コード 0）であること。※ API エラーや通信障害による取得失敗を 0 件と誤判定しないこと。
+  - **判定手順 2（修正未検証 Closed の全件検出）**: `gh api --paginate "repos/:owner/:repo/issues?labels=review-finding,blocking:yes&state=closed&per_page=100" --jq '.[] | select(has("pull_request") | not) | select(.labels | map(.name) | index("status:verified") | not) | "#\(.number): \(.title)"'` の実行結果が 0 件（`status:verified` が付与されずに Closed となった Blocking Finding が 0 件、終了コード 0）であること。未検証のまま Closed にされた Issue が 1 件でも存在する場合は Global GO を保留する。
+- [ ] Non-blocking 指摘（`blocking:yes` ラベルを持たない `severity:p2`, `severity:p3`）について、保留または採否が明確に合意されていること。
 - [ ] 修正に伴う再レビューが行われた場合は、その再検証結果と対象 SHA が記録されていること。
 - [ ] すべてのレビュー対象が同一の共通確定コミットSHA（および是正コミット）に対して検証されていること。
