@@ -37,7 +37,13 @@ description: >-
   - `.review-inbox/review-request.md`: 依頼本文（基準、差分、目的等）
   - `.review-inbox/review-response.md`: 指摘・判定・検証結果（先頭行固定）
   - `.review-inbox/INDEX.md`: ラウンド履歴
-- **運用原則**: エージェント間で完結する閉じたローカルループであり、**Herdr 内部レビューのすべてを GitHub へ投稿する必要はない**。ただし、内部レビュー結果（GO 判定や検証結果）を対象の GitHub Finding Issue にコメントとして記録すること（`gh issue comment`）は進捗可視化・履歴保持として許可される。一方、**Finding Issue のクローズ（`gh issue close`）は PR マージ・マージ後再検証を経て依頼元（requester / implementer）が実施する責務であり、レビュー担当エージェント（reviewer）が自律的に Issue をクローズすることは厳禁とする（クローズは依頼元のみが実施）**。
+- **運用原則**: エージェント間で完結する閉じたローカルループであり、**Herdr 内部レビューはローカルの `.review-inbox/` への記録を標準とし、既定（デフォルト）では GitHub への外部書き込みを行わない**。
+  - **GitHub Finding Issue へのコメント投稿条件（明示的指示時のみ許可）**:
+    1. **投稿トリガー**: 依頼元から明示的な指示（`review-request.md` または handoff の `--instruction` での指定）がある場合に限り、対象 Finding Issue へのレビュー結果コメント投稿（`gh issue comment`）を許可する。
+    2. **事前確認**: コメント投稿前に、対象 Finding Issue の番号・リポジトリ・レビュー対象コミット SHA が一致していることを確認する。
+    3. **投稿内容の限定**: 投稿内容は「判定・総評・指摘事項・検証結果ログ」に限定し、レビューGO を「Finding 解決完了」と表現せず「修正承認。PR マージ待ち」と明記する。
+    4. **レビュアーの操作禁止事項**: **Finding Issue のクローズ（`gh issue close`）、再オープン、ラベル変更（`status:verified` 等）はレビュアー側で厳禁**とする（これらは PR マージ・再検証を経て依頼元のみが実施する）。
+    5. **API 失敗時の非ブロッキング**: コメント投稿が API エラー等で失敗しても、内部レビュー結果自体（`herdr-orchestrator result-submit`）は成功（succeeded）として完了し、コメント投稿の失敗は警告（Warning）として依頼元に報告する（レビュー自体のブロッキングにしない）。
 
 ### 2. GitHub 管理対象レビュー（公開記録・追跡管理）
 
@@ -175,9 +181,10 @@ handoff 失敗時: stderr を人間へ。blind 再送しない（設計 §9）�
 - **レビューGOとFinding解決完了の明確な区別（早期クローズの禁止とクローズ権限の分離）**:
   - **レビューGOは、レビュー対象の変更内容がマージ可能であることを示すのみであり、関連する Finding Issue の解決完了を意味しない**。
   - 修正 PR が Open の間は、レビューGO だけを根拠として Finding Issue を Closed にしてはならない。
-  - **レビュー結果のコメント投稿とクローズ権限の厳格な分離**:
-    - レビュアーエージェントが、レビュー結果や GO 判定を対象 Finding Issue にコメントとして記録すること（`gh issue comment`）は許可される。
-    - **Finding Issue のクローズ（`gh issue close`）は、PR マージおよびマージ後再検証完了後に依頼元（requester / implementer）が実施する責務であり、レビュアー（reviewer）が自律的に Issue をクローズすることは厳禁とする（クローズは依頼元のみが実施）**。
+  - **レビュー結果のコメント投稿条件とクローズ権限の厳格な分離**:
+    - レビュアーエージェントによる対象 Finding Issue へのレビュー結果コメント投稿（`gh issue comment`）は、**依頼元から明示的に指示された場合（request や instruction での指定）に限り許可される**（自律的な独自判断による外部コメント投稿は行わず、`.review-inbox/` への出力を基本とする）。
+    - **Finding Issue のクローズ（`gh issue close`）、再オープン、ラベル変更は、PR マージおよびマージ後再検証完了後に依頼元（requester / implementer）が実施する責務であり、レビュアー（reviewer）が自律的に実行することは厳禁とする（クローズ権限は依頼元のみに限定）**。
+    - コメント投稿が API 障害等で失敗した場合でも内部レビュー結果自体（`result-submit`）は成功として完了し、失敗を警告として依頼元へ報告する（レビュー自体のブロッキングにしない）。
   - Finding Issue の解決完了・クローズは、PR マージおよび必要な再検証が完了した後に、依頼元が [review-finding](../review-finding/SKILL.md) Skill の完了管理手順に従って実施する。
   - レビュー結果を GitHub やチャット等に記録・報告する場合も、「修正内容を承認（マージ可能）。PR マージ待ち」のように、マージ前の承認であることを明確に区別して記載する。
 - **事実と推論の区別**:
