@@ -39,7 +39,19 @@ if len(sys.argv) >= 4 and sys.argv[1] == "agent" and sys.argv[2] == "get":
     cwd = os.environ.get("FAKE_AGENT_CWD", "/nonexistent")
     req = os.environ.get("FAKE_REQUESTER_AGENT", "org-repo-design")
     wrk = os.environ.get("FAKE_WORKER_AGENT", "org-repo-reviewer")
-    st = os.environ.get("FAKE_REQUESTER_STATUS", "idle")
+    sf_path = os.environ.get("FAKE_REQUESTER_STATUS_FILE")
+    if sf_path and os.path.exists(sf_path):
+        with open(sf_path, "r+", encoding="utf-8") as sf:
+            raw_lines = [line.strip() for line in sf.readlines() if line.strip()]
+            if raw_lines:
+                st = raw_lines[0]
+                sf.seek(0)
+                sf.truncate()
+                sf.write("\\n".join(raw_lines[1:]))
+            else:
+                st = os.environ.get("FAKE_REQUESTER_STATUS", "idle")
+    else:
+        st = os.environ.get("FAKE_REQUESTER_STATUS", "idle")
     if t in (req, "w11:p1"):
         print(json.dumps(agent(req, st, cwd, "w11:p1")))
         raise SystemExit(0)
@@ -162,6 +174,7 @@ class Phase6CompletionTests(unittest.TestCase):
         self._tmpdir = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmpdir.cleanup)
         root = Path(self._tmpdir.name)
+        self.scratch = root
         self.state_home = root / "state"
         self.fake_bin = root / "bin"
         self.fake_bin.mkdir()
@@ -246,6 +259,30 @@ class Phase6CompletionTests(unittest.TestCase):
         proc = _run_cli("resume-task", task_id, env=env)
         self.assertEqual(proc.returncode, 0, proc.stdout)
         self.assertEqual(json.loads(proc.stdout)["completion"]["status"], "skipped")
+        self.assertFalse(self.prompt_log.exists())
+
+    def test_resume_task_toctou_requester_transition_to_working_skips(self) -> None:
+        task_id = _async_task_result_pending(self.env, self.worktree)
+        status_file = self.scratch / "requester_status_sequence_working.txt"
+        status_file.write_text("idle\nworking\n", encoding="utf-8")
+        env = {**self.env, "FAKE_REQUESTER_STATUS_FILE": str(status_file)}
+        proc = _run_cli("resume-task", task_id, env=env)
+        self.assertEqual(proc.returncode, 0, proc.stdout)
+        payload = json.loads(proc.stdout)
+        self.assertEqual(payload["completion"]["status"], "skipped")
+        self.assertEqual(payload["completion"]["reason"], "requester_working")
+        self.assertFalse(self.prompt_log.exists())
+
+    def test_resume_task_toctou_requester_transition_to_blocked_skips(self) -> None:
+        task_id = _async_task_result_pending(self.env, self.worktree)
+        status_file = self.scratch / "requester_status_sequence_blocked.txt"
+        status_file.write_text("idle\nblocked\n", encoding="utf-8")
+        env = {**self.env, "FAKE_REQUESTER_STATUS_FILE": str(status_file)}
+        proc = _run_cli("resume-task", task_id, env=env)
+        self.assertEqual(proc.returncode, 0, proc.stdout)
+        payload = json.loads(proc.stdout)
+        self.assertEqual(payload["completion"]["status"], "skipped")
+        self.assertEqual(payload["completion"]["reason"], "requester_blocked")
         self.assertFalse(self.prompt_log.exists())
 
     def test_recover_completion_reset_and_resume(self) -> None:
