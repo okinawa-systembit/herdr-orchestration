@@ -244,7 +244,7 @@ sequenceDiagram
    - `repo-review` Skill に従い、2 段階レビュー（仕様整合性 ＋ 批判的不具合探索）を実施。
 3. **レビュー結果投稿**:
    - AI エージェントは原則として `gh pr review <pr> --comment -F result.md` でレビュー結果（総合判定: GO / 要修正 / NO-GO、指摘一覧、未実施検証）を投稿する。
-   - 運用ポリシーで許可されている場合のみ、Blocking 指摘（P0/P1）存在時に `gh pr review <pr> --request-changes -F result.md` を使用可能とする。
+   - 運用ポリシーで許可されている場合のみ、Blocking 指摘（P0/P1 および例外的な P2 Blocking）が存在する際に `gh pr review <pr> --request-changes -F result.md` を使用可能とする。
 4. **開発者による修正対応**:
    - 開発者が修正コミットを追加プッシュ。
 5. **再レビュー**:
@@ -449,19 +449,20 @@ assignees: ""
 
 ### 7.3 推奨 GitHub ラベル体系
 
-| カテゴリ     | ラベル名              | カラー    | 用途                           |
-| ------------ | --------------------- | --------- | ------------------------------ |
-| **Scope**    | `scope-review`        | `#0E8A16` | 初回 20 Scope レビューの Issue |
-|              | `scope:unit`          | `#1D76DB` | 個別レビュー (R001〜R014)      |
-|              | `scope:integration`   | `#5319E7` | 結合レビュー (I001〜I005)      |
-| **Finding**  | `review-finding`      | `#B60205` | 継続追跡する指摘 Issue         |
-| **Severity** | `severity:p0`         | `#D93F0B` | P0 (致命的・即時修正)          |
-|              | `severity:p1`         | `#E99695` | P1 (重大・Blocking)            |
-|              | `severity:p2`         | `#FBCA04` | P2 (通常・Non-blocking)        |
-|              | `severity:p3`         | `#FEF2C0` | P3 (軽微・改善)                |
-| **Status**   | `status:in-review`    | `#EDEDED` | レビュー中                     |
-|              | `status:ready-to-fix` | `#C2E0C6` | 修正待ち                       |
-|              | `status:verified`     | `#0E8A16` | 修正確認完了                   |
+| カテゴリ     | ラベル名              | カラー    | 用途                                                              |
+| ------------ | --------------------- | --------- | ----------------------------------------------------------------- |
+| **Scope**    | `scope-review`        | `#0E8A16` | 初回 20 Scope レビューの Issue                                    |
+|              | `scope:unit`          | `#1D76DB` | 個別レビュー (R001〜R014)                                         |
+|              | `scope:integration`   | `#5319E7` | 結合レビュー (I001〜I005)                                         |
+| **Finding**  | `review-finding`      | `#B60205` | 継続追跡する指摘 Issue                                            |
+|              | `blocking:yes`        | `#B60205` | Global GOをブロックする未是正の指摘 (P0/P1または例外BlockingのP2) |
+| **Severity** | `severity:p0`         | `#D93F0B` | P0 (致命的・即時修正)                                             |
+|              | `severity:p1`         | `#E99695` | P1 (重大・Blocking)                                               |
+|              | `severity:p2`         | `#FBCA04` | P2 (通常・原則Non-blocking / 例外Blockingあり)                    |
+|              | `severity:p3`         | `#FEF2C0` | P3 (軽微・改善)                                                   |
+| **Status**   | `status:in-review`    | `#EDEDED` | レビュー中                                                        |
+|              | `status:ready-to-fix` | `#C2E0C6` | 修正待ち                                                          |
+|              | `status:verified`     | `#0E8A16` | 修正確認完了                                                      |
 
 ---
 
