@@ -137,7 +137,18 @@ def _execute_requester_completion(task_id: str) -> dict[str, Any]:
         doc = registry_ops.get_task(task_id)
         return _completion_payload(task_id, doc, prompt_sent=False)
 
-    _require_live_pane_id(requester, task_id=task_id)
+    try:
+        _require_live_pane_id(requester, task_id=task_id)
+    except CompletionCommandError as exc:
+        if exc.code != "live_pane_id_missing":
+            raise
+        _finish_requester_completion(
+            task_id,
+            outcome="skipped",
+            reason="live_pane_id_missing",
+        )
+        doc = registry_ops.get_task(task_id)
+        return _completion_payload(task_id, doc, prompt_sent=False)
     prompt_sent = False
     try:
         run_herdr(["agent", "prompt", requester.name, build_task_envelope(task_id)])

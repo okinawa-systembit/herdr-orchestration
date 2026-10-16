@@ -52,8 +52,11 @@ if len(sys.argv) >= 4 and sys.argv[1] == "agent" and sys.argv[2] == "get":
                 st = os.environ.get("FAKE_REQUESTER_STATUS", "idle")
     else:
         st = os.environ.get("FAKE_REQUESTER_STATUS", "idle")
-    if t in (req, "w11:p1"):
-        print(json.dumps(agent(req, st, cwd, "w11:p1")))
+    req_pane = os.environ.get("FAKE_REQUESTER_PANE_ID", "w11:p1")
+    if req_pane == "__NONE__":
+        req_pane = None
+    if t in (req, "w11:p1") or (req_pane and t == req_pane):
+        print(json.dumps(agent(req, st, cwd, req_pane)))
         raise SystemExit(0)
     if t in (wrk, "w11:p2"):
         print(json.dumps(agent(wrk, "idle", cwd, "w11:p2")))
@@ -98,7 +101,7 @@ class _env_patch:
 
     def __enter__(self) -> None:
         for key, value in self.env.items():
-            if key.startswith("XDG_") or key in ("HERDR_ENV", "HERDR_PANE_ID", "PATH"):
+            if key.startswith("XDG_") or key.startswith("FAKE_") or key in ("HERDR_ENV", "HERDR_PANE_ID", "PATH"):
                 self._previous[key] = os.environ.get(key)
                 os.environ[key] = value
 
@@ -427,7 +430,81 @@ class Phase6CompletionTests(unittest.TestCase):
         self.assertEqual(outcome, "failed")
         self.assertEqual(reason, "invalid_timeout_setting")
 
+    def test_resume_task_requester_pane_id_missing_skips_without_stuck_processing(self) -> None:
+        # T38-01 (None), T38-02 (""), T38-03 ("   ")
+        for pane_val, label in [("__NONE__", "none"), ("", "empty"), ("   ", "whitespace")]:
+            with self.subTest(pane_val=label):
+                task_id = _async_task_result_pending(self.env, self.worktree)
+                env = {**self.env, "FAKE_REQUESTER_PANE_ID": pane_val}
+                proc = _run_cli("resume-task", task_id, env=env)
+                self.assertEqual(proc.returncode, 0, proc.stdout)
+                doc = json.loads(proc.stdout)
+                # T38-01, T38-02, T38-03: skipped
+                self.assertEqual(doc["completion"]["status"], "skipped")
+                # T38-04: reason = live_pane_id_missing
+                self.assertEqual(doc["completion"]["reason"], "live_pane_id_missing")
+                # T38-05: prompt_sent is False, prompt log does not exist
+                self.assertFalse(doc["prompt_sent"])
+                self.assertFalse(self.prompt_log.exists())
 
+                # Verify task is not stuck in processing in registry
+                with _env_patch(self.env):
+                    task_doc = registry_ops.get_task(task_id)
+                    self.assertEqual(task_doc["completion"]["status"], "skipped")
+                    self.assertEqual(task_doc["completion"]["reason"], "live_pane_id_missing")
+
+                # T38-06: recover-completion succeeds without registry_conflict since skipped is recoverable
+                proc_recover = _run_cli("recover-completion", task_id, env=self.env)
+                self.assertEqual(proc_recover.returncode, 0, proc_recover.stdout)
+                recover_out = json.loads(proc_recover.stdout)
+                self.assertTrue(recover_out["reset_applied"])
+                self.assertTrue(recover_out["resumed"])
+                self.assertEqual(recover_out["completion"]["status"], "sent")
+                if self.prompt_log.exists():
+                    self.prompt_log.unlink()
+
+    def test_result_submit_best_effort_completion_requester_pane_id_missing_skips(self) -> None:
+        with _env_patch(self.env):
+            doc = registry_ops.create_task(_sample_create_payload(worktree=self.worktree))
+            task_id = doc["task"]["id"]
+            registry_ops.record_prompt_start(task_id)
+            registry_ops.mark_dispatch(task_id, outcome="sent")
+
+        env = {**self.env, "HERDR_PANE_ID": "w11:p2", "FAKE_REQUESTER_PANE_ID": "__NONE__"}
+        proc = _run_cli(
+            "result-submit",
+            task_id,
+            "--result-status",
+            "succeeded",
+            "--result-ref",
+            "out.md",
+            env=env,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stdout)
+        out = json.loads(proc.stdout)
+        self.assertIn("completion_chain", out)
+        self.assertEqual(out["completion_chain"]["completion"]["status"], "skipped")
+        self.assertEqual(out["completion_chain"]["completion"]["reason"], "live_pane_id_missing")
+        self.assertFalse(out["completion_chain"]["prompt_sent"])
+        self.assertFalse(self.prompt_log.exists())
+
+        with _env_patch(self.env):
+            task_doc = registry_ops.get_task(task_id)
+            self.assertEqual(task_doc["completion"]["status"], "skipped")
+            self.assertEqual(task_doc["completion"]["reason"], "live_pane_id_missing")
+
+    def test_resume_task_requester_pane_id_other_completion_command_error_raises(self) -> None:
+        from unittest.mock import patch
+        from orchestrator.completion_commands import CompletionCommandError, _execute_requester_completion
+
+        task_id = _async_task_result_pending(self.env, self.worktree)
+        with _env_patch(self.env):
+            registry_ops.claim_completion(task_id)
+            with patch("orchestrator.completion_commands._require_live_pane_id") as mock_req:
+                mock_req.side_effect = CompletionCommandError("other_error_code", message="test")
+                with self.assertRaises(CompletionCommandError) as cm:
+                    _execute_requester_completion(task_id)
+                self.assertEqual(cm.exception.code, "other_error_code")
 
 
 if __name__ == "__main__":
