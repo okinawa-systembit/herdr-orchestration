@@ -34,6 +34,7 @@ LABELS=(
 
   # Finding 関連
   "review-finding|B60205|コードレビューで検出された未解決指摘の追跡 Issue"
+  "blocking:yes|B60205|Global GOをブロックする未是正の指摘 (P0/P1または例外BlockingのP2)"
 
   # 重大度
   "severity:p0|D93F0B|P0 (致命的・即時修正)"

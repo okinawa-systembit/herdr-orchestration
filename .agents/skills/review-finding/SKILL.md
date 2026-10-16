@@ -49,14 +49,17 @@ GitHub への書き込み（`gh issue create`）を実行する前に、以下�
 
 ### 段階 1: メタデータ整合性検証
 
-1. **検出元の確認**:
-   - 検出元 Scope Issue または PR 番号が明記され、GitHub 上で実在・Open であること。
+1. **検出元の確認 (RF-01)**:
+   - 検出元 Scope Issue または PR 番号が明記され、GitHub 上で実在していること（Open / Closed の状態は問わない）。
+   - 存在しない Issue 番号は拒否する。
+   - 検出元が Closed であっても新規 Finding の起票を妨げない。ただし、検出元の Closed 状態をエージェントが自動で Re-open することは禁止する。
 2. **対象コミット**:
    - 検出対象のコミット SHA（原則 7 文字以上の正規 SHA）が記載されていること。
-3. **重大度と Blocking 判定の整合性**:
-   - **P0 / P1**: `Blocking: Yes` が必須（マージ前是正必須）。
-   - **P2**: 原則 `Blocking: No`。例外的に `Blocking: Yes` とする公算がある場合は、**「Blocking 理由（なぜマージ前に是正が不可欠か）」が客観的・具体的に記述されていること**。
+3. **重大度と Blocking 判定・ラベルの整合性 (RF-02)**:
+   - **P0 / P1**: `Blocking: Yes` が必須（マージ前是正必須）。起票時に `blocking:yes` ラベル付与対象。
+   - **P2**: 原則 `Blocking: No`。例外的に `Blocking: Yes` とする公算がある場合は、**「Blocking 理由（なぜマージ前に是正が不可欠か）」が客観的・具体的に記述されていること**。この場合のみ起票時に `blocking:yes` ラベル付与対象。
    - **P3**: 原則 `Blocking: No`。`Blocking: Yes` の指定は禁止（エラー差し戻し）。
+   - **本文とラベルの完全一致**: 本文内の `Blocking: Yes / No` と起票予定の `blocking:yes` ラベルの有無が論理的に一致していること。
 
 ### 段階 2: 不具合内容の具体性・客観的根拠の検証
 
@@ -78,16 +81,24 @@ GitHub への書き込み（`gh issue create`）を実行する前に、以下�
 3. **`## 維持すべき既存保証`**:
    - 修正によって損なわれてはならない既存の契約・正常系動作・品質ゲートが明記されていること。
 
-### 段階 4: 既存 Issue 重複検証
+### 段階 4: 既存 Issue 重複検証 (RF-03, RF-05)
 
-1. **既存 Issue 検索**:
-   ```bash
-   gh issue list --label review-finding --state all --limit 50
-   ```
-2. **重複判定**:
+1. **多層検索の実施 (RF-03)**:
+   - 全体検索（上限を引き上げて広域に取得）:
+     ```bash
+     gh issue list --label review-finding --state all --limit 300
+     ```
+   - 対象ファイル・シンボルのキーワード絞り込み検索:
+     ```bash
+     gh issue list --label review-finding --state all --search "<対象ファイル名または関数名>"
+     ```
+2. **安全側判定**:
+   - 検索結果が上限（limit）に到達した場合や API エラー等で結果が不完全な場合は、「重複なし」と断定せずに対象パスでの絞り込み検索を必ず実施する。それでも不確実な場合は「重複未検証」として差し戻す。
+3. **重複判定**:
    - 同一の対象ファイル・同一関数・同一の原因・同一の失敗条件に関する Issue が既に Open（または是正中）でないか確認する。
-3. **重複時のアクション**:
-   - 既存 Issue に包含される、または同一原因の別側面である場合は、**新規 Issue を起票せず、既存 Issue へのコメント追記（関連 Scope / PR の言及）にとどめる**。
+4. **重複時のアクション (RF-05)**:
+   - 既存 Issue に包含される、または同一原因の別側面であると判断された場合は、**新規 Issue の起票を中止（差し戻し/保留）**し、重複対象の Issue 番号および重複判断根拠をレビュー担当へ報告する。
+   - **既存 Issue へのコメント追記は自動実行しない**。利用者の明示的な指示または承認がある場合のみ実施する（誤判定による情報混入の防止）。
 
 ---
 
@@ -95,20 +106,27 @@ GitHub への書き込み（`gh issue create`）を実行する前に、以下�
 
 バリデーションをすべて通過した場合のみ、以下の手順で起票する。
 
-### 1. Finding Issue の起票
+### 1. Finding Issue の起票 (RF-02)
 
 ```bash
+# Blocking: Yes の場合（P0, P1, または例外的な P2 Blocking）
+gh issue create \
+  --title "[Finding] <ScopeID/PR>-<連番>: <指摘概要>" \
+  --body-file /tmp/finding_<id>.md \
+  --label "review-finding,severity:<pX>,blocking:yes"
+
+# Blocking: No の場合（通常の P2, P3）
 gh issue create \
   --title "[Finding] <ScopeID/PR>-<連番>: <指摘概要>" \
   --body-file /tmp/finding_<id>.md \
   --label "review-finding,severity:<pX>"
 ```
 
-※ ラベルは `review-finding` および重大度に応じた `severity:p0` 〜 `severity:p3` を付与する。
+※ ラベルは `review-finding`、重大度に応じた `severity:p0` 〜 `severity:p3` に加え、`Blocking: Yes` の場合は必ず `blocking:yes` を付与する。
 
-### 2. 検出元（Scope Issue または PR）への相互リンク記録
+### 2. 検出元（Scope Issue または PR）への相互リンク記録 (RF-01)
 
-起票された Finding Issue の URL / 番号を取得し、検出元の Scope Issue または PR にコメント追記する：
+起票された Finding Issue の URL / 番号を取得し、検出元の Scope Issue または PR にコメント追記する（検出元が Closed であってもコメント追記は可能）：
 
 ```bash
 gh issue comment <source_issue_no> --body "検出された指摘を Finding Issue #<new_issue_no> として起票しました。"

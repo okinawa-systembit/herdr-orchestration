@@ -230,9 +230,9 @@ GitHub を正本とするコードレビュー運用では、以下の手順で 
      gh issue comment <issue_number> -F review-result.md
      ```
 3. **未解決指摘の先行起票とクローズ (SIMP-01 順序厳守 & review-finding Skill 連携)**:
-   - 未解決指摘（P0〜P2）が存在する場合、**Scope Issue をクローズする前に**、[review-finding](../review-finding/SKILL.md) Skill を呼び出して Finding Issue を起票する。
+   - 未解決指摘（P0〜P2）が存在する場合、**Scope Issue をクローズする前に**、[review-finding](../review-finding/SKILL.md) Skill を呼び出して Finding Issue を起票する（クローズ後の追加発見時も Closed の検出元を参照して起票可能）。
    - **起票前品質バリデーション**:
-     - `review-finding` 側で、重大度と Blocking 判定の整合性（P2 Blocking の理由明記必須）、是正完了条件チェックリスト（2項目以上）、回帰テスト条件、維持すべき既存保証、および既存 Issue との重複有無を事前検証する。
+     - `review-finding` 側で、重大度と Blocking 判定の整合性（P2 Blocking の理由明記必須、`blocking:yes` ラベル付与）、是正完了条件チェックリスト（2項目以上）、回帰テスト条件、維持すべき既存保証、および多層検索による既存 Issue との重複有無を事前検証する。
      - バリデーションを通過した場合のみ、`gh issue create` で Issue が起票される。
    - 起票した指摘 Issue 番号を Scope Issue のコメントに追記し、相互リンクを記録。
    - 全指摘の起票・リンク完了を確認後、Scope Issue をクローズ：
