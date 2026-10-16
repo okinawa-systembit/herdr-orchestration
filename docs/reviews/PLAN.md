@@ -693,7 +693,7 @@ Scope Issue（レビュー作業の進捗）と Finding Issue（指摘事項の�
 
 - [ ] 全 15 の個別レビュー Scope Issue（R001〜R014）のレビュー作業が完了し、Closed であること（各実施時点のレビュー判定・指摘が記録されていること）。
 - [ ] 全 5 の結合レビュー Scope Issue（I001〜I005）のレビュー作業が完了し、Closed であること（各実施時点のレビュー判定・指摘が記録されていること）。
-- [ ] 検出されたすべての Blocking 指摘（`severity:p0`, `severity:p1` の Finding Issue）が是正・検証され、Closed（`status:verified`）であること。
-- [ ] Non-blocking 指摘（`severity:p2`, `severity:p3`）について、保留または採否が明確に合意されていること。
+- [ ] 検出されたすべての Blocking 指摘（`severity:p0`, `severity:p1`、および Blocking 指定された `severity:p2` の Finding Issue）が是正・検証され、Closed（`status:verified`）であること。
+- [ ] Non-blocking 指摘（Non-blocking の `severity:p2`, `severity:p3`）について、保留または採否が明確に合意されていること。
 - [ ] 修正に伴う再レビューが行われた場合は、その再検証結果と対象 SHA が記録されていること。
 - [ ] すべてのレビュー対象が同一の共通確定コミットSHA（および是正コミット）に対して検証されていること。

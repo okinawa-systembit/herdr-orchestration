@@ -144,14 +144,14 @@ gh issue create \
 # 2. レビュー結果・進捗のコメント追記
 gh issue comment <issue_number> -F review-result.md
 
-# 3. レビュー完了による Issue クローズ
-gh issue close <issue_number> --reason "completed"
-
-# 4. 後続追跡が必要な未解決指摘の Issue 起票
+# 3. 未解決指摘がある場合は Scope Issue クローズ前に Finding Issue を起票 (review-finding Skill)
 gh issue create \
   --title "[Finding] R001-F001: パス解決境界値での例外未ハンドリング" \
   --body-file finding-detail.md \
-  --label "review-finding,severity:p2,blocking:no"
+  --label "review-finding,severity:p2"
+
+# 4. 指摘の起票・リンク完了後に Scope Issue を完了クローズ
+gh issue close <issue_number> --reason "completed"
 ```
 
 ### 3.3 実行権限と安全制約（Guardrails）
@@ -215,12 +215,16 @@ sequenceDiagram
 
 1. **レビュー結果の記録と指摘 Issue の先行起票 (SIMP-01)**:
    - レビュー検証が完了したら、まず Scope Issue に詳細なレビュー結果と判定（GO / 要修正 / NO-GO）をコメントとして投稿する。
-   - 未解決の指摘事項（特に P0〜P2）がある場合、**Scope Issue をクローズする前に**、個別の指摘追跡 Issue（`review-finding`）を `gh issue create` で起票する（本文内に `検出元: Scope Review #101` を記載）。
+   - 未解決の指摘事項（特に P0〜P2）がある場合、**Scope Issue をクローズする前に**、個別の指摘追跡 Issue（`review-finding`）を起票する（本文内に `検出元: Scope Review #101` を記載）。
+   - **`review-finding` Skill による起票前バリデーション**:
+     - 単に Issue を作成するのではなく、新規 `review-finding` Skill を経由して、重大度と Blocking 判定の論理整合性（P2 Blocking の理由明記等）、是正完了条件チェックリスト（2項目以上）、回帰テスト条件、維持すべき既存保証の具体性を事前に検証する。
+     - 根拠不足や不整合がある場合は起票を保留し、レビュー担当へ差し戻す（独断の判定改変は禁止）。
+     - `gh issue list --label review-finding` により既存 Issue との重複を事前にチェックする。
    - 起票した指摘 Issue 番号（例: `#105`）を Scope Issue のコメントにリンク追記し、相互参照を成立させる。
 2. **安全な Scope Issue クローズ**:
-   - すべての未解決指摘について Issue の起票とリンクが完了したことを確認した上で、最後に Scope Issue を `gh issue close --reason "completed"` でクローズする。
+   - すべての未解決指摘について `review-finding` による Issue の起票とリンクが完了したことを確認した上で、最後に Scope Issue を `gh issue close --reason "completed"` でクローズする。
    - **途中失敗時の非破壊停止**: API 障害や通信断などで途中で失敗した場合は、Scope Issue を **Open のまま残して停止**する。これにより、未解決指摘の追跡漏れを防止する。
-   - **再実行時の重複防止運用**: 再実行時は、既に作成済みの指摘 Issue（タイトルやラベル）を `gh issue list --label review-finding` 等で確認し、未作成の指摘のみ起票した上で Scope Issue をクローズする（独自の復旧エンジンやトランザクション機構は導入せず、シンプルな確認運用とする）。
+   - **再実行時の重複防止運用**: 再実行時は、既に作成済みの指摘 Issue（タイトルやラベル）を `review-finding` の重複確認フローで検出し、未作成の指摘のみ起票した上で Scope Issue をクローズする。
 3. **指摘事項の修正追跡**:
    - クローズされた Scope Issue とは独立して、各指摘 Issue は Open のまま残り、修正 PR（`Fixes #105`）がマージされた時点で個別にクローズされる。
 

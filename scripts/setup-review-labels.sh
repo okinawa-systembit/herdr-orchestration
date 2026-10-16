@@ -38,7 +38,7 @@ LABELS=(
   # 重大度
   "severity:p0|D93F0B|P0 (致命的・即時修正)"
   "severity:p1|E99695|P1 (重大・Blocking)"
-  "severity:p2|FBCA04|P2 (通常・Non-blocking)"
+  "severity:p2|FBCA04|P2 (通常・原則Non-blocking / 例外Blockingあり)"
   "severity:p3|FEF2C0|P3 (軽微・改善)"
 
   # ステータス

@@ -6,7 +6,7 @@
 
 ## Herdr Orchestrator レビュー（本リポジトリ）
 
-sync handoff + `.review-inbox/` + `herdr-orchestrator` CLI: [repo-review](.agents/skills/repo-review/SKILL.md)。汎用 handoff/復旧: [repo-workflow](.agents/skills/repo-workflow/SKILL.md)。
+sync handoff + `.review-inbox/` + `herdr-orchestrator` CLI: [repo-review](.agents/skills/repo-review/SKILL.md)。Finding起票・品質検証: [review-finding](.agents/skills/review-finding/SKILL.md)。汎用 handoff/復旧: [repo-workflow](.agents/skills/repo-workflow/SKILL.md)。
 
 ## Herdr Orchestrator のレビュー
 

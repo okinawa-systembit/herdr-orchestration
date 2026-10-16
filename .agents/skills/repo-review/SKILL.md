@@ -229,20 +229,17 @@ GitHub を正本とするコードレビュー運用では、以下の手順で 
      ```bash
      gh issue comment <issue_number> -F review-result.md
      ```
-3. **未解決指摘の先行起票とクローズ (SIMP-01 順序厳守)**:
-   - 未解決指摘（P0〜P2）が存在する場合、**Scope Issue をクローズする前に**、独立した指摘 Issue を先行起票する：
-     ```bash
-     gh issue create \
-       --title "[Finding] <ScopeID>-<連番>: <指摘概要>" \
-       --body-file finding-detail.md \
-       --label "review-finding,severity:p2"
-     ```
+3. **未解決指摘の先行起票とクローズ (SIMP-01 順序厳守 & review-finding Skill 連携)**:
+   - 未解決指摘（P0〜P2）が存在する場合、**Scope Issue をクローズする前に**、[review-finding](../review-finding/SKILL.md) Skill を呼び出して Finding Issue を起票する。
+   - **起票前品質バリデーション**:
+     - `review-finding` 側で、重大度と Blocking 判定の整合性（P2 Blocking の理由明記必須）、是正完了条件チェックリスト（2項目以上）、回帰テスト条件、維持すべき既存保証、および既存 Issue との重複有無を事前検証する。
+     - バリデーションを通過した場合のみ、`gh issue create` で Issue が起票される。
    - 起票した指摘 Issue 番号を Scope Issue のコメントに追記し、相互リンクを記録。
    - 全指摘の起票・リンク完了を確認後、Scope Issue をクローズ：
      ```bash
      gh issue close <issue_number> --reason "completed"
      ```
-   - ※ 途中で失敗した場合は Scope Issue を Open のまま残して安全停止する。
+   - ※ 途中で失敗またはバリデーションエラーとなった場合は Scope Issue を Open のまま残して安全停止する。
 
 ### C. オフライン・API 障害時のフォールバック
 
