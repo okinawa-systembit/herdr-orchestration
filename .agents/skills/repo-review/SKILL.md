@@ -75,7 +75,18 @@ herdr-orchestrator handoff \
   --mode sync \
   --worker-role reviewer \
   --task-type review \
-  --instruction 'Read .review-inbox/review-request.md and review per repo-review SKILL. Post comments if helpful, but DO NOT close any GitHub issue.'
+  --instruction 'Read .review-inbox/review-request.md and review per repo-review SKILL. DO NOT close or modify any GitHub Finding issue.'
+```
+
+※ **GitHub コメント投稿を明示的に依頼する場合（オプトイン）**:  
+内部レビュー結果を対象 Finding Issue に記録させたい場合のみ、依頼元が以下のように `--instruction` または `review-request.md` で明示的に指定する：
+
+```bash
+herdr-orchestrator handoff \
+  --mode sync \
+  --worker-role reviewer \
+  --task-type review \
+  --instruction 'Read .review-inbox/review-request.md and review per repo-review SKILL. Post review result as comment to Finding Issue #<no> after verifying target SHA. DO NOT close or modify any GitHub issue.'
 ```
 
 4. sync 完了後:
