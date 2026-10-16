@@ -71,6 +71,11 @@
   - 重大度: `severity:p0` (致命的), `severity:p1` (重大・Blocking), `severity:p2` (通常・原則Non-blocking / 例外Blockingあり), `severity:p3` (軽微・改善)
   - 進行ステータス: `status:ready-to-fix` (修正待ち), `status:verified` (修正確認完了) ※レビュー中は `status:in-review`
 - **Scope Issue との紐付け**: Finding Issue の本文に対象 Scope Issue へのリンク（例: `Scope: #15`）を含め、Scope Issue 側からも検出指摘一覧として相互リンクします。
+- **Finding 解決完了とクローズ方針（早期クローズの禁止）**:
+  - 「レビューGO（修正承認）」「PRマージ完了」「Finding解決完了」の3状態を厳格に区別します。
+  - レビューGO だけを根拠とした Finding Issue のクローズは厳禁です。
+  - 解決完了は、①修正PRマージ完了、②マージコミットに対する再検証完了、③是正完了条件の達成、④結果記録 を満たした場合にのみ成立します。
+  - 手動クローズ方式（マージ後再検証・記録を経て `status:verified` 付与・クローズ）を標準とします（詳細は [PLAN.md](PLAN.md#sec-6-3) および [review-finding SKILL](../../.agents/skills/review-finding/SKILL.md) 参照）。
 
 ---
 
@@ -86,7 +91,7 @@
    - 未解決指摘がある場合は GitHub Finding Issue を起票し、Scope Issue と相互リンクします。
 4. **レビュー作業完了 (Scope Issue のクローズ)**:
    - レビュー結果の記録と、未解決指摘がある場合の Finding Issue 起票・相互リンクが完了したら、レビュー作業完了として Scope Issue をクローズします（`gh issue close <number> --reason "completed"`）。
-   - **重要**: Scope Issue のクローズはレビュー作業（解析・判定・結果記録・指摘起票）の完了を示すものであり、未解決 Finding が存在しないことの証明ではありません。指摘事項の修正・解決状況は各 Finding Issue 側で独立して追跡・クローズします。
+   - **重要（混同禁止）**: Scope Issue のクローズはレビュー作業（解析・判定・結果記録・指摘起票）の完了を示すものであり、未解決 Finding が存在しないことの証明ではありません。起票された Finding Issue はこの時点でクローズしてはならず、修正 PR の作成・マージ・再検証を経て独立して解決・クローズします。
 
 ---
 

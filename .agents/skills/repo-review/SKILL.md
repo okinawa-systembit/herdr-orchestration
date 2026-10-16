@@ -37,7 +37,7 @@ description: >-
   - `.review-inbox/review-request.md`: 依頼本文（基準、差分、目的等）
   - `.review-inbox/review-response.md`: 指摘・判定・検証結果（先頭行固定）
   - `.review-inbox/INDEX.md`: ラウンド履歴
-- **運用原則**: エージェント間で完結する閉じたローカルループであり、**Herdr 内部レビューのすべてを GitHub へ投稿する必要はない**。
+- **運用原則**: エージェント間で完結する閉じたローカルループであり、**Herdr 内部レビューのすべてを GitHub へ投稿する必要はない**。特に、レビュー担当エージェントがレビューGOを理由に GitHub Finding Issue に対するコメント投稿や Issue クローズ（`gh issue close`）を自律実行することは厳禁とする（GitHub 操作は明示的な依頼がある場合のみ）。
 
 ### 2. GitHub 管理対象レビュー（公開記録・追跡管理）
 
@@ -172,6 +172,11 @@ handoff 失敗時: stderr を人間へ。blind 再送しない（設計 §9）�
     2. **未解消の確認済み Blocking 指摘（P0 / P1、および P2 の例外的 Blocking を含む）が 0 件であること**（P2 Blocking 指摘が 1 件でもあれば GO 不可。P2 Non-blocking のみであれば他の GO 条件を満たす限り GO 可）。
     3. 未実施の検証を明示した。
     4. 重大な未確認リスクがあれば明記・報告した。
+- **レビューGOとFinding解決完了の明確な区別（早期クローズの禁止）**:
+  - **レビューGOは、レビュー対象の変更内容がマージ可能であることを示すのみであり、関連する Finding Issue の解決完了を意味しない**。
+  - 修正 PR が Open の間は、レビューGO だけを根拠として Finding Issue を Closed にしてはならない。
+  - Finding Issue の解決完了・クローズは、PR マージおよび必要な再検証が完了した後に、[review-finding](../review-finding/SKILL.md) Skill の完了管理手順に従って実施する。
+  - レビュー結果を GitHub やチャット等に記録・報告する場合も、「修正内容を承認（マージ可能）。PR マージ待ち」のように、マージ前の承認であることを明確に区別して記載する。
 - **事実と推論の区別**:
   - 実行して確認した事実、コード読解の事実、仕様・設計に基づく判断、推測・未検証の仮説を明確に区別して記載する（ローカルテスト成功を理由にリモートActions実行成功まで保証しない）。
 - [references.md#review-principles](references.md#review-principles) に基づき重大度（P0〜P3）と確信度（高/中/低）を判定。
@@ -240,6 +245,10 @@ GitHub を正本とするコードレビュー運用では、以下の手順で 
      gh issue close <issue_number> --reason "completed"
      ```
    - ※ 途中で失敗またはバリデーションエラーとなった場合は Scope Issue を Open のまま残して安全停止する。
+   - **Scope Issue と Finding Issue のクローズ条件の厳格な区別（混同禁止）**:
+     - Scope Issue のクローズは「その Scope に対するレビュー解析・判定・指摘起票の作業が完了したこと」を意味する。
+     - 一方、起票された **Finding Issue はこの時点で絶対にクローズしてはならない**。Finding Issue は修正 PR の作成・マージ・再検証を経て、[review-finding](../review-finding/SKILL.md) Skill の管理手順に従って初めて解決・クローズされる。
+     - Scope Issue のクローズ手順（`gh issue close`）を Finding Issue に誤適用することは厳禁とする。
 
 ### C. オフライン・API 障害時のフォールバック
 
