@@ -34,6 +34,14 @@ class IdentityNormalizationTests(unittest.TestCase):
             normalize_remote_url("ssh://host:2222/org/repo"),
             "host:2222/org/repo",
         )
+        self.assertEqual(
+            normalize_remote_url("ssh://git@git.example.com:2222/org/repo.git"),
+            "git.example.com:2222/org/repo",
+        )
+        self.assertEqual(
+            normalize_remote_url("ssh://user:pass@host:2222/org/repo"),
+            "host:2222/org/repo",
+        )
         self.assertNotEqual(
             normalize_remote_url("ssh://host:2222/org/repo"),
             normalize_remote_url("ssh://host/org/repo"),
@@ -42,6 +50,10 @@ class IdentityNormalizationTests(unittest.TestCase):
     def test_https_nonstandard_port(self) -> None:
         self.assertEqual(
             normalize_remote_url("https://host:8443/org/repo"),
+            "host:8443/org/repo",
+        )
+        self.assertEqual(
+            normalize_remote_url("https://user:token@host:8443/org/repo.git"),
             "host:8443/org/repo",
         )
         self.assertEqual(
