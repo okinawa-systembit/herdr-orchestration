@@ -37,7 +37,13 @@ description: >-
   - `.review-inbox/review-request.md`: 依頼本文（基準、差分、目的等）
   - `.review-inbox/review-response.md`: 指摘・判定・検証結果（先頭行固定）
   - `.review-inbox/INDEX.md`: ラウンド履歴
-- **運用原則**: エージェント間で完結する閉じたローカルループであり、**Herdr 内部レビューのすべてを GitHub へ投稿する必要はない**。特に、レビュー担当エージェントがレビューGOを理由に GitHub Finding Issue に対するコメント投稿や Issue クローズ（`gh issue close`）を自律実行することは厳禁とする（GitHub 操作は明示的な依頼がある場合のみ）。
+- **運用原則**: エージェント間で完結する閉じたローカルループであり、**Herdr 内部レビューはローカルの `.review-inbox/` への記録を標準とし、既定（デフォルト）では GitHub への外部書き込みを行わない**。
+  - **GitHub Finding Issue へのコメント投稿条件（明示的指示時のみ許可）**:
+    1. **投稿トリガー**: 依頼元から明示的な指示（`review-request.md` または handoff の `--instruction` での指定）がある場合に限り、対象 Finding Issue へのレビュー結果コメント投稿（`gh issue comment`）を許可する。
+    2. **事前確認**: コメント投稿前に、対象 Finding Issue の番号・リポジトリ・レビュー対象コミット SHA が一致していることを確認する。
+    3. **投稿内容の限定**: 投稿内容は「判定・総評・指摘事項・検証結果ログ」に限定し、レビューGO を「Finding 解決完了」と表現せず「修正承認。PR マージ待ち」と明記する。
+    4. **レビュアーの操作禁止事項**: **Finding Issue のクローズ（`gh issue close`）、再オープン、ラベル変更（`status:verified` 等）はレビュアー側で厳禁**とする（これらは PR マージ・再検証を経て依頼元のみが実施する）。
+    5. **API 失敗時の非ブロッキング**: コメント投稿が API エラー等で失敗しても、内部レビュー結果自体（`herdr-orchestrator result-submit`）は成功（succeeded）として完了し、コメント投稿の失敗は警告（Warning）として依頼元に報告する（レビュー自体のブロッキングにしない）。
 
 ### 2. GitHub 管理対象レビュー（公開記録・追跡管理）
 
@@ -69,7 +75,18 @@ herdr-orchestrator handoff \
   --mode sync \
   --worker-role reviewer \
   --task-type review \
-  --instruction 'Read .review-inbox/review-request.md and review per repo-review SKILL.'
+  --instruction 'Read .review-inbox/review-request.md and review per repo-review SKILL. DO NOT close or modify any GitHub Finding issue.'
+```
+
+※ **GitHub コメント投稿を明示的に依頼する場合（オプトイン）**:  
+内部レビュー結果を対象 Finding Issue に記録させたい場合のみ、依頼元が以下のように `--instruction` または `review-request.md` で明示的に指定する：
+
+```bash
+herdr-orchestrator handoff \
+  --mode sync \
+  --worker-role reviewer \
+  --task-type review \
+  --instruction 'Read .review-inbox/review-request.md and review per repo-review SKILL. Post review result as comment to Finding Issue #<no> after verifying target SHA. DO NOT close or modify any GitHub issue.'
 ```
 
 4. sync 完了後:
@@ -172,10 +189,14 @@ handoff 失敗時: stderr を人間へ。blind 再送しない（設計 §9）�
     2. **未解消の確認済み Blocking 指摘（P0 / P1、および P2 の例外的 Blocking を含む）が 0 件であること**（P2 Blocking 指摘が 1 件でもあれば GO 不可。P2 Non-blocking のみであれば他の GO 条件を満たす限り GO 可）。
     3. 未実施の検証を明示した。
     4. 重大な未確認リスクがあれば明記・報告した。
-- **レビューGOとFinding解決完了の明確な区別（早期クローズの禁止）**:
+- **レビューGOとFinding解決完了の明確な区別（早期クローズの禁止とクローズ権限の分離）**:
   - **レビューGOは、レビュー対象の変更内容がマージ可能であることを示すのみであり、関連する Finding Issue の解決完了を意味しない**。
   - 修正 PR が Open の間は、レビューGO だけを根拠として Finding Issue を Closed にしてはならない。
-  - Finding Issue の解決完了・クローズは、PR マージおよび必要な再検証が完了した後に、[review-finding](../review-finding/SKILL.md) Skill の完了管理手順に従って実施する。
+  - **レビュー結果のコメント投稿条件とクローズ権限の厳格な分離**:
+    - レビュアーエージェントによる対象 Finding Issue へのレビュー結果コメント投稿（`gh issue comment`）は、**依頼元から明示的に指示された場合（request や instruction での指定）に限り許可される**（自律的な独自判断による外部コメント投稿は行わず、`.review-inbox/` への出力を基本とする）。
+    - **Finding Issue のクローズ（`gh issue close`）、再オープン、ラベル変更は、PR マージおよびマージ後再検証完了後に依頼元（requester / implementer）が実施する責務であり、レビュアー（reviewer）が自律的に実行することは厳禁とする（クローズ権限は依頼元のみに限定）**。
+    - コメント投稿が API 障害等で失敗した場合でも内部レビュー結果自体（`result-submit`）は成功として完了し、失敗を警告として依頼元へ報告する（レビュー自体のブロッキングにしない）。
+  - Finding Issue の解決完了・クローズは、PR マージおよび必要な再検証が完了した後に、依頼元が [review-finding](../review-finding/SKILL.md) Skill の完了管理手順に従って実施する。
   - レビュー結果を GitHub やチャット等に記録・報告する場合も、「修正内容を承認（マージ可能）。PR マージ待ち」のように、マージ前の承認であることを明確に区別して記載する。
 - **事実と推論の区別**:
   - 実行して確認した事実、コード読解の事実、仕様・設計に基づく判断、推測・未検証の仮説を明確に区別して記載する（ローカルテスト成功を理由にリモートActions実行成功まで保証しない）。
@@ -247,8 +268,8 @@ GitHub を正本とするコードレビュー運用では、以下の手順で 
    - ※ 途中で失敗またはバリデーションエラーとなった場合は Scope Issue を Open のまま残して安全停止する。
    - **Scope Issue と Finding Issue のクローズ条件の厳格な区別（混同禁止）**:
      - Scope Issue のクローズは「その Scope に対するレビュー解析・判定・指摘起票の作業が完了したこと」を意味する。
-     - 一方、起票された **Finding Issue はこの時点で絶対にクローズしてはならない**。Finding Issue は修正 PR の作成・マージ・再検証を経て、[review-finding](../review-finding/SKILL.md) Skill の管理手順に従って初めて解決・クローズされる。
-     - Scope Issue のクローズ手順（`gh issue close`）を Finding Issue に誤適用することは厳禁とする。
+     - 一方、起票された **Finding Issue はこの時点で絶対にクローズしてはならない**。Finding Issue は修正 PR の作成・マージ・再検証を経て、依頼元（requester / implementer）が [review-finding](../review-finding/SKILL.md) Skill の管理手順に従って初めて解決・クローズされる。
+     - Scope Issue のクローズ手順（`gh issue close`）を Finding Issue に誤適用することは厳禁とする（レビュアーエージェントに Finding Issue のクローズ権限はなく、クローズは依頼元のみが実施する）。
 
 ### C. オフライン・API 障害時のフォールバック
 
