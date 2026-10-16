@@ -605,8 +605,8 @@ Herdr の現在仕様を確認しなければ判断できないものを、推�
 - Herdr lifecycle と business task status を混同する
 - 将来機能を理由なく MVP に追加する
 - 根拠を確認せず「ベストプラクティス」と表現する
-- レビューGO を根拠として PR マージ前の Finding Issue をクローズする（早期クローズ）
-- Scope Issue のクローズ手順を Finding Issue に誤適用する
+- レビューGO を根拠として PR マージ前の Finding Issue をクローズする（早期クローズ。Finding Issue のクローズは PR マージ・再検証完了後に依頼元が実施するものであり、レビュアーによるクローズは厳禁）
+- Scope Issue のクローズ手順（`gh issue close`）を Finding Issue に誤適用する（レビュアーによるレビュー結果のコメント投稿は許可されるが、クローズ権限は依頼元のみにありレビュアーによるクローズは禁止）
 
 ---
 

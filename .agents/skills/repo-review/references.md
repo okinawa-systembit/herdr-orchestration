@@ -11,6 +11,10 @@ Herdr 上の live 名は環境依存。logical role は handoff の `reviewer` /
 
 `herdr agent list` で `agent.name` と pane を確認。Registry の `worker.agent_name` と reviewer 自身の live 名が一致すること（§11.4）。
 
+- **GitHub 操作権限の分離**:
+  - **コメント投稿**: レビュー結果（GO 判定、指摘一覧、検証結果等）を対象 Finding Issue にコメントとして記録すること（`gh issue comment`）は進捗可視化・履歴保持として許可される。
+  - **クローズ権限**: Finding Issue のクローズ（`gh issue close`）は、PR マージ後の再検証を完了した依頼元（requester / implementer）が実施する責務であり、**レビュアー（reviewer）が自律的に Issue をクローズすることは厳禁とする（クローズは依頼元のみが実施）**。
+
 ---
 
 <a id="review-scope"></a>
@@ -116,6 +120,8 @@ GO 判定は「問題が一切存在しないことの保証」ではない。
 4. 重大な未確認リスクがあれば明記・報告した。
 
 ※ **P2 の例外的 Blocking 指摘が 1 件でも存在する場合は GO と判定してはならない**。一方、P2 Non-blocking 指摘のみや P3 の改善提案、未確認リスクが存在する場合でも、未解消の Blocking 指摘がなければ他の GO 条件を満たす限り GO と判定できる（残存リスク・改善推奨として記録）。
+
+※ **レビューGOとIssueクローズの厳格な分離**: レビューGOは変更内容がマージ可能であることを示すのみであり、関連する Finding Issue の解決完了を意味しない。レビュアーがレビュー結果を対象 Issue にコメント投稿することは許可されるが、**Finding Issue のクローズ権限は依頼元（requester / implementer）にあり、レビュアーが自律的に Issue をクローズすることは厳禁とする（クローズは PR マージ後に依頼元が実施）**。
 
 ### 5. 実行結果と推論の区別
 
