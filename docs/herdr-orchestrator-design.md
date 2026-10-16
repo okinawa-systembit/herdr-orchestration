@@ -20,6 +20,10 @@
 | 8    | [導入・動作確認・Repository 移行](herdr-orchestrator/08-adoption-and-verification.md#sec-17)             | 17–19  | 導入・動作確認・Repository 移行              |
 | 9    | [バージョン管理・更新運用・禁止事項・将来構成](herdr-orchestrator/09-maintenance-and-roadmap.md#sec-20)  | 20–24  | バージョン管理・更新運用・禁止事項・将来構成 |
 
+## 機能設計・改訂案
+
+- [Repository Identity UUID化 設計書 (Issue #50)](herdr-orchestrator-identity-uuid.md): リモート origin 未設定のローカルリポジトリへの対応および UUID v4 移行設計案
+
 ## 基本方針
 
 - Herdr の操作仕様は Herdr 公式 Skill / CLI を正とする。
