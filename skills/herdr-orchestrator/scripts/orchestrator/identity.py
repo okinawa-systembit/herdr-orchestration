@@ -58,17 +58,16 @@ def normalize_remote_url(url: str) -> str:
     if not raw:
         raise RepositoryIdentityError("empty remote url")
 
-    m = _SCP_RE.match(raw)
-    if m:
-        user = m.group("user")
-        host_part = m.group("host")
-        if "/" in user or "/" in host_part:
-            raise RepositoryIdentityError("unsupported scp-style remote url")
-        host = host_part.lower()
-        path = _strip_git_suffix(m.group("path"))
-        return _canonical_host_path(host, None, path, default_port=22)
-
     if "://" not in raw:
+        m = _SCP_RE.match(raw)
+        if m:
+            user = m.group("user")
+            host_part = m.group("host")
+            if "/" in user or "/" in host_part:
+                raise RepositoryIdentityError("unsupported scp-style remote url")
+            host = host_part.lower()
+            path = _strip_git_suffix(m.group("path"))
+            return _canonical_host_path(host, None, path, default_port=22)
         raise RepositoryIdentityError(f"unsupported remote url (missing scheme): {url!r}")
 
     try:
