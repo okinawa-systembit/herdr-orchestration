@@ -136,9 +136,13 @@
 
 ---
 
-## 5. Finding 解決完了チェックリスト
+## 5. Finding 解決完了チェックリスト（2段階分離）
 
-Finding Issue を解決完了（Closed かつ `status:verified`）にする前に、以下のチェックリストを内部検証する。
+チェックリストの循環依存を防止するため、**Phase 1（実行可否判定）** と **Phase 2（状態更新と事後確認）** を分離して検証する。
+
+### Phase 1: 完了処理の実行可否判定チェックリスト（事前判定）
+
+以下の全項目にチェックが入る場合のみ、Phase 2（ラベル更新・クローズ操作）へ進むことができる。
 
 - [ ] 対象 Finding に対応する修正 PR の番号と URL が特定されているか？
 - [ ] 修正 PR がマージ済み（Merged）となっているか？（Open の状態でのクローズ・`status:verified` 付与は禁止）
@@ -147,8 +151,20 @@ Finding Issue を解決完了（Closed かつ `status:verified`）にする前�
 - [ ] Finding Issue 本文に記載された「是正完了条件」の全項目（`- [ ]`）が客観的に達成されているか？
 - [ ] 「維持すべき既存保証」が損なわれていないか（回帰がないか）？
 - [ ] 再検証結果、対象マージコミット SHA、テスト合格実績が Finding Issue にコメントとして記録されているか？
-- [ ] `status:ready-to-fix` ラベルが削除されているか？
-- [ ] `status:verified` ラベルが付与されているか？
+
+> [!CAUTION]
+> Phase 1 の項目が 1 つでも未達成の場合、Phase 2 のラベル更新やクローズ処理を実行してはならない。
+
+### Phase 2: 状態更新と事後確認チェックリスト（事後検証）
+
+Phase 1 達成後、状態更新を実行し、最終的な Issue 状態を機械的に確認する。
+
+- [ ] `status:ready-to-fix` ラベルが削除されたか？
+- [ ] `status:verified` ラベルが付与されたか？
+- [ ] Issue が Closed になったか？（手動クローズ実行、または自動クローズ正常発生の確認）
+- [ ] （自動クローズ方式の場合）PR マージ後に `gh issue view` で実際の状態を取得し、Open のままだった場合に自動クローズ不発として手動クローズへフォールバックしたか？（Open のまま `status:verified` だけ付与された不完全状態を防止したか？）
+- [ ] `gh issue view <issue_no> --json state,labels` による再取得で、`state: CLOSED` かつ `status:verified` ラベルが存在することを最終確認したか？
+- [ ] 途中で失敗した場合、完了成功と報告せず、現在の状態と未完了操作を人間に報告したか？
 
 ---
 
@@ -190,7 +206,8 @@ Finding Issue を解決完了（Closed かつ `status:verified`）にする前�
 | **位置づけ**              | **標準運用**（原則こちらを使用）                                    | 許容（PR 本文に明示指定がある場合のみ）                                    |
 | **PR 本文の記述**         | `Refs #36` 等（非クローズ型）                                       | `Closes #36` 等（自動クローズ型）                                          |
 | **PR マージ前の Issue**   | Open (`status:ready-to-fix`)                                        | Open (`status:ready-to-fix`)                                               |
-| **PR マージ直後の Issue** | Open (`status:ready-to-fix`)                                        | Closed（`status:verified` なし・一時的未検証）                             |
+| **PR マージ直後の実状態** | Open (`status:ready-to-fix`)                                        | **要実状態取得**: Closed（正常）または Open（自動クローズ不発）            |
 | **再検証の手順**          | マージコミットで検証 → コメント記録 → ラベル更新 → `gh issue close` | マージコミットで検証 → コメント記録 → ラベル更新（`status:verified` 付与） |
-| **再検証失敗時の挙動**    | Open のまま再修正へ                                                 | 直ちに `gh issue reopen` して再修正へ                                      |
+| **自動クローズ不発時**    | 該当なし（常に手動）                                                | **手動クローズへフォールバック**（Open のまま放置を厳禁）                  |
+| **再検証失敗時の挙動**    | Open のまま再修正へ                                                 | Closed の場合は直ちに `gh issue reopen`、Open の場合はそのまま維持         |
 | **Global GO Gate 判定**   | 未検証 Closed が発生しないため安全                                  | 再検証前は未検証 Closed として自動検出・保留される                         |
