@@ -49,6 +49,7 @@ copy_tree() {
     return 0
   fi
   mkdir -p "$(dirname "$dst")"
+  rm -rf "$dst"
   cp -a "$src" "$dst"
 }
 

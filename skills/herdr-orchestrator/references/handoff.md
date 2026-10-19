@@ -7,3 +7,12 @@
 - 配送安全: [§11.4](../../../docs/herdr-orchestrator/06-results-and-workflows.md#sec-11-4)（最小 prompt + 受信側 Registry 検証）。
 
 `herdr-orchestrator handoff` は public CLI で提供（段階 4+）。repository 側は [worker-receive.md](worker-receive.md) / [requester-receive.md](requester-receive.md) を Skill に組み込む。
+
+## Git 未初期化ディレクトリでのエラー対応
+
+正本: [herdr-orchestrator-identity-uuid.md](../../../docs/herdr-orchestrator-identity-uuid.md#7-git-未初期化ディレクトリの取り扱い)
+
+- CLI は Git 管理外のディレクトリで handoff を実行した場合、専用エラーコード `git_repository_not_initialized` を返して非ゼロ終了する。
+- **Skill 側の責務**:
+  - `git_repository_not_initialized` を受信した場合、タスク委託を即座に中止し、人間にチャットで原因と対処方法（`git init`）を報告する。
+  - **エージェントが自動的に `git init` を実行することは禁止する**。

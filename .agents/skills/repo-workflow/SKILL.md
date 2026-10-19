@@ -28,6 +28,7 @@ herdr-orchestrator --help
 
 1. 同 Skill に従い `.review-inbox/review-request.md` を更新する。
 2. 同一 worktree・requester pane から `herdr-orchestrator handoff --mode sync --worker-role reviewer …`（instruction は inbox 参照の短文）。
+   - CLI が `git_repository_not_initialized` を返した場合は、自動で `git init` せずチャットで人間に報告すること。
 3. sync 完了後 `task-result <task.id>`。requester 受信は [requester-receive.md](../../../skills/herdr-orchestrator/references/requester-receive.md)。
 
 ## Worker: 受信（§11.4）

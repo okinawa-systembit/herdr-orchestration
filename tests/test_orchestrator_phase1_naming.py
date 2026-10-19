@@ -4,74 +4,64 @@ import hashlib
 import unittest
 
 from orchestrator.naming import (
+    STANDARD_ROLES,
     derive_requester_role,
     expected_agent_name,
+    hash16_from_repository_identity,
     project_slug_from_repository_identity,
 )
 
+_SAMPLE_UUID = "550e8400-e29b-41d4-a716-446655440000"
+
 
 class NamingTests(unittest.TestCase):
-    def test_example_identity_slug(self) -> None:
+    def test_pattern_a_hash16(self) -> None:
+        hash16 = hash16_from_repository_identity(_SAMPLE_UUID)
+        expected = hashlib.sha256(_SAMPLE_UUID.encode("utf-8")).hexdigest()[:16]
+        self.assertEqual(hash16, expected)
+        self.assertEqual(len(hash16), 16)
+
+    def test_pattern_a_all_standard_roles(self) -> None:
+        hash16 = hash16_from_repository_identity(_SAMPLE_UUID)
+        for role in STANDARD_ROLES:
+            name = expected_agent_name(_SAMPLE_UUID, role)
+            expected = f"r-{hash16}-{role}"
+            self.assertEqual(name, expected)
+            self.assertLessEqual(len(name), 32)
+            self.assertTrue(name.startswith("r-"))
+            self.assertTrue(name.endswith(f"-{role}"))
+
+    def test_orchestrator_max_length_31_chars(self) -> None:
+        name = expected_agent_name(_SAMPLE_UUID, "orchestrator")
+        self.assertEqual(len(name), 31)
+        self.assertLessEqual(len(name), 32)
+
+    def test_derive_requester_role_unique(self) -> None:
+        for role in STANDARD_ROLES:
+            name = expected_agent_name(_SAMPLE_UUID, role)
+            self.assertEqual(derive_requester_role(_SAMPLE_UUID, name), role)
+
+    def test_derive_requester_role_rejects_unknown(self) -> None:
+        with self.assertRaises(ValueError):
+            derive_requester_role(_SAMPLE_UUID, "unknown-agent")
+
+    def test_derive_requester_role_rejects_different_uuid(self) -> None:
+        name1 = expected_agent_name(_SAMPLE_UUID, "design")
+        other_uuid = "a0000000-0000-4000-8000-000000000000"
+        with self.assertRaises(ValueError):
+            derive_requester_role(other_uuid, name1)
+
+    def test_unsupported_role_raises_value_error(self) -> None:
+        with self.assertRaises(ValueError):
+            expected_agent_name(_SAMPLE_UUID, "tester")
+
+    def test_legacy_slug_helper(self) -> None:
         self.assertEqual(
             project_slug_from_repository_identity("git.example/repo"),
             "git-example-repo",
         )
-        self.assertEqual(
-            expected_agent_name("git.example/repo", "reviewer"),
-            "git-example-repo-reviewer",
-        )
-
-    def test_standard_roles_for_example_repo(self) -> None:
-        identity = "git.example/repo"
-        self.assertEqual(
-            expected_agent_name(identity, "design"),
-            "git-example-repo-design",
-        )
-        self.assertEqual(
-            expected_agent_name(identity, "implementer"),
-            "git-example-repo-implementer",
-        )
-
-    def test_numeric_slug_gets_r_prefix(self) -> None:
         slug = project_slug_from_repository_identity("0123/foo")
         self.assertTrue(slug.startswith("r-"))
-
-    def test_derive_requester_role_unique(self) -> None:
-        identity = "git.example/repo"
-        name = expected_agent_name(identity, "design")
-        self.assertEqual(derive_requester_role(identity, name), "design")
-
-    def test_derive_requester_role_rejects_unknown(self) -> None:
-        with self.assertRaises(ValueError):
-            derive_requester_role("git.example/repo", "unknown-agent")
-
-    def test_long_identity_uses_hash_form(self) -> None:
-        identity = "very-long-host.example.com/org/some/deep/path/to/repository"
-        name = expected_agent_name(identity, "reviewer")
-        self.assertLessEqual(len(name), 32)
-        self.assertTrue(name.endswith("-reviewer"))
-        hash4 = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:4]
-        self.assertIn(f"-{hash4}-reviewer", name)
-
-    def test_candidate_length_32_uses_normal_form(self) -> None:
-        # slug 23 + "-" + "reviewer"(8) = 32
-        identity = "a.example/x"
-        slug = project_slug_from_repository_identity(identity)
-        candidate = f"{slug}-reviewer"
-        self.assertLessEqual(len(candidate), 32)
-        self.assertEqual(expected_agent_name(identity, "reviewer"), candidate)
-
-    def test_candidate_length_33_switches_to_hash_form(self) -> None:
-        identity = "aaaa.example/" + ("x" * 40)
-        slug = project_slug_from_repository_identity(identity)
-        self.assertGreater(len(f"{slug}-reviewer"), 32)
-        name = expected_agent_name(identity, "reviewer")
-        self.assertLessEqual(len(name), 32)
-        self.assertNotEqual(name, f"{slug}-reviewer")
-
-    def test_derive_requester_role_zero_matches_fail_closed(self) -> None:
-        with self.assertRaises(ValueError):
-            derive_requester_role("git.example/repo", "git-example-repo-tester")
 
 
 if __name__ == "__main__":

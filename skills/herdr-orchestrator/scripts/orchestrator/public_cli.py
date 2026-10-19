@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 from typing import Callable
 
 from orchestrator.cli_output import (
+    emit_command_error,
     emit_completion_command_error,
     emit_handoff_command_error,
     emit_herdr_env_error,
@@ -20,6 +22,12 @@ from orchestrator.completion_commands import (
 )
 from orchestrator.dispatch_commands import run_doctor, run_reconcile_dispatch
 from orchestrator.handoff_commands import HandoffCommandError, HandoffInput, run_handoff
+from orchestrator.identity import (
+    GitRepositoryNotInitializedError,
+    RepositoryIdentityError,
+    get_or_create_repository_identity,
+    get_repository_identity,
+)
 from orchestrator.registry.errors import RegistryError
 from orchestrator.env import HerdrEnvError, require_herdr_env
 from orchestrator.errors import emit_error
@@ -36,6 +44,7 @@ PUBLIC_COMMANDS = (
     "recover-completion",
     "doctor",
     "reconcile-dispatch",
+    "identity",
 )
 
 _COMMAND_HELP: dict[str, str] = {
@@ -47,6 +56,7 @@ _COMMAND_HELP: dict[str, str] = {
     "reset-completion": "Reset completion for retry (§9.14)",
     "recover-completion": "Reset then resume completion when eligible",
     "reconcile-dispatch": "Recover stale dispatch (§6.12)",
+    "identity": "Manage repository identity UUID (init or show)",
 }
 
 
@@ -168,6 +178,66 @@ def _cmd_result_submit(ns: argparse.Namespace) -> int:
     return emit_json(payload)
 
 
+def _cmd_identity(ns: argparse.Namespace) -> int:
+    action = getattr(ns, "identity_action", None)
+    cwd = Path.cwd()
+    if action == "init":
+        try:
+            repo_id = get_or_create_repository_identity(cwd)
+        except GitRepositoryNotInitializedError as exc:
+            emit_command_error(
+                "git_repository_not_initialized",
+                retryable=False,
+                message=str(exc),
+                exit_code=1,
+            )
+        except RepositoryIdentityError as exc:
+            emit_command_error(
+                "repository_identity_error",
+                retryable=False,
+                message=str(exc),
+                exit_code=1,
+            )
+        return emit_json({
+            "command": "identity",
+            "action": "init",
+            "repository_id": repo_id,
+        })
+    elif action == "show":
+        try:
+            repo_id = get_repository_identity(cwd)
+        except GitRepositoryNotInitializedError as exc:
+            emit_command_error(
+                "git_repository_not_initialized",
+                retryable=False,
+                message=str(exc),
+                exit_code=1,
+            )
+        except RepositoryIdentityError as exc:
+            code = (
+                "repository_identity_not_initialized"
+                if "not initialized" in str(exc)
+                else "repository_identity_error"
+            )
+            emit_command_error(
+                code,
+                retryable=False,
+                message=str(exc),
+                exit_code=1,
+            )
+        return emit_json({
+            "command": "identity",
+            "action": "show",
+            "repository_id": repo_id,
+        })
+    emit_command_error(
+        "invalid_input",
+        retryable=False,
+        message="identity action must be 'init' or 'show'",
+        exit_code=1,
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="herdr-orchestrator",
@@ -212,6 +282,10 @@ def build_parser() -> argparse.ArgumentParser:
             )
             p.add_argument("--result-ref", default=None)
             p.add_argument("--summary", default=None)
+        elif name == "identity":
+            id_sub = p.add_subparsers(dest="identity_action", required=True)
+            id_sub.add_parser("init", help="Initialize or retrieve repository identity UUID")
+            id_sub.add_parser("show", help="Show registered repository identity UUID")
         else:
             p.add_argument("task_id", nargs="?", metavar="task.id")
 
@@ -231,6 +305,7 @@ def main(argv: list[str] | None = None) -> int:
         "resume-task": _cmd_resume_task,
         "reset-completion": _cmd_reset_completion,
         "recover-completion": _cmd_recover_completion,
+        "identity": _cmd_identity,
     }
     handler = handlers[ns.command]
     return handler(ns)

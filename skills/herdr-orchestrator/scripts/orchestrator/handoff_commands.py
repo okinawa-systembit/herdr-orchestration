@@ -10,7 +10,12 @@ from typing import Any
 
 from orchestrator.handoff_lock import HandoffLockSession
 from orchestrator.herdr_cli import HerdrCliError, classify_prompt_error, run_herdr
-from orchestrator.identity import RepositoryIdentityError, derive_repository_identity
+from orchestrator.identity import (
+    GitRepositoryNotInitializedError,
+    RepositoryIdentityError,
+    get_or_create_repository_identity,
+    resolve_git_common_dir,
+)
 from orchestrator.live_agent import (
     LiveAgentError,
     get_caller_live_agent,
@@ -108,9 +113,15 @@ def _resolve_parties(*, worker_role: str) -> tuple[Any, Any, Path, str, str]:
     try:
         worktree = resolve_worktree_root(requester.foreground_cwd)
     except WorktreeError as exc:
+        try:
+            resolve_git_common_dir(requester.foreground_cwd)
+        except GitRepositoryNotInitializedError as git_exc:
+            raise HandoffCommandError("git_repository_not_initialized", message=str(git_exc)) from git_exc
         raise HandoffCommandError("requester_context_unverified", message=str(exc)) from exc
     try:
-        identity = derive_repository_identity(worktree)
+        identity = get_or_create_repository_identity(worktree)
+    except GitRepositoryNotInitializedError as exc:
+        raise HandoffCommandError("git_repository_not_initialized", message=str(exc)) from exc
     except RepositoryIdentityError as exc:
         raise HandoffCommandError("requester_context_unverified", message=str(exc)) from exc
     try:

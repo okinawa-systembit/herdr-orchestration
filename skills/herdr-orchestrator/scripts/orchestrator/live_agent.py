@@ -7,7 +7,7 @@ from typing import Any
 
 from orchestrator.env import HerdrEnvError, require_herdr_env
 from orchestrator.herdr_cli import HerdrCliError, run_herdr
-from orchestrator.identity import RepositoryIdentityError, derive_repository_identity
+from orchestrator.identity import RepositoryIdentityError, get_repository_identity
 from orchestrator.worktree import WorktreeError, resolve_worktree_root
 
 PROMPTABLE_AGENT_STATES = frozenset({"idle", "done"})
@@ -122,7 +122,7 @@ def verify_worktree_affinity(
         )
 
     try:
-        derived = derive_repository_identity(resolved)
+        derived = get_repository_identity(resolved)
     except RepositoryIdentityError as exc:
         raise LiveAgentError("repository identity derivation failed") from exc
 

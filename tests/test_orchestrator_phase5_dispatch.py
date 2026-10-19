@@ -22,11 +22,16 @@ from pathlib import Path
 
 from orchestrator.handoff_lock import HandoffLockSession
 from orchestrator.registry.errors import RegistryError
+from orchestrator.naming import expected_agent_name
 from orchestrator.registry import operations as registry_ops
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CLI = REPO_ROOT / "skills" / "herdr-orchestrator" / "scripts" / "herdr-orchestrator"
 _GIT_IDENTITY = ["-c", "user.name=herdr-orchestrator-test", "-c", "user.email=test@example.com"]
+
+_SAMPLE_UUID = "550e8400-e29b-41d4-a716-446655440000"
+_WORKER_AGENT = expected_agent_name(_SAMPLE_UUID, "reviewer")
+_REQUESTER_AGENT = expected_agent_name(_SAMPLE_UUID, "design")
 
 _FAKE_HERDR_PY = """#!/usr/bin/env python3
 import json, os, sys
@@ -100,6 +105,11 @@ def _init_worktree(root: Path) -> Path:
     )
     (repo / "README.md").write_text("x\n", encoding="utf-8")
     subprocess.run(
+        ["git", *_GIT_IDENTITY, "-C", str(repo), "config", "herdr.repository-id", _SAMPLE_UUID],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
         ["git", *_GIT_IDENTITY, "-C", str(repo), "remote", "add", "origin", "https://github.com/org/repo.git"],
         check=True,
         capture_output=True,
@@ -128,7 +138,7 @@ def _sample_create_payload(*, worktree: Path, mode: str = "async") -> dict:
             "instruction": "review",
         },
         "context": {
-            "repository": {"identity": "github.com/org/repo"},
+            "repository": {"identity": _SAMPLE_UUID},
             "worktree": {
                 "path": str(worktree.resolve()),
                 "branch": "main",
@@ -137,12 +147,12 @@ def _sample_create_payload(*, worktree: Path, mode: str = "async") -> dict:
         },
         "requester": {
             "role": "design",
-            "agent_name": "org-repo-design",
+            "agent_name": _REQUESTER_AGENT,
             "pane_id": "w11:p1",
         },
         "worker": {
             "role": "reviewer",
-            "agent_name": "org-repo-reviewer",
+            "agent_name": _WORKER_AGENT,
             "pane_id": "w11:p2",
         },
         "completion": {"action": "resume_requester" if mode == "async" else "none"},
@@ -175,7 +185,7 @@ class Phase5DispatchTests(unittest.TestCase):
         self.env["HERDR_ORCHESTRATOR_STALE_DISPATCH_SEC"] = "60"
         self.worktree = _init_worktree(root)
         self.env["FAKE_AGENT_CWD"] = str(self.worktree)
-        self.env["FAKE_WORKER_AGENT"] = "org-repo-reviewer"
+        self.env["FAKE_WORKER_AGENT"] = _WORKER_AGENT
 
     def _create_pending(
         self,
