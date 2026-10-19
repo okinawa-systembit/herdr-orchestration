@@ -641,6 +641,55 @@ exec /bin/rm "$@"
             self.assertIn("WARNING: Failed to clean up incomplete installation directory", proc.stderr)
             self.assertIn("Manual cleanup recommended:", proc.stderr)
 
+    def test_installer_update_post_commit_failure_preserves_new_dest(self) -> None:
+        """PR52-09: Ensure destination is NOT removed if process exits abnormally after update commit and backup removal."""
+        for script, name in [(DEV_INSTALL, "dev-local-install.sh"), (SETUP, "setup.sh")]:
+            with tempfile.TemporaryDirectory() as tmp:
+                dest = Path(tmp) / "skill_dest"
+                dest.mkdir()
+                old_marker = dest / "old_installation_marker.txt"
+                old_marker.write_text("v1.0.0-existing", encoding="utf-8")
+
+                # Mock rm to trigger SIGTERM on parent after backup removal succeeds
+                mock_bin = Path(tmp) / "mock_bin"
+                mock_bin.mkdir()
+                rm_mock = mock_bin / "rm"
+                rm_mock.write_text(
+                    """#!/usr/bin/env bash
+/bin/rm "$@"
+ret=$?
+if [[ $ret -eq 0 && "$*" == *backup* ]]; then
+    kill -TERM $PPID
+    sleep 0.2
+fi
+exit $ret
+""",
+                    encoding="utf-8",
+                )
+                rm_mock.chmod(0o755)
+
+                env = os.environ.copy()
+                orig_path = env["PATH"]
+                env["PATH"] = f"{mock_bin}:{orig_path}"
+                bin_link = Path(tmp) / "bin" / "herdr-orchestrator"
+                env["HERDR_ORCHESTRATOR_BIN_LINK"] = str(bin_link)
+
+                proc = subprocess.run(
+                    ["bash", str(script), "--dest", str(dest)],
+                    capture_output=True,
+                    text=True,
+                    env=env,
+                    check=False,
+                )
+                # Terminated by SIGTERM (code 143)
+                self.assertEqual(proc.returncode, 143, f"{name}: unexpected return code: {proc.returncode}")
+
+                # Ensure destination was NOT removed and contains newly installed files
+                self.assertTrue(dest.is_dir(), f"{name}: newly installed destination was mistakenly removed!")
+                self.assertTrue((dest / "SKILL.md").is_file(), f"{name}: missing SKILL.md in destination")
+                self.assertTrue((dest / "scripts" / "herdr-orchestrator").is_file(), f"{name}: missing CLI in destination")
+                self.assertFalse(old_marker.exists(), f"{name}: old marker should have been replaced")
+
 
 if __name__ == "__main__":
     unittest.main()
