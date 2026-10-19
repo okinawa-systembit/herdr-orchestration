@@ -49,6 +49,10 @@ npm run install:orchestrator-dev
 - **コピー先**: `~/.agents/skills/herdr-orchestration/`（上書きコピー）。
 - **再実行**: Skill / CLI を直したら **同スクリプトを再実行**してグローバルコピーを更新（配布 install 後の更新と同型）。
 - **PATH**: `~/.local/bin/herdr-orchestrator` → install 先 `scripts/herdr-orchestrator` へ **symlink**（`install/link-cli.sh`）。開発・配布で同じ（`--dry-run` 時は未インストール環境でもシミュレーション実行可能）。
+- **安全性と多重ネスト防止（PR52-01）**:
+  - 再実行時の多重ネスト（`scripts/scripts` 等）を防止し、常にリポジトリ正本と完全同期する。
+  - `--dest` にルート（`/`）やホーム直下（`$HOME`）などの危険なパスが指定された場合は安全に拒絶する。
+  - コピー失敗時に既存の正常なインストール環境を保護するため、一時ステージング展開とロールバック保護により失敗耐性を担保する。
 
 別パス:
 
