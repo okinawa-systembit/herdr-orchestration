@@ -102,14 +102,14 @@ class LiveAgentTests(unittest.TestCase):
                     return_value=Path("/tmp/repo"),
                 ):
                     with patch(
-                        "orchestrator.live_agent.derive_repository_identity",
-                        return_value="github.com/org/repo",
+                        "orchestrator.live_agent.get_repository_identity",
+                        return_value="550e8400-e29b-41d4-a716-446655440000",
                     ):
                         with self.assertRaises(LiveAgentError):
                             verify_live_agent_context(
                                 "worker",
                                 expected_worktree_path=Path("/other"),
-                                expected_repository_identity="github.com/org/repo",
+                                expected_repository_identity="550e8400-e29b-41d4-a716-446655440000",
                             )
 
 

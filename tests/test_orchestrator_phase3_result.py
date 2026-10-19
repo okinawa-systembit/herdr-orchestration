@@ -17,10 +17,15 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from orchestrator.naming import expected_agent_name
 from orchestrator.registry import operations as registry_ops
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CLI = REPO_ROOT / "skills" / "herdr-orchestrator" / "scripts" / "herdr-orchestrator"
+
+_SAMPLE_UUID = "550e8400-e29b-41d4-a716-446655440000"
+_WORKER_AGENT = expected_agent_name(_SAMPLE_UUID, "reviewer")
+_REQUESTER_AGENT = expected_agent_name(_SAMPLE_UUID, "design")
 
 _GIT_IDENTITY = ["-c", "user.name=herdr-orchestrator-test", "-c", "user.email=test@example.com"]
 
@@ -33,7 +38,12 @@ def _git(worktree: Path, *args: str) -> None:
     )
 
 
-def _init_worktree(root: Path, *, origin: str = "https://github.com/org/repo.git") -> Path:
+def _init_worktree(
+    root: Path,
+    *,
+    repo_uuid: str = _SAMPLE_UUID,
+    origin: str = "https://github.com/org/repo.git",
+) -> Path:
     repo = root / "wt"
     if repo.exists():
         repo = root / f"wt_{origin.split('/')[-1].replace('.git', '')}"
@@ -43,6 +53,7 @@ def _init_worktree(root: Path, *, origin: str = "https://github.com/org/repo.git
         capture_output=True,
     )
     (repo / "README.md").write_text("x\n", encoding="utf-8")
+    _git(repo, "config", "herdr.repository-id", repo_uuid)
     _git(repo, "remote", "add", "origin", origin)
     _git(repo, "add", "README.md")
     _git(repo, "commit", "-m", "init")
@@ -61,7 +72,7 @@ def _sample_create_payload(*, worktree: Path, mode: str = "sync") -> dict:
             "instruction": "review changes",
         },
         "context": {
-            "repository": {"identity": "github.com/org/repo"},
+            "repository": {"identity": _SAMPLE_UUID},
             "worktree": {
                 "path": str(worktree.resolve()),
                 "branch": "main",
@@ -70,12 +81,12 @@ def _sample_create_payload(*, worktree: Path, mode: str = "sync") -> dict:
         },
         "requester": {
             "role": "design",
-            "agent_name": "org-repo-design",
+            "agent_name": _REQUESTER_AGENT,
             "pane_id": "w11:p1",
         },
         "worker": {
             "role": "reviewer",
-            "agent_name": "org-repo-reviewer",
+            "agent_name": _WORKER_AGENT,
             "pane_id": "w11:p2",
         },
         "completion": {"action": "none" if mode == "sync" else "resume_requester"},
@@ -142,7 +153,7 @@ class Phase3ResultCliTests(unittest.TestCase):
             "import json, os, sys\n"
             'if len(sys.argv) >= 3 and sys.argv[1] == "agent" and sys.argv[2] == "get":\n'
             '    cwd = os.environ.get("FAKE_AGENT_CWD", "/nonexistent")\n'
-            '    name = os.environ.get("FAKE_AGENT_NAME", "org-repo-reviewer")\n'
+            f'    name = os.environ.get("FAKE_AGENT_NAME", "{_WORKER_AGENT}")\n'
             "    print(json.dumps({\n"
             '        "result": {\n'
             '            "agent": {\n'
@@ -164,7 +175,7 @@ class Phase3ResultCliTests(unittest.TestCase):
         self.env["XDG_STATE_HOME"] = str(self.state_home)
         self.env["PATH"] = f"{self.fake_bin}:{self.env.get('PATH', '')}"
         self.env["FAKE_AGENT_CWD"] = str(self.worktree / "sub")
-        self.env["FAKE_AGENT_NAME"] = "org-repo-reviewer"
+        self.env["FAKE_AGENT_NAME"] = _WORKER_AGENT
         (self.worktree / "sub").mkdir(exist_ok=True)
 
     def _ready_task(self) -> str:
@@ -300,18 +311,16 @@ class Phase3ResultCliTests(unittest.TestCase):
         before = task_path.read_text(encoding="utf-8")
         _git(
             self.worktree,
-            "remote",
-            "set-url",
-            "origin",
-            "https://github.com/other/repo.git",
+            "config",
+            "herdr.repository-id",
+            "a0000000-0000-4000-8000-000000000000",
         )
         self.addCleanup(
             lambda: _git(
                 self.worktree,
-                "remote",
-                "set-url",
-                "origin",
-                "https://github.com/org/repo.git",
+                "config",
+                "herdr.repository-id",
+                _SAMPLE_UUID,
             )
         )
         proc = _run_cli(*_submit_args(task_id), env=self.env)

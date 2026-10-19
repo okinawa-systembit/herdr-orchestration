@@ -25,9 +25,11 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 CLI = REPO_ROOT / "skills" / "herdr-orchestrator" / "scripts" / "herdr-orchestrator"
 REGISTRY_CLI = REPO_ROOT / "skills" / "herdr-orchestrator" / "scripts" / "task-registry.py"
 
-_IDENTITY = "github.com/org/repo"
-_REQUESTER_AGENT = "github-com-org-repo-design"
-_WORKER_AGENT = "github-com-org-repo-reviewer"
+from orchestrator.naming import expected_agent_name
+
+_IDENTITY = "550e8400-e29b-41d4-a716-446655440000"
+_REQUESTER_AGENT = expected_agent_name(_IDENTITY, "design")
+_WORKER_AGENT = expected_agent_name(_IDENTITY, "reviewer")
 
 _GIT_IDENTITY = ["-c", "user.name=herdr-orchestrator-test", "-c", "user.email=test@example.com"]
 
@@ -127,6 +129,7 @@ def _init_worktree(root: Path) -> Path:
         capture_output=True,
     )
     (repo / "README.md").write_text("x\n", encoding="utf-8")
+    _git(repo, "config", "herdr.repository-id", _IDENTITY)
     _git(repo, "remote", "add", "origin", "https://github.com/org/repo.git")
     _git(repo, "add", "README.md")
     _git(repo, "commit", "-m", "init")

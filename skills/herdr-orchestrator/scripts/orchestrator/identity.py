@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import fcntl
+import os
 import re
 import subprocess
+import uuid
+from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -10,9 +14,183 @@ class RepositoryIdentityError(Exception):
     pass
 
 
+class GitRepositoryNotInitializedError(RepositoryIdentityError):
+    pass
+
+
+_UUID_V4_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+)
+
 _SCP_RE = re.compile(r"^(?P<user>[^@]+)@(?P<host>[^:]+):(?P<path>.+)$")
+CONFIG_KEY = "herdr.repository-id"
+CONFIG_FILE_NAME = "config"
+LOCK_FILE_NAME = "herdr-identity.lock"
 
 
+def _run_git(args: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
+    """
+    Execute a git command with LC_ALL=C to enforce deterministic English output.
+    LC_ALL=C is always enforced, even if kwargs contains a custom env.
+    """
+    env = dict(os.environ)
+    if "env" in kwargs and kwargs["env"] is not None:
+        env.update(kwargs.pop("env"))
+    env["LC_ALL"] = "C"
+    capture_output = kwargs.pop("capture_output", True)
+    text = kwargs.pop("text", True)
+    check = kwargs.pop("check", False)
+    return subprocess.run(
+        args,
+        capture_output=capture_output,
+        text=text,
+        check=check,
+        env=env,
+        **kwargs,
+    )
+
+
+def is_valid_uuid_v4(val: str) -> bool:
+    """Validate RFC 4122 / RFC 9562 UUID v4 (lowercase hexadecimal, 36 chars with hyphens)."""
+    if not isinstance(val, str):
+        return False
+    return bool(_UUID_V4_RE.match(val))
+
+
+def is_not_git_repository_error(stderr: str) -> bool:
+    """
+    Check if git error output indicates that the directory is not inside a git repository.
+    Relies on standard C locale error message output ('fatal: not a git repository ...').
+    """
+    s = stderr.lower()
+    return "not a git repository" in s
+
+
+def resolve_git_common_dir(worktree: Path) -> Path:
+    """
+    Resolve the git common directory for worktree.
+    Raise GitRepositoryNotInitializedError only if explicitly not inside a git repository.
+    Raise RepositoryIdentityError for other git errors (corrupted repo, permission denied, etc.).
+    """
+    if not worktree.exists():
+        raise RepositoryIdentityError(f"worktree path does not exist: {worktree}")
+
+    proc = _run_git(["git", "-C", str(worktree), "rev-parse", "--is-inside-work-tree"])
+    if proc.returncode != 0:
+        err = proc.stderr.strip()
+        if is_not_git_repository_error(err):
+            raise GitRepositoryNotInitializedError(
+                err or f"{worktree} is not inside a git repository"
+            )
+        raise RepositoryIdentityError(
+            f"git rev-parse --is-inside-work-tree failed: {err or f'exit code {proc.returncode}'}"
+        )
+
+    proc_common = _run_git(["git", "-C", str(worktree), "rev-parse", "--git-common-dir"])
+    if proc_common.returncode != 0:
+        err_common = proc_common.stderr.strip()
+        if is_not_git_repository_error(err_common):
+            raise GitRepositoryNotInitializedError(err_common)
+        raise RepositoryIdentityError(
+            f"git rev-parse --git-common-dir failed: {err_common}"
+        )
+    common_dir_str = proc_common.stdout.strip()
+    if not common_dir_str:
+        raise RepositoryIdentityError("git rev-parse --git-common-dir returned empty path")
+    common_path = Path(common_dir_str)
+    if not common_path.is_absolute():
+        common_path = (worktree / common_path).resolve()
+    return common_path
+
+
+@contextmanager
+def _acquire_identity_lock(git_common_dir: Path):
+    """Acquire exclusive flock on <git-common-dir>/herdr-identity.lock."""
+    lock_file = git_common_dir / LOCK_FILE_NAME
+    lock_file.parent.mkdir(parents=True, exist_ok=True)
+    f = open(lock_file, "a+")
+    try:
+        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            try:
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+            except OSError:
+                pass
+    finally:
+        f.close()
+
+
+def _read_uuid_from_git_config(git_common_dir: Path) -> str | None:
+    """Read herdr.repository-id directly from <git-common-dir>/config."""
+    config_file = git_common_dir / CONFIG_FILE_NAME
+    proc = _run_git(["git", "config", "--file", str(config_file), "--get", CONFIG_KEY])
+    if proc.returncode == 0:
+        val = proc.stdout.strip()
+        return val if val else None
+    if proc.returncode == 1:
+        return None
+    raise RepositoryIdentityError(f"failed to read git config: {proc.stderr.strip()}")
+
+
+def _write_uuid_to_git_config(git_common_dir: Path, uuid_str: str) -> None:
+    """Write herdr.repository-id directly to <git-common-dir>/config."""
+    config_file = git_common_dir / CONFIG_FILE_NAME
+    proc = _run_git(["git", "config", "--file", str(config_file), CONFIG_KEY, uuid_str])
+    if proc.returncode != 0:
+        raise RepositoryIdentityError(f"failed to write git config: {proc.stderr.strip()}")
+
+
+def get_or_create_repository_identity(worktree: Path) -> str:
+    """
+    Get existing UUID v4 from common git config, or generate and persist a new one.
+    Guarantees idempotency and concurrency safety via flock on <git-common-dir>/herdr-identity.lock.
+    Aborts without returning on write/verify failure.
+    """
+    common_dir = resolve_git_common_dir(worktree)
+    with _acquire_identity_lock(common_dir):
+        existing = _read_uuid_from_git_config(common_dir)
+        if existing is not None:
+            if not is_valid_uuid_v4(existing):
+                raise RepositoryIdentityError(
+                    f"invalid repository identity format in git config: {existing!r}"
+                )
+            return existing
+
+        new_uuid = str(uuid.uuid4()).lower()
+        _write_uuid_to_git_config(common_dir, new_uuid)
+
+        readback = _read_uuid_from_git_config(common_dir)
+        if readback != new_uuid:
+            raise RepositoryIdentityError(
+                f"repository identity write verification failed: expected={new_uuid!r}, read={readback!r}"
+            )
+        return new_uuid
+
+
+def get_repository_identity(worktree: Path) -> str:
+    """
+    Read-only retrieval of UUID v4 from common git config.
+    Does not generate, alter, or repair UUIDs.
+    """
+    common_dir = resolve_git_common_dir(worktree)
+    existing = _read_uuid_from_git_config(common_dir)
+    if existing is None:
+        raise RepositoryIdentityError("repository identity not initialized")
+    if not is_valid_uuid_v4(existing):
+        raise RepositoryIdentityError(
+            f"invalid repository identity format in git config: {existing!r}"
+        )
+    return existing
+
+
+def derive_repository_identity(worktree: Path) -> str:
+    """Read-only alias for get_repository_identity(worktree)."""
+    return get_repository_identity(worktree)
+
+
+# Legacy / URL helper routines preserved for utility and backward test compatibility
 def _strip_git_suffix(path: str) -> str:
     path = path.strip("/")
     if path.endswith(".git"):
@@ -50,10 +228,6 @@ def _canonical_host_path(host: str, port: int | None, path: str, *, default_port
 
 
 def normalize_remote_url(url: str) -> str:
-    """
-    Map one Git remote URL to canonical identity (§11.0).
-    MVP: scp, https, ssh:// only.
-    """
     raw = url.strip()
     if not raw:
         raise RepositoryIdentityError("empty remote url")
@@ -79,9 +253,7 @@ def normalize_remote_url(url: str) -> str:
         raise RepositoryIdentityError(f"unsupported scheme: {scheme}")
 
     host = _parsed_hostname(parsed)
-
     path = _strip_git_suffix(parsed.path or "")
-
     port = _parsed_port(parsed)
     if scheme == "https":
         return _canonical_host_path(host, port, path, default_port=443)
@@ -89,12 +261,7 @@ def normalize_remote_url(url: str) -> str:
 
 
 def git_remote_fetch_urls(worktree: Path, remote: str = "origin") -> list[str]:
-    proc = subprocess.run(
-        ["git", "-C", str(worktree), "remote", "get-url", "--all", remote],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    proc = _run_git(["git", "-C", str(worktree), "remote", "get-url", "--all", remote])
     if proc.returncode != 0:
         raise RepositoryIdentityError(f"git remote get-url failed: {proc.stderr.strip()}")
     lines = [ln.strip() for ln in proc.stdout.splitlines() if ln.strip()]
@@ -113,35 +280,7 @@ def identity_from_origin_fetch_urls(urls: list[str]) -> str:
 
 
 def list_remotes(worktree: Path) -> list[str]:
-    proc = subprocess.run(
-        ["git", "-C", str(worktree), "remote"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    proc = _run_git(["git", "-C", str(worktree), "remote"])
     if proc.returncode != 0:
         raise RepositoryIdentityError(proc.stderr.strip() or "git remote failed")
     return [ln.strip() for ln in proc.stdout.splitlines() if ln.strip()]
-
-
-def derive_repository_identity(worktree: Path) -> str:
-    """
-    §11.0: origin required; origin fetch URLs (all) → identity; every remote must match.
-    """
-    remotes = list_remotes(worktree)
-    if "origin" not in remotes:
-        raise RepositoryIdentityError("origin remote is required")
-
-    origin_identity = identity_from_origin_fetch_urls(git_remote_fetch_urls(worktree, "origin"))
-
-    for remote in remotes:
-        if remote == "origin":
-            continue
-        remote_identity = identity_from_origin_fetch_urls(git_remote_fetch_urls(worktree, remote))
-        if remote_identity != origin_identity:
-            raise RepositoryIdentityError(
-                f"remotes disagree on repository identity: "
-                f"origin={origin_identity!r}, {remote}={remote_identity!r}"
-            )
-
-    return origin_identity

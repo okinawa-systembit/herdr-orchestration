@@ -17,11 +17,16 @@ import unittest
 from pathlib import Path
 
 from orchestrator.registry.errors import RegistryError
+from orchestrator.naming import expected_agent_name
 from orchestrator.registry import operations as registry_ops
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CLI = REPO_ROOT / "skills" / "herdr-orchestrator" / "scripts" / "herdr-orchestrator"
 _GIT_IDENTITY = ["-c", "user.name=herdr-orchestrator-test", "-c", "user.email=test@example.com"]
+
+_SAMPLE_UUID = "550e8400-e29b-41d4-a716-446655440000"
+_WORKER_AGENT = expected_agent_name(_SAMPLE_UUID, "reviewer")
+_REQUESTER_AGENT = expected_agent_name(_SAMPLE_UUID, "design")
 
 _FAKE_HERDR_PY = """#!/usr/bin/env python3
 import json, os, sys
@@ -133,6 +138,11 @@ def _init_worktree(root: Path) -> Path:
     )
     (repo / "README.md").write_text("x\n", encoding="utf-8")
     subprocess.run(
+        ["git", *_GIT_IDENTITY, "-C", str(repo), "config", "herdr.repository-id", _SAMPLE_UUID],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
         ["git", *_GIT_IDENTITY, "-C", str(repo), "remote", "add", "origin", "https://github.com/org/repo.git"],
         check=True,
         capture_output=True,
@@ -148,11 +158,11 @@ def _sample_create_payload(*, worktree: Path) -> dict:
     return {
         "task": {"type": "review", "mode": "async", "instruction": "review"},
         "context": {
-            "repository": {"identity": "github.com/org/repo"},
+            "repository": {"identity": _SAMPLE_UUID},
             "worktree": {"path": str(worktree.resolve()), "branch": "main", "commit": None},
         },
-        "requester": {"role": "design", "agent_name": "org-repo-design", "pane_id": "w11:p1"},
-        "worker": {"role": "reviewer", "agent_name": "org-repo-reviewer", "pane_id": "w11:p2"},
+        "requester": {"role": "design", "agent_name": _REQUESTER_AGENT, "pane_id": "w11:p1"},
+        "worker": {"role": "reviewer", "agent_name": _WORKER_AGENT, "pane_id": "w11:p2"},
         "completion": {"action": "resume_requester"},
     }
 
@@ -191,8 +201,8 @@ class Phase6CompletionTests(unittest.TestCase):
         self.env["XDG_STATE_HOME"] = str(self.state_home)
         self.env["PATH"] = f"{self.fake_bin}:{self.env.get('PATH', '')}"
         self.env["FAKE_AGENT_CWD"] = str(self.worktree)
-        self.env["FAKE_REQUESTER_AGENT"] = "org-repo-design"
-        self.env["FAKE_WORKER_AGENT"] = "org-repo-reviewer"
+        self.env["FAKE_REQUESTER_AGENT"] = _REQUESTER_AGENT
+        self.env["FAKE_WORKER_AGENT"] = _WORKER_AGENT
         self.env["FAKE_PROMPT_LOG"] = str(self.prompt_log)
 
     def test_result_submit_best_effort_completion_sent(self) -> None:
