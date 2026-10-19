@@ -31,13 +31,12 @@ LOCK_FILE_NAME = "herdr-identity.lock"
 def _run_git(args: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
     """
     Execute a git command with LC_ALL=C to enforce deterministic English output.
+    LC_ALL=C is always enforced, even if kwargs contains a custom env.
     """
     env = dict(os.environ)
-    env["LC_ALL"] = "C"
     if "env" in kwargs and kwargs["env"] is not None:
-        merged = env.copy()
-        merged.update(kwargs.pop("env"))
-        env = merged
+        env.update(kwargs.pop("env"))
+    env["LC_ALL"] = "C"
     capture_output = kwargs.pop("capture_output", True)
     text = kwargs.pop("text", True)
     check = kwargs.pop("check", False)

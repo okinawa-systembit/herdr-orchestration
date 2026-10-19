@@ -355,16 +355,17 @@ sys.exit(1)
         # Non-English error message returns False, falling back safely to RepositoryIdentityError
         self.assertFalse(is_not_git_repository_error("fatal: git リポジトリではありません"))
 
-        # 2. _run_git forces LC_ALL=C
+        # 2. _run_git forces LC_ALL=C (even if caller passes custom LC_ALL - INFO-01)
         with patch("subprocess.run") as mock_subproc:
             mock_subproc.return_value = subprocess.CompletedProcess(
                 args=["git"], returncode=0, stdout="", stderr=""
             )
-            _run_git(["git", "status"])
+            _run_git(["git", "status"], env={"LC_ALL": "ja_JP.UTF-8", "CUSTOM_VAR": "val"})
             mock_subproc.assert_called_once()
             _, kwargs = mock_subproc.call_args
             self.assertIn("env", kwargs)
             self.assertEqual(kwargs["env"].get("LC_ALL"), "C")
+            self.assertEqual(kwargs["env"].get("CUSTOM_VAR"), "val")
 
         # 3. Non-existent path -> RepositoryIdentityError
         non_existent = self.root / "non_existent_directory"
