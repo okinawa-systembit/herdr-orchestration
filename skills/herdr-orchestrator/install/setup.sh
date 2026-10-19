@@ -18,6 +18,7 @@ CLEANUP_BACKUP_DIR=""
 CLEANUP_DEST=""
 CLEANUP_SWAPPED=0
 CLEANUP_BACKUP_CREATED=0
+CLEANUP_FRESH_INSTALLED=0
 
 cleanup() {
   local exit_code=$?
@@ -41,6 +42,9 @@ cleanup() {
         CLEANUP_BACKUP_DIR=""
       fi
     fi
+  elif [[ ${CLEANUP_FRESH_INSTALLED:-0} -eq 1 && $exit_code -ne 0 ]]; then
+    echo "${SCRIPT_NAME}: Initial installation failed with exit code ${exit_code}. Cleaning up incomplete installation at ${CLEANUP_DEST}..." >&2
+    rm -rf "$CLEANUP_DEST" 2>/dev/null || true
   fi
 
   if [[ -n "${CLEANUP_STAGING_DIR:-}" && -d "$CLEANUP_STAGING_DIR" ]]; then
@@ -61,8 +65,8 @@ trap cleanup EXIT
 acquire_lock() {
   local lock_file="${DEST_PARENT}/${LOCK_FILE_NAME}"
   mkdir -p "$DEST_PARENT"
-  eval "exec ${LOCK_FD}>\"${lock_file}\""
-  if ! flock -n "${LOCK_FD}"; then
+  exec 200>"$lock_file"
+  if ! flock -n 200; then
     echo "${SCRIPT_NAME}: another installation process is running on ${DEST_PARENT} (lock: ${lock_file})" >&2
     exit 1
   fi
@@ -196,7 +200,9 @@ done
 chmod +x "${STAGING_DIR}/scripts/herdr-orchestrator" "${STAGING_DIR}/scripts/task-registry.py" 2>/dev/null || true
 
 # Atomic swap into place
+IS_UPDATE=0
 if [[ -e "$DEST" || -L "$DEST" ]]; then
+  IS_UPDATE=1
   mv "$DEST" "$BACKUP_DIR"
   CLEANUP_BACKUP_CREATED=1
   CLEANUP_SWAPPED=1
@@ -204,8 +210,12 @@ fi
 
 mv "$STAGING_DIR" "$DEST"
 CLEANUP_STAGING_DIR="" # Successfully moved into place
+if [[ $IS_UPDATE -eq 0 ]]; then
+  CLEANUP_FRESH_INSTALLED=1
+fi
 
 # Clean up backup on success
+CLEANUP_FRESH_INSTALLED=0
 CLEANUP_BACKUP_CREATED=0
 CLEANUP_SWAPPED=0
 if [[ -n "${CLEANUP_BACKUP_PARENT:-}" && -d "$CLEANUP_BACKUP_PARENT" ]]; then

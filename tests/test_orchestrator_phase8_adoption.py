@@ -422,7 +422,7 @@ exec /bin/mv "$@"
 
         with tempfile.TemporaryDirectory() as tmp:
             dest = Path(tmp) / "herdr-orchestration"
-            lock_file = Path(tmp) / ".herdr-orchestration.install.lock"
+            lock_file = Path(tmp) / ".herdr-orchestrator.install.lock"
 
             with open(lock_file, "w") as f:
                 # Acquire exclusive lock
@@ -451,6 +451,105 @@ exec /bin/mv "$@"
                 check=False,
             )
             self.assertEqual(proc_ok.returncode, 0, proc_ok.stderr)
+
+    def test_installer_eval_free_and_special_character_path(self) -> None:
+        """PR52-06: Ensure acquire_lock does not use eval and safely handles special characters."""
+        import fcntl
+
+        # Static verification: Neither setup.sh nor dev-local-install.sh contains eval
+        for script, name in [(SETUP, "setup.sh"), (DEV_INSTALL, "dev-local-install.sh")]:
+            content = script.read_text(encoding="utf-8")
+            self.assertNotIn("eval ", content, f"{name} contains unsafe 'eval' statement")
+
+        # Dynamic verification: special characters in path do not cause command execution
+        with tempfile.TemporaryDirectory() as tmp:
+            marker_file = Path(tmp) / "injected_marker.txt"
+            # Attempt command injection in directory name: $(touch ...)
+            special_name = f"skill-dir with spaces and 'single' and \"double\" and $(touch {marker_file})"
+            dest = Path(tmp) / special_name
+            bin_link = Path(tmp) / "bin" / "herdr-orchestrator"
+            env = os.environ.copy()
+            env["HERDR_ORCHESTRATOR_BIN_LINK"] = str(bin_link)
+
+            proc = subprocess.run(
+                ["bash", str(DEV_INSTALL), "--dest", str(dest)],
+                capture_output=True,
+                text=True,
+                env=env,
+                check=False,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            # Ensure command injection did NOT execute
+            self.assertFalse(marker_file.exists(), "Command injection was executed via special characters in path!")
+            self.assertTrue((dest / "SKILL.md").is_file())
+
+            # Cross-installer mutual exclusion on identical DEST_PARENT
+            lock_file = Path(tmp) / ".herdr-orchestrator.install.lock"
+            with open(lock_file, "w") as f:
+                fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                proc_setup = subprocess.run(
+                    ["bash", str(SETUP), "--dest", str(Path(tmp) / "cursor_dest")],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertNotEqual(proc_setup.returncode, 0)
+                self.assertIn("another installation process is running", proc_setup.stderr)
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+
+    def test_installer_initial_install_failure_cleanup(self) -> None:
+        """PR52-07: Ensure initial installation cleans up incomplete destination on failure."""
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "brand_new_skill"
+            # Ensure destination does not exist beforehand (initial install)
+            self.assertFalse(dest.exists())
+
+            # Create invalid bin_link causing failure after staging has been moved to dest
+            invalid_bin_parent = Path(tmp) / "invalid_bin_file"
+            invalid_bin_parent.write_text("blocking", encoding="utf-8")
+            invalid_bin_link = invalid_bin_parent / "herdr-orchestrator"
+
+            env = os.environ.copy()
+            env["HERDR_ORCHESTRATOR_BIN_LINK"] = str(invalid_bin_link)
+
+            proc = subprocess.run(
+                ["bash", str(DEV_INSTALL), "--dest", str(dest)],
+                capture_output=True,
+                text=True,
+                env=env,
+                check=False,
+            )
+            self.assertNotEqual(proc.returncode, 0)
+            self.assertIn("Initial installation failed with exit code", proc.stderr)
+            self.assertIn("Cleaning up incomplete installation", proc.stderr)
+
+            # Destination directory must be completely removed on initial install failure
+            self.assertFalse(dest.exists(), "Incomplete destination was left behind on initial install failure")
+
+    def test_installer_default_dest_symlink_home_resolution(self) -> None:
+        """Ensure DEFAULT_DEST with symlinked HOME is properly recognized for SHOULD_LINK."""
+        with tempfile.TemporaryDirectory() as tmp:
+            real_home = Path(tmp) / "real_home"
+            real_home.mkdir()
+            symlink_home = Path(tmp) / "symlink_home"
+            os.symlink(real_home, symlink_home)
+
+            env = os.environ.copy()
+            env["HOME"] = str(symlink_home)
+            env.pop("HERDR_ORCHESTRATION_SKILL_DEST", None)
+            env.pop("HERDR_ORCHESTRATOR_BIN_LINK", None)
+
+            # Dry-run with symlinked HOME should recognize DEFAULT_DEST and plan ln -sf
+            proc = subprocess.run(
+                ["bash", str(DEV_INSTALL), "--dry-run"],
+                capture_output=True,
+                text=True,
+                env=env,
+                check=False,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("would ln -sf", proc.stdout)
+            self.assertNotIn("would skip ~/.local/bin link", proc.stdout)
 
 
 if __name__ == "__main__":

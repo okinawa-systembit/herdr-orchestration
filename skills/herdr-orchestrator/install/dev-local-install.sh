@@ -13,7 +13,7 @@ DRY_RUN=0
 
 SCRIPT_NAME="dev-local-install.sh"
 LOCK_FD=200
-LOCK_FILE_NAME=".herdr-orchestration.install.lock"
+LOCK_FILE_NAME=".herdr-orchestrator.install.lock"
 BACKUP_PREFIX=".herdr-orchestration.backup"
 STAGING_PREFIX=".herdr-orchestration.staging"
 
@@ -23,6 +23,7 @@ CLEANUP_BACKUP_DIR=""
 CLEANUP_DEST=""
 CLEANUP_SWAPPED=0
 CLEANUP_BACKUP_CREATED=0
+CLEANUP_FRESH_INSTALLED=0
 
 cleanup() {
   local exit_code=$?
@@ -46,6 +47,9 @@ cleanup() {
         CLEANUP_BACKUP_DIR=""
       fi
     fi
+  elif [[ ${CLEANUP_FRESH_INSTALLED:-0} -eq 1 && $exit_code -ne 0 ]]; then
+    echo "${SCRIPT_NAME}: Initial installation failed with exit code ${exit_code}. Cleaning up incomplete installation at ${CLEANUP_DEST}..." >&2
+    rm -rf "$CLEANUP_DEST" 2>/dev/null || true
   fi
 
   if [[ -n "${CLEANUP_STAGING_DIR:-}" && -d "$CLEANUP_STAGING_DIR" ]]; then
@@ -66,8 +70,8 @@ trap cleanup EXIT
 acquire_lock() {
   local lock_file="${DEST_PARENT}/${LOCK_FILE_NAME}"
   mkdir -p "$DEST_PARENT"
-  eval "exec ${LOCK_FD}>\"${lock_file}\""
-  if ! flock -n "${LOCK_FD}"; then
+  exec 200>"$lock_file"
+  if ! flock -n 200; then
     echo "${SCRIPT_NAME}: another installation process is running on ${DEST_PARENT} (lock: ${lock_file})" >&2
     exit 1
   fi
@@ -162,9 +166,16 @@ done
 
 validate_dest_path "$DEST"
 
+DEFAULT_DEST_RESOLVED=""
+if command -v realpath > /dev/null 2>&1; then
+  DEFAULT_DEST_RESOLVED=$(realpath -m "$DEFAULT_DEST" 2>/dev/null || true)
+else
+  DEFAULT_DEST_RESOLVED=$(python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$DEFAULT_DEST" 2>/dev/null || true)
+fi
+
 CLI="${DEST}/scripts/herdr-orchestrator"
 SHOULD_LINK=0
-if [[ "$DEST" == "$DEFAULT_DEST" ]] || [[ -n "${HERDR_ORCHESTRATOR_BIN_LINK:-}" ]]; then
+if [[ "$DEST" == "$DEFAULT_DEST" ]] || [[ -n "$DEFAULT_DEST_RESOLVED" && "$DEST" == "$DEFAULT_DEST_RESOLVED" ]] || [[ -n "${HERDR_ORCHESTRATOR_BIN_LINK:-}" ]]; then
   SHOULD_LINK=1
 fi
 
@@ -217,7 +228,9 @@ done
 chmod +x "${STAGING_DIR}/scripts/herdr-orchestrator" "${STAGING_DIR}/scripts/task-registry.py" 2>/dev/null || true
 
 # Atomic swap into place
+IS_UPDATE=0
 if [[ -e "$DEST" || -L "$DEST" ]]; then
+  IS_UPDATE=1
   mv "$DEST" "$BACKUP_DIR"
   CLEANUP_BACKUP_CREATED=1
   CLEANUP_SWAPPED=1
@@ -225,6 +238,9 @@ fi
 
 mv "$STAGING_DIR" "$DEST"
 CLEANUP_STAGING_DIR="" # Successfully moved into place
+if [[ $IS_UPDATE -eq 0 ]]; then
+  CLEANUP_FRESH_INSTALLED=1
+fi
 
 if [[ $SHOULD_LINK -eq 1 ]]; then
   link_herdr_orchestrator_cli "$CLI" 0
@@ -233,6 +249,7 @@ else
 fi
 
 # Clean up backup on success
+CLEANUP_FRESH_INSTALLED=0
 CLEANUP_BACKUP_CREATED=0
 CLEANUP_SWAPPED=0
 if [[ -n "${CLEANUP_BACKUP_PARENT:-}" && -d "$CLEANUP_BACKUP_PARENT" ]]; then
