@@ -164,6 +164,33 @@ class Phase8AdoptionTests(unittest.TestCase):
                     self.assertNotEqual(proc.returncode, 0, f"{script_name} unexpectedly succeeded on {target}")
                     self.assertIn(expected_err, proc.stderr)
 
+        with tempfile.TemporaryDirectory() as tmp:
+            broken_symlink = Path(tmp) / "broken_link"
+            os.symlink(Path(tmp) / "nonexistent_target", broken_symlink)
+            reg_file = Path(tmp) / "regular_file"
+            reg_file.write_text("hello", encoding="utf-8")
+
+            for script, script_name in [(SETUP, "setup.sh"), (DEV_INSTALL, "dev-local-install.sh")]:
+                # Test broken symlink rejection (PR52-04)
+                proc_sym = subprocess.run(
+                    ["bash", str(script), "--dest", str(broken_symlink)],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertNotEqual(proc_sym.returncode, 0)
+                self.assertIn("destination path is a broken symbolic link", proc_sym.stderr)
+
+                # Test non-directory regular file rejection (PR52-04)
+                proc_file = subprocess.run(
+                    ["bash", str(script), "--dest", str(reg_file)],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertNotEqual(proc_file.returncode, 0)
+                self.assertIn("destination exists but is not a directory", proc_file.stderr)
+
     def test_installer_reinstallation_avoids_nested_directories(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             dest = Path(tmp) / "herdr-orchestrator"
@@ -266,6 +293,164 @@ class Phase8AdoptionTests(unittest.TestCase):
             backup_leftovers = list(Path(tmp).glob(".herdr-orchestration.backup.*"))
             self.assertEqual(staging_leftovers, [], "Staging directory was not cleaned up")
             self.assertEqual(backup_leftovers, [], "Backup directory was not cleaned up")
+
+    def test_installer_backup_uniqueness_and_existing_backup_preservation(self) -> None:
+        """PR52-02: Ensure backup path is unique and does not overwrite/delete pre-existing backups."""
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "herdr-orchestration"
+            dest.mkdir()
+            (dest / "v1.txt").write_text("v1", encoding="utf-8")
+
+            # Simulate a pre-existing backup directory from a past session
+            pre_existing_backup = Path(tmp) / ".herdr-orchestration.backup.old_session"
+            pre_existing_backup.mkdir()
+            (pre_existing_backup / "preserved.txt").write_text("keep_me", encoding="utf-8")
+
+            bin_link = Path(tmp) / "bin" / "herdr-orchestrator"
+            env = os.environ.copy()
+            env["HERDR_ORCHESTRATOR_BIN_LINK"] = str(bin_link)
+
+            proc = subprocess.run(
+                ["bash", str(DEV_INSTALL), "--dest", str(dest)],
+                capture_output=True,
+                text=True,
+                env=env,
+                check=False,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertTrue((dest / "SKILL.md").is_file())
+
+            # Pre-existing backup must remain untouched
+            self.assertTrue(pre_existing_backup.is_dir(), "Pre-existing backup directory was unexpectedly removed")
+            self.assertEqual(
+                (pre_existing_backup / "preserved.txt").read_text(encoding="utf-8"),
+                "keep_me",
+            )
+
+    def test_installer_rollback_failure_reporting_and_preservation(self) -> None:
+        """PR52-03: When rollback itself fails, report error clearly, preserve backup, and output recovery steps."""
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "herdr-orchestration"
+            dest.mkdir()
+            canary = dest / "important_data.txt"
+            canary.write_text("original_important_content", encoding="utf-8")
+
+            # Create an invalid bin_link to trigger failure after swap
+            invalid_bin_parent = Path(tmp) / "invalid_bin_file"
+            invalid_bin_parent.write_text("blocking", encoding="utf-8")
+            invalid_bin_link = invalid_bin_parent / "herdr-orchestrator"
+
+            # Setup mv wrapper to fail on the 3rd invocation (which is the rollback restore mv)
+            wrapper_dir = Path(tmp) / "mock_bin"
+            wrapper_dir.mkdir()
+            mv_wrapper = wrapper_dir / "mv"
+            count_file = Path(tmp) / "mv_count.txt"
+            mv_wrapper.write_text(
+                f"""#!/usr/bin/env bash
+COUNT=0
+if [[ -f "{count_file}" ]]; then
+    COUNT=$(cat "{count_file}")
+fi
+COUNT=$((COUNT + 1))
+echo "$COUNT" > "{count_file}"
+if [[ "$COUNT" -ge 3 ]]; then
+    echo "simulated rollback mv failure" >&2
+    exit 1
+fi
+exec /bin/mv "$@"
+""",
+                encoding="utf-8",
+            )
+            mv_wrapper.chmod(0o755)
+
+            env = os.environ.copy()
+            env["PATH"] = f"{wrapper_dir}:{env['PATH']}"
+            env["HERDR_ORCHESTRATOR_BIN_LINK"] = str(invalid_bin_link)
+
+            proc = subprocess.run(
+                ["bash", str(DEV_INSTALL), "--dest", str(dest)],
+                capture_output=True,
+                text=True,
+                env=env,
+                check=False,
+            )
+            self.assertNotEqual(proc.returncode, 0)
+            self.assertIn("CRITICAL: Automatic rollback to previous installation failed!", proc.stderr)
+            self.assertIn("Previous installation backup is PRESERVED at:", proc.stderr)
+            self.assertIn("Manual recovery: remove incomplete destination and restore backup:", proc.stderr)
+
+            # Ensure that backup directory was NOT deleted
+            backups = list(Path(tmp).glob(".herdr-orchestration.backup.*"))
+            self.assertTrue(len(backups) >= 1, "Backup directory was not preserved on rollback failure")
+            backup_file = backups[0] / "backup" / "important_data.txt"
+            self.assertTrue(backup_file.is_file(), f"Original file not preserved in backup {backups[0]}")
+            self.assertEqual(backup_file.read_text(encoding="utf-8"), "original_important_content")
+
+    def test_installer_symlink_destination_handling(self) -> None:
+        """PR52-04: Canonicalize symlink destinations to real target and preserve symlink integrity."""
+        with tempfile.TemporaryDirectory() as tmp:
+            real_dest = Path(tmp) / "real_skill_dir"
+            real_dest.mkdir()
+            symlink_dest = Path(tmp) / "symlink_skill"
+            os.symlink(real_dest, symlink_dest)
+
+            bin_link = Path(tmp) / "bin" / "herdr-orchestrator"
+            env = os.environ.copy()
+            env["HERDR_ORCHESTRATOR_BIN_LINK"] = str(bin_link)
+
+            # Install via symlink path
+            proc = subprocess.run(
+                ["bash", str(DEV_INSTALL), "--dest", str(symlink_dest)],
+                capture_output=True,
+                text=True,
+                env=env,
+                check=False,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+
+            # Ensure the symlink itself is preserved and not replaced by a plain directory
+            self.assertTrue(symlink_dest.is_symlink(), "symlink_dest should remain a symlink")
+            self.assertEqual(symlink_dest.resolve(), real_dest.resolve())
+
+            # Ensure files are properly placed into real_dest
+            self.assertTrue((real_dest / "SKILL.md").is_file())
+            self.assertTrue((real_dest / "scripts" / "herdr-orchestrator").is_file())
+
+    def test_installer_concurrency_lock(self) -> None:
+        """PR52-05: Ensure concurrent installations are rejected by flock."""
+        import fcntl
+
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "herdr-orchestration"
+            lock_file = Path(tmp) / ".herdr-orchestration.install.lock"
+
+            with open(lock_file, "w") as f:
+                # Acquire exclusive lock
+                fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+                proc = subprocess.run(
+                    ["bash", str(DEV_INSTALL), "--dest", str(dest)],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertNotEqual(proc.returncode, 0)
+                self.assertIn("another installation process is running", proc.stderr)
+
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+
+            # Once unlocked, installation should succeed
+            bin_link = Path(tmp) / "bin" / "herdr-orchestrator"
+            env = os.environ.copy()
+            env["HERDR_ORCHESTRATOR_BIN_LINK"] = str(bin_link)
+            proc_ok = subprocess.run(
+                ["bash", str(DEV_INSTALL), "--dest", str(dest)],
+                capture_output=True,
+                text=True,
+                env=env,
+                check=False,
+            )
+            self.assertEqual(proc_ok.returncode, 0, proc_ok.stderr)
 
 
 if __name__ == "__main__":
