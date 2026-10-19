@@ -18,15 +18,19 @@ import sys
 import tempfile
 import threading
 import unittest
+import uuid
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 from unittest.mock import patch
 
+from orchestrator.paths import task_json_path
+from orchestrator.handoff_commands import HandoffInput, run_handoff
 from orchestrator.identity import (
     GitRepositoryNotInitializedError,
     RepositoryIdentityError,
     get_or_create_repository_identity,
     get_repository_identity,
+    is_not_git_repository_error,
     is_valid_uuid_v4,
     resolve_git_common_dir,
 )
@@ -79,24 +83,70 @@ class OrchestratorIdentityUuidTests(unittest.TestCase):
         self.worktree = self.root / "repo"
         _init_repo(self.worktree)
 
+        self.state_dir = self.root / "state"
+        self.state_dir.mkdir()
+        self._old_xdg = os.environ.get("XDG_STATE_HOME")
+        os.environ["XDG_STATE_HOME"] = str(self.state_dir)
+
+        def _cleanup_xdg() -> None:
+            if self._old_xdg is not None:
+                os.environ["XDG_STATE_HOME"] = self._old_xdg
+            else:
+                os.environ.pop("XDG_STATE_HOME", None)
+
+        self.addCleanup(_cleanup_xdg)
+
         bin_dir = self.root / "bin"
         bin_dir.mkdir()
         fake_herdr = bin_dir / "herdr"
         fake_herdr.write_text(
-            """#!/usr/bin/env python3
+            f"""#!/usr/bin/env python3
 import json, os, sys
+from pathlib import Path
+
+sys.path.insert(0, {str(REPO_ROOT / 'skills' / 'herdr-orchestrator' / 'scripts')!r})
+
 if len(sys.argv) >= 4 and sys.argv[1] == "agent" and sys.argv[2] == "get":
-    cwd = os.environ.get("FAKE_AGENT_CWD", os.getcwd())
-    name = os.environ.get("FAKE_AGENT_NAME", "caller-agent")
-    pane = os.environ.get("FAKE_AGENT_PANE", "w11:p1")
-    agent = {
-        "name": name,
-        "agent_status": "idle",
-        "foreground_cwd": cwd,
-        "pane_id": pane,
-    }
-    print(json.dumps({"result": {"agent": agent}}))
+    target = sys.argv[3]
+    cwd = Path(os.environ.get("FAKE_AGENT_CWD", os.getcwd())).resolve()
+
+    req_pane = os.environ.get("FAKE_REQUESTER_PANE", "w11:p1")
+    wrk_pane = os.environ.get("FAKE_WORKER_PANE", "w11:p2")
+    req_role = os.environ.get("FAKE_REQUESTER_ROLE", "design")
+    wrk_role = os.environ.get("FAKE_WORKER_ROLE", "reviewer")
+
+    # Read repo identity if present
+    repo_uuid = os.environ.get("FAKE_EXPECTED_UUID")
+    if not repo_uuid:
+        from orchestrator.identity import _read_uuid_from_git_config, resolve_git_common_dir
+        try:
+            common_dir = resolve_git_common_dir(cwd)
+            repo_uuid = _read_uuid_from_git_config(common_dir)
+        except Exception:
+            repo_uuid = None
+
+    if repo_uuid:
+        from orchestrator.naming import expected_agent_name
+        req_name = expected_agent_name(repo_uuid, req_role)
+        wrk_name = expected_agent_name(repo_uuid, wrk_role)
+    else:
+        req_name = os.environ.get("FAKE_REQUESTER_NAME", "caller-agent")
+        wrk_name = os.environ.get("FAKE_WORKER_NAME", "worker-agent")
+
+    if target in (req_pane, req_name):
+        agent = {{"name": req_name, "agent_status": "idle", "foreground_cwd": str(cwd), "pane_id": req_pane}}
+    elif target in (wrk_pane, wrk_name):
+        agent = {{"name": wrk_name, "agent_status": "idle", "foreground_cwd": str(cwd), "pane_id": wrk_pane}}
+    else:
+        agent = {{"name": target, "agent_status": "idle", "foreground_cwd": str(cwd), "pane_id": "w11:p9"}}
+
+    print(json.dumps({{"result": {{"agent": agent}}}}))
     sys.exit(0)
+
+if len(sys.argv) >= 4 and sys.argv[1] == "agent" and sys.argv[2] == "prompt":
+    print(json.dumps({{"result": {{"prompt": "sent"}}}}))
+    sys.exit(0)
+
 sys.exit(1)
 """,
             encoding="utf-8",
@@ -152,15 +202,52 @@ sys.exit(1)
         self.assertEqual(uuid_after, manual_uuid)
 
     def test_id05_handoff_auto_initialization(self) -> None:
-        """ID-05: handoff による自動初期化 -> UUID 未初期化でも自動初期化成功"""
+        """ID-05: handoff による自動初期化 -> handoff 実行時に UUID が自動生成・保存され、Task Registry に記録される"""
         # Ensure not yet initialized
         with self.assertRaises(RepositoryIdentityError):
             get_repository_identity(self.worktree)
 
-        # Trigger get_or_create as handoff does
-        uuid_val = get_or_create_repository_identity(self.worktree)
-        self.assertTrue(is_valid_uuid_v4(uuid_val))
-        self.assertEqual(get_repository_identity(self.worktree), uuid_val)
+        fixed_uuid = "33333333-3333-4333-8333-333333333333"
+        env = dict(
+            os.environ,
+            HERDR_ENV="1",
+            HERDR_PANE_ID="w11:p1",
+            PATH=f"{self.bin_dir}:{os.environ.get('PATH', '')}",
+            FAKE_AGENT_CWD=str(self.worktree),
+            FAKE_EXPECTED_UUID=fixed_uuid,
+            FAKE_REQUESTER_ROLE="design",
+            FAKE_WORKER_ROLE="reviewer",
+        )
+        with patch.dict(os.environ, env):
+            with patch("orchestrator.identity.uuid.uuid4", return_value=uuid.UUID(fixed_uuid)):
+                payload = run_handoff(
+                    HandoffInput(
+                        mode="async",
+                        worker_role="reviewer",
+                        task_type="review",
+                        instruction="review auto-init test",
+                        result_wait_timeout_sec=30,
+                    )
+                )
+
+        # 1. Handoff succeeded
+        self.assertEqual(payload["command"], "handoff")
+        task_id = payload["task_id"]
+
+        # 2. UUID was automatically generated and persisted into git config
+        persisted_uuid = get_repository_identity(self.worktree)
+        self.assertEqual(persisted_uuid, fixed_uuid)
+
+        # 3. Task Registry has the generated UUID and Pattern A agent names
+        registry_file = task_json_path(task_id)
+        self.assertTrue(registry_file.exists())
+        task_data = json.loads(registry_file.read_text(encoding="utf-8"))
+        self.assertEqual(task_data["context"]["repository"]["identity"], fixed_uuid)
+        self.assertEqual(task_data["context"]["worktree"]["path"], str(self.worktree.resolve()))
+        self.assertEqual(task_data["requester"]["role"], "design")
+        self.assertEqual(task_data["worker"]["role"], "reviewer")
+        self.assertTrue(task_data["requester"]["agent_name"].startswith("r-"))
+        self.assertTrue(task_data["worker"]["agent_name"].startswith("r-"))
 
     def test_id06_concurrent_initialization_acquires_lock(self) -> None:
         """ID-06: 同時初期化 -> 同じ UUID に確定（排他制御）"""
@@ -212,7 +299,7 @@ sys.exit(1)
     # -------------------------------------------------------------------------
 
     def test_git01_uninitialized_directory_cli_error(self) -> None:
-        """GIT-01: Git 未初期化時の CLI 動作 -> git_repository_not_initialized 専用エラー、非ゼロ終了"""
+        """GIT-01: Git 未初期化時の CLI 動作（CLI 責務） -> 専用エラー git_repository_not_initialized、非ゼロ終了コードで安全停止"""
         empty_dir = self.root / "not-a-git-repo"
         empty_dir.mkdir()
 
@@ -223,24 +310,72 @@ sys.exit(1)
                 capture_output=True,
                 text=True,
             )
-            self.assertNotEqual(res.returncode, 0)
+            self.assertEqual(res.returncode, 1)
             data = json.loads(res.stdout)
             self.assertEqual(data.get("error"), "git_repository_not_initialized")
+            self.assertEqual(data.get("retryable"), False)
+            self.assertIn("message", data)
+
+        # Ensure .git was NOT created by CLI
+        self.assertFalse((empty_dir / ".git").exists())
 
     def test_git02_uninitialized_skill_behavior_and_no_auto_git_init(self) -> None:
-        """GIT-02: Git 未初期化時の Skill 動作（責務） -> git init の自動実行禁止確認"""
-        empty_dir = self.root / "no-git-dir"
+        """GIT-02: Git 未初期化時の Skill 動作（Skill 責務） -> チャット報告仕様と git init 自動実行禁止の確認"""
+        empty_dir = self.root / "no-git-skill-test"
         empty_dir.mkdir()
 
+        # 1. CLI produces the exact machine-readable contract the Skill depends on
         res = subprocess.run(
             [sys.executable, str(CLI), "identity", "init"],
             cwd=str(empty_dir),
             capture_output=True,
             text=True,
         )
-        self.assertNotEqual(res.returncode, 0)
-        # Ensure .git was NOT created
+        self.assertEqual(res.returncode, 1)
+        data = json.loads(res.stdout)
+        self.assertEqual(data["error"], "git_repository_not_initialized")
+
+        # 2. Verify that .git was not created (no automatic git init)
         self.assertFalse((empty_dir / ".git").exists())
+
+        # 3. Verify Skill reference documentation explicitly prescribes the chat template and forbids auto git init
+        handoff_doc = (REPO_ROOT / "skills" / "herdr-orchestrator" / "references" / "handoff.md").read_text(encoding="utf-8")
+        self.assertIn("git_repository_not_initialized", handoff_doc)
+        self.assertIn("git init", handoff_doc)
+        self.assertIn("自動実行していません", handoff_doc)
+        self.assertIn("エージェントが自律的・自動的に `git init` を実行することは禁止する", handoff_doc)
+
+    def test_git_error_classification_distinguishes_non_git_from_other_errors(self) -> None:
+        """R01: Git コマンド失敗時のエラー分類 -> 未初期化とその他のエラー（権限、破損等）を明確に区別"""
+        # 1. Helper function classification
+        self.assertTrue(is_not_git_repository_error("fatal: not a git repository (or any of the parent directories): .git"))
+        self.assertFalse(is_not_git_repository_error("error: permission denied"))
+        self.assertFalse(is_not_git_repository_error("fatal: bad config file line 1 in .git/config"))
+
+        # 2. Non-existent path -> RepositoryIdentityError
+        non_existent = self.root / "non_existent_directory"
+        with self.assertRaises(RepositoryIdentityError) as ctx:
+            resolve_git_common_dir(non_existent)
+        self.assertIn("path does not exist", str(ctx.exception))
+
+        # 3. Uninitialized directory -> GitRepositoryNotInitializedError
+        uninit_dir = self.root / "uninit_dir"
+        uninit_dir.mkdir()
+        with self.assertRaises(GitRepositoryNotInitializedError):
+            resolve_git_common_dir(uninit_dir)
+
+        # 4. Other git failure (e.g. permission denied) -> RepositoryIdentityError, NOT GitRepositoryNotInitializedError
+        mock_proc = subprocess.CompletedProcess(
+            args=["git", "-C", str(self.worktree), "rev-parse", "--is-inside-work-tree"],
+            returncode=128,
+            stdout="",
+            stderr="fatal: cannot access '.git': Permission denied\n",
+        )
+        with patch("subprocess.run", return_value=mock_proc):
+            with self.assertRaises(RepositoryIdentityError) as ctx:
+                resolve_git_common_dir(self.worktree)
+            self.assertNotIsInstance(ctx.exception, GitRepositoryNotInitializedError)
+            self.assertIn("Permission denied", str(ctx.exception))
 
     def test_git03_uninitialized_does_not_create_task_registry_entry(self) -> None:
         """GIT-03: Git 未初期化時の Task Registry -> 不完全なタスクを作成しない"""
@@ -279,11 +414,72 @@ sys.exit(1)
         self.assertFalse((empty_dir / ".herdr").exists())
 
     def test_git04_origin_unset_handoff_succeeds(self) -> None:
-        """GIT-04: origin 未設定 -> UUID 生成・取得成功"""
-        # worktree has no origin set
-        uuid_val = get_or_create_repository_identity(self.worktree)
-        self.assertTrue(is_valid_uuid_v4(uuid_val))
-        self.assertEqual(get_repository_identity(self.worktree), uuid_val)
+        """GIT-04: origin 未設定で handoff 成功 -> 統合 handoff ワークフローが完全動作"""
+        # Ensure worktree has no origin set
+        remotes_proc = _git(self.worktree, "remote")
+        self.assertEqual(remotes_proc.stdout.strip(), "")
+
+        # 1. Initialize identity
+        res_init = subprocess.run(
+            [sys.executable, str(CLI), "identity", "init"],
+            cwd=str(self.worktree),
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        data_init = json.loads(res_init.stdout)
+        repo_uuid = data_init["repository_id"]
+        self.assertTrue(is_valid_uuid_v4(repo_uuid))
+
+        # 2. Execute full handoff CLI without any git remote configured
+        env = dict(
+            os.environ,
+            HERDR_ENV="1",
+            HERDR_PANE_ID="w11:p1",
+            PATH=f"{self.bin_dir}:{os.environ.get('PATH', '')}",
+            FAKE_AGENT_CWD=str(self.worktree),
+            FAKE_EXPECTED_UUID=repo_uuid,
+            FAKE_REQUESTER_ROLE="design",
+            FAKE_WORKER_ROLE="reviewer",
+            XDG_STATE_HOME=str(self.state_dir),
+        )
+        res_handoff = subprocess.run(
+            [
+                sys.executable,
+                str(CLI),
+                "handoff",
+                "--mode",
+                "async",
+                "--worker-role",
+                "reviewer",
+                "--task-type",
+                "review",
+                "--instruction",
+                "review origin-unset test",
+            ],
+            cwd=str(self.worktree),
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        self.assertEqual(res_handoff.returncode, 0, res_handoff.stderr)
+        data_handoff = json.loads(res_handoff.stdout)
+        self.assertEqual(data_handoff["command"], "handoff")
+        task_id = data_handoff["task_id"]
+
+        # 3. Check Task Registry file has valid UUID and Pattern A names
+        task_file = task_json_path(task_id)
+        self.assertTrue(task_file.exists())
+        task_data = json.loads(task_file.read_text(encoding="utf-8"))
+        self.assertEqual(task_data["context"]["repository"]["identity"], repo_uuid)
+        self.assertEqual(task_data["requester"]["role"], "design")
+        self.assertEqual(task_data["worker"]["role"], "reviewer")
+        self.assertTrue(task_data["requester"]["agent_name"].startswith("r-"))
+        self.assertTrue(task_data["worker"]["agent_name"].startswith("r-"))
+
+        # 4. Verify git remote remains empty
+        remotes_after = _git(self.worktree, "remote")
+        self.assertEqual(remotes_after.stdout.strip(), "")
 
     def test_git05_origin_url_change_maintains_uuid(self) -> None:
         """GIT-05: origin URL 変更 -> UUID 維持"""

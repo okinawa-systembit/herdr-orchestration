@@ -18,6 +18,6 @@ def resolve_worktree_root(foreground_cwd: Path) -> Path:
         check=False,
     )
     if proc.returncode != 0 or not proc.stdout.strip():
-        raise WorktreeError("not a git worktree or git failed")
+        raise WorktreeError(f"not a git worktree or git failed: {proc.stderr.strip()}")
     root = Path(proc.stdout.strip()).resolve()
     return root

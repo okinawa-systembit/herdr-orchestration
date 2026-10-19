@@ -34,8 +34,21 @@ def is_valid_uuid_v4(val: str) -> bool:
     return bool(_UUID_V4_RE.match(val))
 
 
+def is_not_git_repository_error(stderr: str) -> bool:
+    """Check if git error output indicates that the directory is not inside a git repository."""
+    s = stderr.lower()
+    return "not a git repository" in s
+
+
 def resolve_git_common_dir(worktree: Path) -> Path:
-    """Resolve the git common directory for worktree. Raise GitRepositoryNotInitializedError if not in a git repo."""
+    """
+    Resolve the git common directory for worktree.
+    Raise GitRepositoryNotInitializedError only if explicitly not inside a git repository.
+    Raise RepositoryIdentityError for other git errors (corrupted repo, permission denied, etc.).
+    """
+    if not worktree.exists():
+        raise RepositoryIdentityError(f"worktree path does not exist: {worktree}")
+
     proc = subprocess.run(
         ["git", "-C", str(worktree), "rev-parse", "--is-inside-work-tree"],
         capture_output=True,
@@ -43,8 +56,13 @@ def resolve_git_common_dir(worktree: Path) -> Path:
         check=False,
     )
     if proc.returncode != 0:
-        raise GitRepositoryNotInitializedError(
-            proc.stderr.strip() or f"{worktree} is not inside a git repository"
+        err = proc.stderr.strip()
+        if is_not_git_repository_error(err):
+            raise GitRepositoryNotInitializedError(
+                err or f"{worktree} is not inside a git repository"
+            )
+        raise RepositoryIdentityError(
+            f"git rev-parse --is-inside-work-tree failed: {err or f'exit code {proc.returncode}'}"
         )
 
     proc_common = subprocess.run(
@@ -54,8 +72,11 @@ def resolve_git_common_dir(worktree: Path) -> Path:
         check=False,
     )
     if proc_common.returncode != 0:
+        err_common = proc_common.stderr.strip()
+        if is_not_git_repository_error(err_common):
+            raise GitRepositoryNotInitializedError(err_common)
         raise RepositoryIdentityError(
-            f"git rev-parse --git-common-dir failed: {proc_common.stderr.strip()}"
+            f"git rev-parse --git-common-dir failed: {err_common}"
         )
     common_dir_str = proc_common.stdout.strip()
     if not common_dir_str:
