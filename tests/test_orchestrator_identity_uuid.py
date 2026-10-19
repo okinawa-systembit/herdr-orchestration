@@ -28,6 +28,7 @@ from orchestrator.handoff_commands import HandoffInput, run_handoff
 from orchestrator.identity import (
     GitRepositoryNotInitializedError,
     RepositoryIdentityError,
+    _run_git,
     get_or_create_repository_identity,
     get_repository_identity,
     is_not_git_repository_error,
@@ -346,25 +347,39 @@ sys.exit(1)
         self.assertIn("エージェントが自律的・自動的に `git init` を実行することは禁止する", handoff_doc)
 
     def test_git_error_classification_distinguishes_non_git_from_other_errors(self) -> None:
-        """R01: Git コマンド失敗時のエラー分類 -> 未初期化とその他のエラー（権限、破損等）を明確に区別"""
+        """R01/RF-01: Git コマンド失敗時のエラー分類 -> 未初期化とその他のエラー（権限、破損、非英語等）を明確に区別し、LC_ALL=C で固定"""
         # 1. Helper function classification
         self.assertTrue(is_not_git_repository_error("fatal: not a git repository (or any of the parent directories): .git"))
         self.assertFalse(is_not_git_repository_error("error: permission denied"))
         self.assertFalse(is_not_git_repository_error("fatal: bad config file line 1 in .git/config"))
+        # Non-English error message returns False, falling back safely to RepositoryIdentityError
+        self.assertFalse(is_not_git_repository_error("fatal: git リポジトリではありません"))
 
-        # 2. Non-existent path -> RepositoryIdentityError
+        # 2. _run_git forces LC_ALL=C
+        with patch("subprocess.run") as mock_subproc:
+            mock_subproc.return_value = subprocess.CompletedProcess(
+                args=["git"], returncode=0, stdout="", stderr=""
+            )
+            _run_git(["git", "status"])
+            mock_subproc.assert_called_once()
+            _, kwargs = mock_subproc.call_args
+            self.assertIn("env", kwargs)
+            self.assertEqual(kwargs["env"].get("LC_ALL"), "C")
+
+        # 3. Non-existent path -> RepositoryIdentityError
         non_existent = self.root / "non_existent_directory"
         with self.assertRaises(RepositoryIdentityError) as ctx:
             resolve_git_common_dir(non_existent)
         self.assertIn("path does not exist", str(ctx.exception))
 
-        # 3. Uninitialized directory -> GitRepositoryNotInitializedError
+        # 4. Uninitialized directory -> GitRepositoryNotInitializedError (even if environment has other LANG)
         uninit_dir = self.root / "uninit_dir"
         uninit_dir.mkdir()
-        with self.assertRaises(GitRepositoryNotInitializedError):
-            resolve_git_common_dir(uninit_dir)
+        with patch.dict(os.environ, {"LANG": "ja_JP.UTF-8", "LC_ALL": "ja_JP.UTF-8"}):
+            with self.assertRaises(GitRepositoryNotInitializedError):
+                resolve_git_common_dir(uninit_dir)
 
-        # 4. Other git failure (e.g. permission denied) -> RepositoryIdentityError, NOT GitRepositoryNotInitializedError
+        # 5. Other git failure (e.g. permission denied) -> RepositoryIdentityError, NOT GitRepositoryNotInitializedError
         mock_proc = subprocess.CompletedProcess(
             args=["git", "-C", str(self.worktree), "rev-parse", "--is-inside-work-tree"],
             returncode=128,
@@ -376,6 +391,19 @@ sys.exit(1)
                 resolve_git_common_dir(self.worktree)
             self.assertNotIsInstance(ctx.exception, GitRepositoryNotInitializedError)
             self.assertIn("Permission denied", str(ctx.exception))
+
+        # 6. Unknown non-English error message -> fails safely to RepositoryIdentityError
+        mock_proc_ja = subprocess.CompletedProcess(
+            args=["git", "-C", str(self.worktree), "rev-parse", "--is-inside-work-tree"],
+            returncode=128,
+            stdout="",
+            stderr="fatal: 致命的なエラー: アクセスできません\n",
+        )
+        with patch("subprocess.run", return_value=mock_proc_ja):
+            with self.assertRaises(RepositoryIdentityError) as ctx:
+                resolve_git_common_dir(self.worktree)
+            self.assertNotIsInstance(ctx.exception, GitRepositoryNotInitializedError)
+            self.assertIn("致命的なエラー", str(ctx.exception))
 
     def test_git03_uninitialized_does_not_create_task_registry_entry(self) -> None:
         """GIT-03: Git 未初期化時の Task Registry -> 不完全なタスクを作成しない"""

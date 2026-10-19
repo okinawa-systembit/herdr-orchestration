@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import fcntl
+import os
 import re
 import subprocess
 import uuid
@@ -27,6 +28,29 @@ CONFIG_FILE_NAME = "config"
 LOCK_FILE_NAME = "herdr-identity.lock"
 
 
+def _run_git(args: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
+    """
+    Execute a git command with LC_ALL=C to enforce deterministic English output.
+    """
+    env = dict(os.environ)
+    env["LC_ALL"] = "C"
+    if "env" in kwargs and kwargs["env"] is not None:
+        merged = env.copy()
+        merged.update(kwargs.pop("env"))
+        env = merged
+    capture_output = kwargs.pop("capture_output", True)
+    text = kwargs.pop("text", True)
+    check = kwargs.pop("check", False)
+    return subprocess.run(
+        args,
+        capture_output=capture_output,
+        text=text,
+        check=check,
+        env=env,
+        **kwargs,
+    )
+
+
 def is_valid_uuid_v4(val: str) -> bool:
     """Validate RFC 4122 / RFC 9562 UUID v4 (lowercase hexadecimal, 36 chars with hyphens)."""
     if not isinstance(val, str):
@@ -35,7 +59,10 @@ def is_valid_uuid_v4(val: str) -> bool:
 
 
 def is_not_git_repository_error(stderr: str) -> bool:
-    """Check if git error output indicates that the directory is not inside a git repository."""
+    """
+    Check if git error output indicates that the directory is not inside a git repository.
+    Relies on standard C locale error message output ('fatal: not a git repository ...').
+    """
     s = stderr.lower()
     return "not a git repository" in s
 
@@ -49,12 +76,7 @@ def resolve_git_common_dir(worktree: Path) -> Path:
     if not worktree.exists():
         raise RepositoryIdentityError(f"worktree path does not exist: {worktree}")
 
-    proc = subprocess.run(
-        ["git", "-C", str(worktree), "rev-parse", "--is-inside-work-tree"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    proc = _run_git(["git", "-C", str(worktree), "rev-parse", "--is-inside-work-tree"])
     if proc.returncode != 0:
         err = proc.stderr.strip()
         if is_not_git_repository_error(err):
@@ -65,12 +87,7 @@ def resolve_git_common_dir(worktree: Path) -> Path:
             f"git rev-parse --is-inside-work-tree failed: {err or f'exit code {proc.returncode}'}"
         )
 
-    proc_common = subprocess.run(
-        ["git", "-C", str(worktree), "rev-parse", "--git-common-dir"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    proc_common = _run_git(["git", "-C", str(worktree), "rev-parse", "--git-common-dir"])
     if proc_common.returncode != 0:
         err_common = proc_common.stderr.strip()
         if is_not_git_repository_error(err_common):
@@ -109,12 +126,7 @@ def _acquire_identity_lock(git_common_dir: Path):
 def _read_uuid_from_git_config(git_common_dir: Path) -> str | None:
     """Read herdr.repository-id directly from <git-common-dir>/config."""
     config_file = git_common_dir / CONFIG_FILE_NAME
-    proc = subprocess.run(
-        ["git", "config", "--file", str(config_file), "--get", CONFIG_KEY],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    proc = _run_git(["git", "config", "--file", str(config_file), "--get", CONFIG_KEY])
     if proc.returncode == 0:
         val = proc.stdout.strip()
         return val if val else None
@@ -126,12 +138,7 @@ def _read_uuid_from_git_config(git_common_dir: Path) -> str | None:
 def _write_uuid_to_git_config(git_common_dir: Path, uuid_str: str) -> None:
     """Write herdr.repository-id directly to <git-common-dir>/config."""
     config_file = git_common_dir / CONFIG_FILE_NAME
-    proc = subprocess.run(
-        ["git", "config", "--file", str(config_file), CONFIG_KEY, uuid_str],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    proc = _run_git(["git", "config", "--file", str(config_file), CONFIG_KEY, uuid_str])
     if proc.returncode != 0:
         raise RepositoryIdentityError(f"failed to write git config: {proc.stderr.strip()}")
 
@@ -255,12 +262,7 @@ def normalize_remote_url(url: str) -> str:
 
 
 def git_remote_fetch_urls(worktree: Path, remote: str = "origin") -> list[str]:
-    proc = subprocess.run(
-        ["git", "-C", str(worktree), "remote", "get-url", "--all", remote],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    proc = _run_git(["git", "-C", str(worktree), "remote", "get-url", "--all", remote])
     if proc.returncode != 0:
         raise RepositoryIdentityError(f"git remote get-url failed: {proc.stderr.strip()}")
     lines = [ln.strip() for ln in proc.stdout.splitlines() if ln.strip()]
@@ -279,12 +281,7 @@ def identity_from_origin_fetch_urls(urls: list[str]) -> str:
 
 
 def list_remotes(worktree: Path) -> list[str]:
-    proc = subprocess.run(
-        ["git", "-C", str(worktree), "remote"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    proc = _run_git(["git", "-C", str(worktree), "remote"])
     if proc.returncode != 0:
         raise RepositoryIdentityError(proc.stderr.strip() or "git remote failed")
     return [ln.strip() for ln in proc.stdout.splitlines() if ln.strip()]
