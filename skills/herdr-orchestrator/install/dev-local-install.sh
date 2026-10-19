@@ -29,8 +29,13 @@ cleanup() {
   local exit_code=$?
   trap - EXIT INT TERM HUP
 
-  if [[ (${CLEANUP_BACKUP_CREATED:-0} -eq 1 || ${CLEANUP_SWAPPED:-0} -eq 1) && $exit_code -ne 0 ]]; then
-    if [[ -n "${CLEANUP_BACKUP_DIR:-}" && -e "$CLEANUP_BACKUP_DIR" ]]; then
+  local has_backup=0
+  if [[ -n "${CLEANUP_BACKUP_DIR:-}" && (-e "$CLEANUP_BACKUP_DIR" || -L "$CLEANUP_BACKUP_DIR") ]]; then
+    has_backup=1
+  fi
+
+  if [[ ($has_backup -eq 1 || ${CLEANUP_BACKUP_CREATED:-0} -eq 1 || ${CLEANUP_SWAPPED:-0} -eq 1) && $exit_code -ne 0 ]]; then
+    if [[ -n "${CLEANUP_BACKUP_DIR:-}" && (-e "$CLEANUP_BACKUP_DIR" || -L "$CLEANUP_BACKUP_DIR") ]]; then
       echo "${SCRIPT_NAME}: Installation failed with exit code ${exit_code}. Rolling back to previous installation..." >&2
       rm -rf "$CLEANUP_DEST" 2>/dev/null || true
       if [[ ! -e "$CLEANUP_DEST" && ! -L "$CLEANUP_DEST" ]] && mv "$CLEANUP_BACKUP_DIR" "$CLEANUP_DEST" 2>/dev/null; then
@@ -47,9 +52,13 @@ cleanup() {
         CLEANUP_BACKUP_DIR=""
       fi
     fi
-  elif [[ ${CLEANUP_FRESH_INSTALLED:-0} -eq 1 && $exit_code -ne 0 ]]; then
+  elif [[ (${CLEANUP_FRESH_INSTALLED:-0} -eq 1 || ($has_backup -eq 0 && -n "${CLEANUP_DEST:-}" && (-e "$CLEANUP_DEST" || -L "$CLEANUP_DEST") && (! -e "${CLEANUP_STAGING_DIR:-/nonexistent}"))) && $exit_code -ne 0 ]]; then
     echo "${SCRIPT_NAME}: Initial installation failed with exit code ${exit_code}. Cleaning up incomplete installation at ${CLEANUP_DEST}..." >&2
     rm -rf "$CLEANUP_DEST" 2>/dev/null || true
+    if [[ -e "$CLEANUP_DEST" || -L "$CLEANUP_DEST" ]]; then
+      echo "${SCRIPT_NAME}: WARNING: Failed to clean up incomplete installation directory at: ${CLEANUP_DEST}" >&2
+      echo "${SCRIPT_NAME}: Manual cleanup recommended: rm -rf '${CLEANUP_DEST}'" >&2
+    fi
   fi
 
   if [[ -n "${CLEANUP_STAGING_DIR:-}" && -d "$CLEANUP_STAGING_DIR" ]]; then
@@ -236,11 +245,12 @@ if [[ -e "$DEST" || -L "$DEST" ]]; then
   CLEANUP_SWAPPED=1
 fi
 
-mv "$STAGING_DIR" "$DEST"
-CLEANUP_STAGING_DIR="" # Successfully moved into place
 if [[ $IS_UPDATE -eq 0 ]]; then
   CLEANUP_FRESH_INSTALLED=1
 fi
+
+mv "$STAGING_DIR" "$DEST"
+CLEANUP_STAGING_DIR="" # Successfully moved into place
 
 if [[ $SHOULD_LINK -eq 1 ]]; then
   link_herdr_orchestrator_cli "$CLI" 0

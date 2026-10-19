@@ -551,6 +551,96 @@ exec /bin/mv "$@"
             self.assertIn("would ln -sf", proc.stdout)
             self.assertNotIn("would skip ~/.local/bin link", proc.stdout)
 
+    def test_installer_rollback_on_signal_interruption_before_flag_set(self) -> None:
+        """PR52-08: Ensure rollback occurs even if interrupted by signal immediately after mv before flag set."""
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "skill_dest"
+            dest.mkdir()
+            old_marker = dest / "old_installation_marker.txt"
+            old_marker.write_text("v1.0.0-existing", encoding="utf-8")
+
+            # Setup mv mock to trigger SIGINT on parent immediately after backup mv succeeds
+            mock_bin = Path(tmp) / "mock_bin"
+            mock_bin.mkdir()
+            mv_mock = mock_bin / "mv"
+            mv_mock.write_text(
+                """#!/usr/bin/env bash
+/bin/mv "$@"
+ret=$?
+if [[ $ret -eq 0 && "$*" == *backup* ]]; then
+    kill -INT $PPID
+    sleep 0.2
+fi
+exit $ret
+""",
+                encoding="utf-8",
+            )
+            mv_mock.chmod(0o755)
+
+            env = os.environ.copy()
+            orig_path = env["PATH"]
+            env["PATH"] = f"{mock_bin}:{orig_path}"
+            bin_link = Path(tmp) / "bin" / "herdr-orchestrator"
+            env["HERDR_ORCHESTRATOR_BIN_LINK"] = str(bin_link)
+
+            proc = subprocess.run(
+                ["bash", str(DEV_INSTALL), "--dest", str(dest)],
+                capture_output=True,
+                text=True,
+                env=env,
+                check=False,
+            )
+            # Process was terminated by SIGINT (code 130)
+            self.assertEqual(proc.returncode, 130)
+            self.assertIn("Rolling back to previous installation", proc.stderr)
+            self.assertIn("Rolled back successfully to previous installation", proc.stderr)
+
+            # Ensure previous installation was completely restored
+            self.assertTrue(dest.is_dir())
+            self.assertTrue(old_marker.is_file())
+            self.assertEqual(old_marker.read_text(encoding="utf-8"), "v1.0.0-existing")
+
+    def test_installer_initial_install_cleanup_failure_notification(self) -> None:
+        """PR52-08: Ensure warning is emitted if cleanup of incomplete initial install fails."""
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "fresh_skill"
+            self.assertFalse(dest.exists())
+
+            mock_bin = Path(tmp) / "mock_bin"
+            mock_bin.mkdir()
+            rm_mock = mock_bin / "rm"
+            rm_mock.write_text(
+                """#!/usr/bin/env bash
+if [[ "$*" == *fresh_skill* ]]; then
+    exit 1
+fi
+exec /bin/rm "$@"
+""",
+                encoding="utf-8",
+            )
+            rm_mock.chmod(0o755)
+
+            invalid_bin_parent = Path(tmp) / "invalid_bin_file"
+            invalid_bin_parent.write_text("blocking", encoding="utf-8")
+            invalid_bin_link = invalid_bin_parent / "herdr-orchestrator"
+
+            env = os.environ.copy()
+            orig_path = env["PATH"]
+            env["PATH"] = f"{mock_bin}:{orig_path}"
+            env["HERDR_ORCHESTRATOR_BIN_LINK"] = str(invalid_bin_link)
+
+            proc = subprocess.run(
+                ["bash", str(DEV_INSTALL), "--dest", str(dest)],
+                capture_output=True,
+                text=True,
+                env=env,
+                check=False,
+            )
+            self.assertNotEqual(proc.returncode, 0)
+            self.assertIn("Initial installation failed with exit code", proc.stderr)
+            self.assertIn("WARNING: Failed to clean up incomplete installation directory", proc.stderr)
+            self.assertIn("Manual cleanup recommended:", proc.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
