@@ -143,6 +143,130 @@ class Phase8AdoptionTests(unittest.TestCase):
         self.assertNotIn("implementation staged", proc.stdout)
         self.assertIn("resume-task", proc.stdout)
 
+    def test_installer_dest_path_validation(self) -> None:
+        dangerous_targets = [
+            ("   ", "destination path cannot be empty"),
+            ("/", "destination cannot be root directory ('/')"),
+            (os.environ["HOME"], "destination cannot be home directory"),
+            ("/bin", "destination cannot be system directory:"),
+            ("/usr/bin", "destination cannot be system directory: /usr/bin"),
+            ("/etc", "destination cannot be system directory: /etc"),
+        ]
+        for script, script_name in [(SETUP, "setup.sh"), (DEV_INSTALL, "dev-local-install.sh")]:
+            for target, expected_err in dangerous_targets:
+                with self.subTest(script=script_name, target=target):
+                    proc = subprocess.run(
+                        ["bash", str(script), "--dest", target],
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
+                    self.assertNotEqual(proc.returncode, 0, f"{script_name} unexpectedly succeeded on {target}")
+                    self.assertIn(expected_err, proc.stderr)
+
+    def test_installer_reinstallation_avoids_nested_directories(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "herdr-orchestrator"
+            # First install
+            proc1 = subprocess.run(
+                ["bash", str(SETUP), "--dest", str(dest)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(proc1.returncode, 0, proc1.stderr)
+            self.assertTrue((dest / "SKILL.md").is_file())
+            self.assertTrue((dest / "scripts" / "herdr-orchestrator").is_file())
+
+            # Second install (re-installation into the same existing directory)
+            proc2 = subprocess.run(
+                ["bash", str(SETUP), "--dest", str(dest)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(proc2.returncode, 0, proc2.stderr)
+            # Ensure nesting does not occur
+            self.assertFalse(
+                (dest / "scripts" / "scripts").exists(),
+                "scripts/scripts directory nesting detected after reinstallation",
+            )
+            self.assertFalse(
+                (dest / "references" / "references").exists(),
+                "references/references directory nesting detected after reinstallation",
+            )
+
+    def test_installer_dev_local_reinstallation_avoids_nested_directories(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "herdr-orchestration"
+            bin_link = Path(tmp) / "bin" / "herdr-orchestrator"
+            env = os.environ.copy()
+            env["HERDR_ORCHESTRATOR_BIN_LINK"] = str(bin_link)
+
+            # First install
+            proc1 = subprocess.run(
+                ["bash", str(DEV_INSTALL), "--dest", str(dest)],
+                capture_output=True,
+                text=True,
+                env=env,
+                check=False,
+            )
+            self.assertEqual(proc1.returncode, 0, proc1.stderr)
+
+            # Second install
+            proc2 = subprocess.run(
+                ["bash", str(DEV_INSTALL), "--dest", str(dest)],
+                capture_output=True,
+                text=True,
+                env=env,
+                check=False,
+            )
+            self.assertEqual(proc2.returncode, 0, proc2.stderr)
+            self.assertFalse(
+                (dest / "scripts" / "scripts").exists(),
+                "scripts/scripts nesting detected after dev-local reinstallation",
+            )
+            self.assertFalse(
+                (dest / "references" / "references").exists(),
+                "references/references nesting detected after dev-local reinstallation",
+            )
+
+    def test_installer_rollback_on_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "target_skill"
+            dest.mkdir()
+            canary_file = dest / "canary.txt"
+            canary_file.write_text("prior_state_preserved", encoding="utf-8")
+
+            # Create an invalid bin_link whose parent is a regular file, causing link_herdr_orchestrator_cli to fail
+            invalid_bin_parent = Path(tmp) / "invalid_bin_file"
+            invalid_bin_parent.write_text("blocking file", encoding="utf-8")
+            invalid_bin_link = invalid_bin_parent / "herdr-orchestrator"
+
+            env = os.environ.copy()
+            env["HERDR_ORCHESTRATOR_BIN_LINK"] = str(invalid_bin_link)
+
+            proc = subprocess.run(
+                ["bash", str(DEV_INSTALL), "--dest", str(dest)],
+                capture_output=True,
+                text=True,
+                env=env,
+                check=False,
+            )
+            self.assertNotEqual(proc.returncode, 0, "Installer should have failed due to invalid symlink destination")
+            self.assertIn("Rolling back to previous installation", proc.stderr)
+            self.assertIn("Rolled back successfully to previous installation", proc.stderr)
+
+            # Check that the canary file was restored by rollback
+            self.assertTrue(canary_file.is_file(), "Original canary file was not restored after rollback")
+            self.assertEqual(canary_file.read_text(encoding="utf-8"), "prior_state_preserved")
+
+            # Check that staging or backup directories are cleaned up
+            staging_leftovers = list(Path(tmp).glob(".herdr-orchestration.staging.*"))
+            backup_leftovers = list(Path(tmp).glob(".herdr-orchestration.backup.*"))
+            self.assertEqual(staging_leftovers, [], "Staging directory was not cleaned up")
+            self.assertEqual(backup_leftovers, [], "Backup directory was not cleaned up")
+
 
 if __name__ == "__main__":
     unittest.main()
