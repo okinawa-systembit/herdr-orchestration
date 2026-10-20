@@ -1,6 +1,6 @@
 # 内部レビュースキル改善 Phase 1 設計書
 
-> 状態: 第4ラウンドの技術設計レビューは GO。バックアップを外した設計書の第1ラウンド指摘を反映。再レビュー・実装承認待ち。
+> 状態: 第4ラウンドの技術設計レビューは GO。バックアップを外した設計書の第2ラウンド指摘を反映。再レビュー・実装承認待ち。
 >
 > 対象: このリポジトリの内部レビュー。比較対象の固有情報は記載しない。
 
@@ -59,9 +59,9 @@ Phase 1 はこのリポジトリの Herdr 内部レビューの品質基準、�
 
 ## 3. 配送とレビュー実行
 
-現行の `handoff` は Task ID を内部で発行してから worker に通知する。公開 CLI に Task ID の事前発行機能はないため、requester が `.inbox/review/<task-id>/request.md` を先に作る方式は採らない。[handoff の契約](../herdr-orchestrator/04-handoff-and-requester.md#sec-7)に従い、次の順序にする。
+現行の `handoff` は Task ID を内部で発行してから worker に通知する。公開 CLI に Task ID の事前発行機能はないため、requester が `.inbox/review/<task-id>/request.md` を先に作る方式は採らない。Phase 1 の review handoff は必ず repository 固有 helper を経由し、[handoff の契約](../herdr-orchestrator/04-handoff-and-requester.md#sec-7)に従い、次の順序にする。
 
-1. requester は [§5 の世代・worktree 確認](#sec-5)後に `.inbox/review/pending/<random-token>/request.md` を排他的に作成し、短い相対パスを `handoff --instruction` に載せる。一時パストークンは配送前の衝突回避用で、Task ID や Review ID の代わりに使用しない。`--instruction` はファイル内容を取り込む機能ではない。
+1. requester は helper を通じて[§5 の世代・worktree 確認](#sec-5)と共有 lock 下の未完了登録を済ませ、`.inbox/review/pending/<random-token>/request.md` を排他的に作成する。短い相対パスを `handoff --instruction` に載せる。一時パストークンは配送前の衝突回避用で、Task ID や Review ID の代わりに使用しない。`--instruction` はファイル内容を取り込む機能ではない。
 2. worker は通知された Task ID で `task-status` を読み、Registry の instruction、worker、repository identity、worktree を照合する。一致しなければ依頼を読んだだけで作業を開始せず、既存の[worker 受信手順](../../skills/herdr-orchestrator/references/worker-receive.md)に従う。
 3. worker は仮置き依頼を読み、必要なら `.inbox/review/<task-id>/request.md` に排他的に写す。同名ファイルがあればハッシュ一致時だけ再利用し、異なれば停止する。移動・複写に失敗しても仮置き原本を残す。保存前にも世代と Registry context を再確認し、旧世代の処理を新世代の記録として保存しない。
 4. [repo-review Skill](../../.agents/skills/repo-review/SKILL.md) の2段階レビュー、指摘の反証確認、既存保証の確認を実施する。Tier は調査範囲を決めるが品質ゲートの省略には使わない。
@@ -102,9 +102,11 @@ worktree 内の Git 除外ファイルは `git clean -fdx` / `git clean -fdX`、
 
 欠落を検出した時点で、台帳に残る各旧 Task ID を `task-status` で確認し、欠落状態とともに確認結果を記録・報告する。`result.status` が terminal (`succeeded` / `failed` / `unavailable`) なら Registry の結果を維持し、成果物参照の失効を報告する。`pending` なら旧 Task を未解決として依頼者または運用管理者へ通知し、架空の成果物・固定済み payload を作らず、reviewer 側から自動 submit しない。Registry の状態が取得不能または不確定なら未解決として[既存の復旧契約](../herdr-orchestrator/06-results-and-workflows.md#sec-10-2)に従って確認する。未解決の旧 Task と新規依頼の採番継続は別に扱う。ただし旧 Task を完了扱いにせず、同じ Task ID を新規記録へ結び直さない。
 
-世代切替または worktree 再登録の前には、既知の Task ID だけでなく、旧 repository identity と旧 worktree の review Task 全体に未完了 Task がないことを確認する。現行の公開 CLI は Task ID 指定の `task-status` を提供するが、Task 一覧のコマンドはない。Phase 1 の repository 固有 helper は Registry の task JSON を**読み取り専用**で列挙し、既存 schema、所有者、symlink、Task ID、repository identity、worktree、task.type を検証して対象候補を抽出する。各候補を `task-status` でも再確認し、`result.status=pending`、dispatch 不確定、列挙中の新規作成、破損ファイル、アクセス不能、参照できない旧 Registry があれば「未完了なし」と判定しない。Registry を直接書き換えず、列挙の整合性を保証できなければ自動切替を停止する。この列挙は採番の普段の経路には使わず、喪失・再登録時の保守判定に限定する。
+世代切替または worktree 再登録の前には、既知の Task ID に加え、旧 repository identity と旧 worktree の review Task に未完了 Task がないか確認する。現行の公開 CLI は Task ID 指定の `task-status` を提供するが、Task 一覧のコマンドはない。Phase 1 の repository 固有 helper は Registry の task JSON を**読み取り専用**で列挙し、既存 schema、所有者、symlink、Task ID、repository identity、worktree、task.type を検証して対象候補を抽出する。各候補を `task-status` でも確認し、`result.status=pending`、dispatch 不確定、破損ファイル、アクセス不能、参照できない旧 Registry があれば自動切替を停止する。Registry へ直接書き込まない。この列挙は既存 Task の見落としを減らす補助確認であり、全 Task の一貫したスナップショットや同時作成の検出を保証しない。
 
-世代切替・worktree 再登録と review handoff の競合を避けるため、repository 固有の共有 lock の下で review handoff の開始を一時トークンで登録し、Task ID 発行後に対応付ける。terminal 結果または既存復旧手順による確認まで未完了登録を残し、handoff が Task ID 発行前に失敗した場合も失敗が確定するまで登録を消さない。保存側も記録公開前に同じ lock の下で instance ID、worktree 登録、Task ID の context を再確認する。以前の登録が存在した形跡があり、補助状態とともに lock または未完了登録が消失・破損した場合は実行中の旧 worker を除外できないので自動切替せず停止する。新規採番の再開は、Registry の読み取り専用照合とこの未完了登録の両方で旧 Task の処理がないと確認できた場合に限る。
+repository 固有の保証範囲は、helper を経由する review handoff と記録保存に限定する。helper は共有 lock 下で世代・worktree を確認し、`handoff` を呼ぶ**前**に一時トークン付きの未完了登録を永続化してから lock を解放する。世代切替・worktree 再登録は同じ lock を取得し、未完了登録がないことを確認してから開始する。切替処理が lock を保持している間は helper から新しい handoff を開始できない。`handoff` が Task ID を発行した後は、取得可能になった時点で登録と対応付ける。ID 発行前の失敗や発行直後の異常終了では登録を残し、依頼パスのトークンと Registry の instruction を照合してから解消する。Registry と照合できない登録は消さず、切替を停止する。保存側も記録公開前に同じ lock 下で instance ID、worktree 登録、Task ID の context を再確認する。
+
+中央 Orchestrator の `create_task` はこの lock に参加しない。helper を経由しない直接の Task 作成は、この同時作成防止の保証範囲外とし、Skill と運用文書で review handoff の直接実行を禁止する。直接作成された Task を列挙で発見した場合は未完了状態を確認して切替を止めるが、列挙直後に作成される Task を必ず検出できるとは主張しない。以前の登録が存在した形跡があり、補助状態とともに lock または未完了登録が消失・破損した場合は実行中の旧 worker を除外できないので自動切替せず停止する。新規採番の再開は、協調する handoff の未完了登録がなく、Registry の補助確認でも旧 Task の未完了・不確定状態が見つからない場合に限る。中央 Orchestrator の契約は変更しない。
 
 補助状態だけが失われ、個別記録が残る場合は、旧 instance への新規保存を直ちに禁止する。旧 Task の未完了登録と Registry の全対象 Task を上記の方法で確認し、未完了または不確定な Task があれば自動世代切替を停止する。初期環境・誤削除・破損・初期化中断を同じ「安全な初期状態」と推定しない。安全性を確認できた場合だけ、残る全 instance ディレクトリをその場で新規保存禁止の履歴アーカイブとし、記録の名前と内容を変更・移動しない。これにより、参照元の worktree とファイルが残る限り既存の `result.ref` の相対パスを保つ。アーカイブした instance ID を非公開の `docs/reviews/internal/ARCHIVE_INDEX.md` に記録し、旧 instance への新規保存と旧 Task ID の自動 submit を禁止する。保存前に symlink、重複 ID、不正なパスが見つかれば停止し、黙ってアーカイブ対象から除外しない。
 
@@ -147,7 +149,7 @@ CI は push 後の検出であり、公開済み情報の流出防止にはな�
 
 実装承認後は新規依頼だけを新方式へ切り替える。旧 `.review-inbox/` の固定ファイルと履歴は読み取り専用で残し、進行中 task の有無を確認してから旧参照を廃止する。既存の[Scope INDEX](INDEX.md)と過去の検証記録は移動・削除しない。旧・新パスを同時に履歴の正本として更新しない。
 
-改修対象候補は `.agents/skills/repo-review/SKILL.md` と `references.md`、`.agents/skills/repo-workflow/SKILL.md`、repository 固有の記録・採番 helper とテスト、`.gitignore`、依頼・応答テンプレート、`AGENTS.md`、`README.md`、公開可能な運用文書である。旧パス参照を検索し、運用上の参照を切り替える。中央 Orchestrator の Task Registry schema、handoff、result、completion は原則変更しない。
+改修対象候補は `.agents/skills/repo-review/SKILL.md` と `references.md`、`.agents/skills/repo-workflow/SKILL.md`、repository 固有の handoff・記録・採番 helper とテスト、`.gitignore`、依頼・応答テンプレート、`AGENTS.md`、`README.md`、公開可能な運用文書である。Skill と運用文書には review handoff の helper 経由を必須として記載する。旧パス参照を検索し、運用上の参照を切り替える。中央 Orchestrator の Task Registry schema、handoff、result、completion は変更しない。
 
 <a id="sec-9"></a>
 
@@ -170,6 +172,9 @@ CI は push 後の検出であり、公開済み情報の流出防止にはな�
 13. `RV999` の次を `RV1000` として発行し、Follow-up の Chain と Finding 対応を追跡できる。
 14. 強制 Git 追加、権限異常、symlink、公開対象への機密情報混入を検出・停止できる。
 15. GitHub PR・Finding Issue の既存権限、中央 Orchestrator の handoff/result/completion 契約に回帰がない。
+16. helper 経由の review handoff と世代切替を同時実行し、先に lock を得た処理に応じて依頼登録または切替が直列化される。切替開始後の handoff は旧世代で開始せず、未完了登録がある間は切替しない。
+17. Task ID 発行前の handoff 失敗と発行直後の異常終了では未完了登録を保持し、Registry の instruction と一時トークンを照合して復旧できる。照合不能な登録を自動削除しない。
+18. Registry 列挙中の別プロセスによる Task 作成、JSON 破損・アクセス不能、初期化 journal 更新途中の異常終了、worktree 再登録中の別プロセスからの採番要求を試す。直接作成を列挙が必ず検出すると期待せず、helper 経由の競合防止と列挙の補助的な検出を区別して検証する。
 
 Orchestrator の回帰確認には `npm run test:orchestrator` と `npm run verify:orchestrator` を使い、Markdown 変更時は `npm run format:md` と `npm run check:md` を通す。実機の並列配送と故障復旧は実装後に別途検証する。
 
