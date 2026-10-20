@@ -21,6 +21,8 @@
   - [B. 開発者向けローカルインストール（Git Clone）](#b-開発者向けローカルインストールgit-clone)
 - [初期セットアップ・動作確認](#初期セットアップ動作確認)
 - [基本的な使い方](#基本的な使い方)
+  - [A. AI Agent に指示して利用する（推奨）](#a-ai-agent-に指示して利用する推奨)
+  - [B. CLI による直接操作（開発・デバッグ用）](#b-cli-による直接操作開発デバッグ用)
 - [アップデート（更新方法）](#アップデート更新方法)
 - [アンインストール方法](#アンインストール方法)
 - [トラブルシューティング](#トラブルシューティング)
@@ -189,33 +191,110 @@ Codex Agent を利用する場合、各 Agent 製品のユーザー設定とし�
 
 ## 基本的な使い方
 
+本ツールは、Herdr 上で稼働する AI Agent（Cursor、Codex、Antigravity 等）にプロンプトで指示を出し、Agent 自身に Skill を通じてオーケストレーションを実行させる運用を想定しています。
+
 > [!NOTE]
-> タスク操作を行うコマンド（`handoff`, `result-submit` 等）は、**`HERDR_ENV=1` が設定された Herdr のペイン内**で実行する必要があります。
+> タスク操作を行うコマンド（`handoff`, `result-submit` 等）は、**`HERDR_ENV=1` が設定された Herdr のセッションペイン内**で実行する必要があります。
 
-以下は各コマンドの基本的な実行例です。実際の運用では、`handoff` 実行時に返されるタスク ID（以下の例では `task_example` と表記）を使用します。結果提出は Worker 側で行われ、`sync` モード（Requester が完了まで待機）と `async` モード（Requester が後から `task-result` で取得）によって処理フローが異なります。
+---
 
-### 1. Worker へタスクを委託する (handoff)
+### A. AI Agent に指示して利用する（推奨）
 
-Requester Agent から Worker Agent（例: reviewer）へタスクを委託します。
+利用者はチャット欄からエージェントへ自然言語プロンプトで指示を出すだけで、Skill の参照、タスク委託、結果確認を行えます。
+
+#### 1. Skill の読み込みと環境確認
+
+エージェントにオーケストレーション Skill を認識させ、実行環境を確認させます。
+
+> **プロンプト例:**
+>
+> ```text
+> herdr-orchestration スキルを読み込んで、現在の Herdr 環境でタスク委託ができるか確認してください。
+> ```
+
+- **エージェントの内部動作**:  
+  Skill 定義（`SKILL.md`）を参照し、`herdr-orchestrator doctor` や `herdr-orchestrator identity show` を実行して動作環境とリポジトリ識別子を確認します。
+
+#### 2. Worker エージェントへレビューを依頼する (handoff)
+
+作業ブランチの変更や Pull Request のレビューを、別の Reviewer エージェントへ委託します。
+
+> **プロンプト例（同期実行・結果待機）:**
+>
+> ```text
+> 現在の作業ブランチの変更内容について、Reviewer エージェントへコードレビュー依頼を出してください。結果が返ってくるまで待機してください。
+> ```
+>
+> **プロンプト例（非同期実行・即時復帰）:**
+>
+> ```text
+> 現在の作業ブランチの変更内容について、Reviewer エージェントへコードレビューを非同期（async）で依頼してください。結果の完了は待たず、発行されたタスク ID を教えてください。
+> ```
+
+- **エージェントの内部動作**:  
+  エージェントがタスク契約（Task Contract）を組み立て、以下のコマンドを実行して Worker を呼び出します。
+  ```bash
+  # 同期実行（結果待機）の場合
+  herdr-orchestrator handoff \
+    --mode sync \
+    --worker-role reviewer \
+    --task-type review \
+    --instruction "ブランチのコードレビューを実施してください。"
+
+  # 非同期実行（即時復帰）の場合
+  herdr-orchestrator handoff \
+    --mode async \
+    --worker-role reviewer \
+    --task-type review \
+    --instruction "ブランチのコードレビューを実施してください。"
+  ```
+  - **sync モード**: CLI は Worker の作業完了まで待機して実行結果を返し、エージェントはその結果を受け取ってユーザーへレビュー結果を報告します。
+  - **async モード**: タスク登録後に待機せず即座に CLI から制御が戻ります。エージェントは発行されたタスク ID を受け取ってユーザーへ提示し、後から状態や結果を確認します。
+
+#### 3. タスク結果の確認・作業再開 (async モード時)
+
+非同期（`async`）で委託したタスクの結果を確認させたり、後続の作業を再開させます。
+
+※ `task_example` は説明用の仮の ID です。実際には Step 2 の非同期委託時に発行されたタスク ID に置き換えてください。
+
+> **プロンプト例:**
+>
+> ```text
+> タスク task_example のレビュー結果を確認して、指摘事項があれば対応方針を教えてください。
+> ```
+
+- **エージェントの内部動作**:  
+  `herdr-orchestrator task-result task_example` を実行して Worker の提出結果（ステータス、成果物パス、サマリー）を取得し、ユーザーへ報告します。
+
+---
+
+### B. CLI による直接操作（開発・デバッグ用）
+
+ターミナルから人間が直接オーケストレーションを操作・検証する場合のコマンド例です。
+
+> [!NOTE]
+> CLI による直接操作は、原則として Herdr セッションペイン内で行います。タスク操作コマンド（`handoff`, `task-status`, `result-submit`, `task-result` 等）など `HERDR_ENV=1` が必要なコマンドは、通常のターミナルから直接実行できません（`--help` や `identity` 等はペイン外でも実行可能です）。
+
+#### 1. Worker へタスクを委託する (handoff)
 
 ```bash
 herdr-orchestrator handoff \
   --mode sync \
   --worker-role reviewer \
   --task-type review \
-  --instruction "PR #54 のコードレビューを実施してください。"
+  --instruction "PR #56 のコードレビューを実施してください。"
 ```
 
 - `--mode sync`: Worker の結果提出が完了するまでブロッキング待機します。
 - `--mode async`: タスク登録後、待機せず即座に制御を返します。
 
-### 2. タスクの状態を確認する
+#### 2. タスクの状態を確認する
 
 ```bash
 herdr-orchestrator task-status task_example
 ```
 
-### 3. Worker が実行結果を提出する (result-submit)
+#### 3. Worker が実行結果を提出する (result-submit)
 
 Worker Agent は作業完了後、タスク結果を提出します（Requester ではなく Worker が実行します）。
 
@@ -226,7 +305,7 @@ herdr-orchestrator result-submit task_example \
   --summary "レビュー完了。指摘なし（GO）。"
 ```
 
-### 4. Requester がタスク結果を取得する
+#### 4. Requester がタスク結果を取得する
 
 ```bash
 herdr-orchestrator task-result task_example
