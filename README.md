@@ -182,10 +182,30 @@ herdr-orchestrator doctor
 
 正常であれば `HERDR_ENV=1` が認識され、診断結果の JSON が出力されます（ペイン外で実行した場合は `herdr_env: false` となり終了コード 1 が返ります）。
 
-### 5. Codex を利用する場合の承認設定（execpolicy）
+### 5. Codex を利用する場合の承認設定（任意・設定例）
 
-Codex Agent を利用する場合、各 Agent 製品のユーザー設定として `~/.codex/rules/default.rules` に CLI 実行ルールを追加することが推奨されます。  
-設定例のテンプレートは [codex-execpolicy-snippet.rules](skills/herdr-orchestrator/install/codex-execpolicy-snippet.rules) を参照してください。
+Codex Agent を利用する場合、承認プロンプトによる中断を防ぎ自律実行を円滑にするため、ユーザー設定 `~/.codex/rules/default.rules` に CLI 実行ルールを追加する設定例（テンプレート）を提供しています。
+
+> [!NOTE]
+> 本設定は **Codex を利用する場合のみの任意設定**です。Cursor や Antigravity など他の Agent を利用する場合や、Codex を利用しない場合は設定不要です。また、Codex CLI のインストールは本ツールの必須要件ではありません。
+
+設定テンプレートは [codex-execpolicy-snippet.rules](skills/herdr-orchestrator/install/codex-execpolicy-snippet.rules) に用意されています。
+
+- **許可方針の分類**:
+  - **診断・読み取り系（自動許可）**: `doctor`, `task-status`, `task-result`, `identity show`。副作用のない参照操作として許可されます。
+  - **自動化の書き込み例外（自動許可）**: `result-submit`。Task Registry の更新および completion 処理を伴いますが、Worker による結果提出の自律実行を維持するため例外的に許可されます。
+  - **意図的に自動許可しないコマンド**: `handoff`（Worker 起動・タスク登録）、`identity init`（Git 設定変更）、`resume-task` や `reset-completion` などの復旧・状態変更コマンドは、影響範囲が大きいため無条件許可せず、Codex 側の通常承認・サンドボックス制御に委ねます。
+  - **絶対パス実行への対応**: Agent が PATH を経由せず絶対パスで CLI を呼び出す場合に備え、テンプレート内の `GLOBAL_INSTALL_ABS` を実際のインストール先ディレクトリ（例: `/home/<user>/.agents/skills/herdr-orchestration`）に置換して登録します。
+  - **開発者向け任意ルール**: `npm run test:orchestrator` および `npm run verify:orchestrator` は本リポジトリの開発・検証用の任意設定です。通常利用のみであれば追記不要です。
+
+設定後、必要に応じて以下のコマンドで許可ルールが正しく適用されているか確認できます（任意の確認手順です）。
+
+```bash
+codex execpolicy check --rules ~/.codex/rules/default.rules -- herdr-orchestrator identity show
+# 期待される出力: "decision": "allow" が含まれる JSON
+```
+
+詳細な仕様およびカスタマイズ方法: [install/README.md](skills/herdr-orchestrator/install/README.md)
 
 ---
 
