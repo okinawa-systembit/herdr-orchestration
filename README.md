@@ -1,106 +1,363 @@
-# herdr-orchestration（仮 README）
+# herdr-orchestration
 
-Herdr 上の **中央オーケストレーション**（Task Registry、role、handoff、`herdr-orchestrator` CLI）。  
-設計・実装の正本は [docs/herdr-orchestrator-design.md](docs/herdr-orchestrator-design.md) / [実装 INDEX](docs/herdr-orchestrator-implementation-index.md)。
+[![CI](https://github.com/okinawa-systembit/herdr-orchestration/actions/workflows/ci.yml/badge.svg)](https://github.com/okinawa-systembit/herdr-orchestration/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/okinawa-systembit/herdr-orchestration)](https://github.com/okinawa-systembit/herdr-orchestration/releases)
 
-> **仮段階** — 本 README は導入のクイックメモ。詳細は [skills/herdr-orchestrator/references/](skills/herdr-orchestrator/references/) に順次移す。
+[herdr](https://herdr.dev) 上で稼働する複数の AI Agent に対し、タスクの委託（handoff）、実行結果の提出・回収、および依頼元への完了通知・処理再開を支援するオーケストレーションツールです。
 
-## 前提
+> [!IMPORTANT]
+> **公式 herdr との関係性**  
+> 本ツールは [herdr](https://herdr.dev) 本体そのものではなく、herdr のセッション環境上で動作する**追加のオーケストレーション Skill / CLI** です。公式 herdr および公式 `herdr` Skill と併用して動作します。公式 herdr 本体の機能と混同しないようご注意ください。
 
-- [Herdr](https://herdr.dev) と公式 **herdr** Skill（pane / agent の意味論）
-- Orchestrator CLI は **`HERDR_ENV=1` の pane 内**でのみ実行
+---
 
-## 開発時ローカルインストール
+## 目次
 
-各エージェント（Cursor / Codex / Agy）共通: Skill を **`~/.agents/skills/herdr-orchestration`** にコピー（公式 `herdr` と別名）。
+- [主な機能](#主な機能)
+- [利用イメージ（連携フロー）](#利用イメージ連携フロー)
+- [動作環境・前提条件](#動作環境前提条件)
+- [インストール方法](#インストール方法)
+  - [A. 通常インストール（推奨・Release 利用）](#a-通常インストール推奨release-利用)
+  - [B. 開発者向けローカルインストール（Git Clone）](#b-開発者向けローカルインストールgit-clone)
+- [初期セットアップ・動作確認](#初期セットアップ動作確認)
+- [基本的な使い方](#基本的な使い方)
+- [アップデート（更新方法）](#アップデート更新方法)
+- [アンインストール方法](#アンインストール方法)
+- [トラブルシューティング](#トラブルシューティング)
+- [制限事項・注意事項](#制限事項注意事項)
+- [リリース情報](#リリース情報)
+- [問題報告・フィードバック](#問題報告フィードバック)
+- [ライセンス](#ライセンス)
+- [開発者・Agent 向けドキュメント](#開発者agent-向けドキュメント)
+
+---
+
+## 主な機能
+
+- **AI Agent 間のタスク委託（handoff）**: Requester Agent から Worker Agent へ指示とコンテキストを委託します。
+- **同期・非同期実行のサポート**: 結果確定まで完了待機する `sync` モードと、即時復帰する `async` モードを提供します。
+- **Task Registry による状態管理**: リポジトリ外のファイルベース領域でタスクのライフサイクル（4軸状態遷移）を厳密に管理します。
+- **実行結果の提出と回収**: Worker による結果登録（`result-submit`）と Requester による結果取得（`task-result`）を接続します。
+- **Requester への完了通知・再開**: Worker の結果提出を契機に Requester の completion 状態を更新し、安全な処理再開を促します。
+- **異常時の復旧支援**: 応答のない未確定 dispatch の安全な復旧（`reconcile-dispatch`）や completion のリセット（`reset-completion`, `recover-completion`）を備えています。
+- **Repository Identity（リポジトリ識別）**: Git リポジトリごとの一意な UUID を自動管理し、マルチリポジトリ環境での決定論的エージェントルーティングを実現します。
+- **人間・Agent 共通の公開 CLI**: コマンドラインツール `herdr-orchestrator` により、ターミナルから直接各操作を実行可能です。
+
+---
+
+## 利用イメージ（連携フロー）
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Requester as Requester Agent
+    participant CLI as herdr-orchestrator
+    participant Registry as Task Registry
+    actor Worker as Worker Agent
+
+    Requester->>CLI: handoff (sync/async)
+    CLI->>Registry: タスク作成 (created -> dispatched)
+    CLI->>Worker: Herdr 経由でタスク通知・起動
+    Note over Worker: タスク作業の実行
+    Worker->>CLI: result-submit (成果物パス・要約)
+    CLI->>Registry: 結果確定 (succeeded / failed)
+    CLI->>Registry: Completion 状態更新 (eligible -> ready)
+    CLI-->>Requester: 完了通知・処理再開 (resume-task)
+    Requester->>CLI: task-result (結果の取得)
+```
+
+---
+
+## 動作環境・前提条件
+
+- **対応 OS**: **Linux / WSL2（Ubuntu）**
+  - ※ Windows ネイティブ環境および macOS は未検証・動作保証対象外です。
+- **必要な herdr 環境**:
+  - [herdr](https://herdr.dev) が稼働していること
+  - 公式 **herdr** Skill（pane / agent の操作機能）が導入されていること
+- **ランタイム・必要コマンド**:
+  - `python3` (3.10 以上)
+  - `bash` (4.0 以上)
+  - `curl`
+  - `tar`
+  - `flock`
+  - `git`
+- **対象 AI Agent 製品**: Cursor, Codex, Antigravity (Agy) 等
+
+> [!NOTE]
+> **Node.js / npm の要否について**  
+> 一般利用者のインストールおよび CLI の日常利用において、**Node.js や npm は不要**です（Python スクリプトおよびシェルスクリプトのみで動作します）。  
+> Node.js / npm は、本リポジトリ自体の開発・自動テスト（`npm run test:orchestrator` 等）を実行する場合にのみ必要となります。
+
+---
+
+## インストール方法
+
+### A. 通常インストール（推奨・Release 利用）
+
+GitHub Releases に公開されている公式リリース tarball から直接インストールします（Git の clone は不要です）。
+
+#### 1. 事前確認（Dry-run）
+
+変更予定内容を事前に確認します（ファイルは変更されません）。
 
 ```bash
-git clone <this-repo-url> herdr-orchestration
+curl -fsSL 'https://raw.githubusercontent.com/okinawa-systembit/herdr-orchestration/main/install.sh' | bash -s -- --dry-run
+```
+
+#### 2. 本番インストール
+
+```bash
+curl -fsSL 'https://raw.githubusercontent.com/okinawa-systembit/herdr-orchestration/main/install.sh' | bash
+```
+
+- **Skill インストール先**: `~/.agents/skills/herdr-orchestration`
+- **CLI シンボリックリンク**: `~/.local/bin/herdr-orchestrator`
+
+※ `--version <tag>` で特定のバージョン（例: `--version v0.2.0`）を指定することも可能です（省略時は最新安定版が選択されます）。  
+詳細なインストール仕様: [distribution-install.md](skills/herdr-orchestrator/references/distribution-install.md)
+
+---
+
+### B. 開発者向けローカルインストール（Git Clone）
+
+リポジトリをローカルにクローンし、開発中の Skill ツリーをローカル環境へ配置して動作確認する場合の手順です。
+
+```bash
+# 1. リポジトリのクローン
+git clone https://github.com/okinawa-systembit/herdr-orchestration.git
 cd herdr-orchestration
+
+# 2. 開発用依存パッケージのインストールと自動テスト
 npm install
 npm run test:orchestrator
 
+# 3. 開発用ローカルインストール
 npm run install:orchestrator-dev
-# または
-skills/herdr-orchestrator/install/dev-local-install.sh --dry-run
-skills/herdr-orchestrator/install/dev-local-install.sh
 ```
 
-| 項目          | 値                                                                                  |
-| ------------- | ----------------------------------------------------------------------------------- |
-| 編集の正本    | リポジトリ内 `skills/herdr-orchestrator/`                                           |
-| Skill `name:` | `herdr-orchestration`                                                               |
-| CLI           | **`herdr-orchestrator`** on PATH → `~/.agents/skills/herdr-orchestration/scripts/…` |
-| Registry      | `~/.local/state/herdr-orchestrator/tasks/`（リポジトリ外）                          |
+詳細な開発者向けインストール仕様: [dev-local-install.md](skills/herdr-orchestrator/references/dev-local-install.md)
 
-`install:orchestrator-dev` は Skill コピー + **`~/.local/bin/herdr-orchestrator` symlink**（配布 install も同じ予定）。  
-Skill / CLI を直したら **再実行**する（repo 直 PATH は使わない）。
+---
+
+## 初期セットアップ・動作確認
+
+### 1. PATH の確認
+
+CLI リンク先（`~/.local/bin`）が環境変数 `PATH` に含まれていることを確認します。
+
+```bash
+which herdr-orchestrator
+# 期待される出力例: /home/<user>/.local/bin/herdr-orchestrator
+```
+
+### 2. ヘルプ表示の確認
+
+通常のターミナル（Herdr セッションペイン外）から実行できます。
 
 ```bash
 herdr-orchestrator --help
 ```
 
-詳細: [skills/herdr-orchestrator/references/dev-local-install.md](skills/herdr-orchestrator/references/dev-local-install.md)
+### 3. Repository Identity の初期化
 
-## 配布インストール（予定・未実装）
-
-```bash
-# 案（URL・install.sh は未確定）
-curl -fsSL 'https://<host>/herdr-orchestration/install.sh' | bash
-
-# 配置先 default 案
-curl -fsSL '.../install.sh' | bash -s -- --dest "$HOME/.agents/skills/herdr-orchestration"
-```
-
-併記候補:
+Orchestrator を利用する各開発 Git リポジトリのルートで実行します（Herdr ペイン外でも実行可能）。
 
 ```bash
-npx skills add <org>/herdr-orchestration --skill herdr-orchestration -g
+cd /path/to/your-project-repo
+herdr-orchestrator identity init
 ```
 
-配布 `install.sh` は開発用 `dev-local-install.sh` と同じコピー処理を共有する想定。  
-方針のみ: [skills/herdr-orchestrator/references/distribution-install.md](skills/herdr-orchestrator/references/distribution-install.md)
+`.git/config` にリポジトリ固有の UUID が登録され、決定論的な識別ハッシュが発行されます。
 
-レガシー（Cursor `~/.cursor/skills/herdr-orchestrator`）: `skills/herdr-orchestrator/install/setup.sh`
+### 4. 環境診断の実行
 
-## Codex の承認（execpolicy）— README に書くか、インストール脚本か
-
-### 結論（現時点）
-
-| 方式                                                               | 推奨           | 理由                                                                                                                                                                       |
-| ------------------------------------------------------------------ | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **README + スニペットファイル**（手動で `~/.codex/rules/` に追記） | **主**         | 設計 §15.6 — allowlist は **各 Agent 製品のユーザ設定**。他プロジェクトの rule と衝突しやすく、脚本が `default.rules` を勝手にマージするのは安全・可搬性の面で望ましくない |
-| **インストール脚本が rule を自動追記**                             | **しない**     | 上書き・重複・パス差分のリスク。Codex 専用で Cursor CLI 設定とは別                                                                                                         |
-| **脚本がインストール後に 1 行を表示**（`--print-codex-rule` 等）   | **任意の将来** | パスを `$HOME` 展開した **コピペ用**を出すだけなら許容（書き込みはしない）                                                                                                 |
-
-Cursor / Agy は Codex と **別の permissions モデル**のため、中央インストーラで一括設定はしない。製品ごとの doc を [references/](skills/herdr-orchestrator/references/) に足す想定。
-
-### Codex: `~/.codex/rules/default.rules` に追記
-
-テンプレ: [codex-execpolicy-snippet.rules](skills/herdr-orchestrator/install/codex-execpolicy-snippet.rules)（**PATH 名 `herdr-orchestrator` が主**、絶対パス 1 行はエージェントがフルパスを使う場合の fallback）
-
-検証:
+Herdr が起動しているペイン内で実行し、環境設定を確認します。
 
 ```bash
-codex execpolicy check --rules ~/.codex/rules/default.rules -- \
-  herdr-orchestrator task-status task_example
+herdr-orchestrator doctor
 ```
 
-**`/bin/bash -lc "…"`** 1 文字列で実行される場合は prefix が別 argv になり、上記 rule だけでは足りないことがある。可能なら **CLI をシェルラップせず直接実行**。どうしても `-lc` のときは TUI の allow が **全文一致**になりやすい（task 固定 rule が増える）。`pattern=["/bin/bash","-lc"]` のみ allow は非推奨（全 `-lc` が無承認になる）。
+正常であれば `HERDR_ENV=1` が認識され、診断結果の JSON が出力されます（ペイン外で実行した場合は `herdr_env: false` となり終了コード 1 が返ります）。
 
-`handoff` / `reconcile-dispatch` / completion 復旧系は **allow しない**（明示承認のまま）。
+### 5. Codex を利用する場合の承認設定（execpolicy）
 
-## 検証
+Codex Agent を利用する場合、各 Agent 製品のユーザー設定として `~/.codex/rules/default.rules` に CLI 実行ルールを追加することが推奨されます。  
+設定例のテンプレートは [codex-execpolicy-snippet.rules](skills/herdr-orchestrator/install/codex-execpolicy-snippet.rules) を参照してください。
+
+---
+
+## 基本的な使い方
+
+> [!NOTE]
+> タスク操作を行うコマンド（`handoff`, `result-submit` 等）は、**`HERDR_ENV=1` が設定された Herdr のペイン内**で実行する必要があります。
+
+### 1. Worker へタスクを委託する (handoff)
+
+Requester Agent から Worker Agent（例: reviewer）へタスクを委託します。
 
 ```bash
-npm run verify:orchestrator
+herdr-orchestrator handoff \
+  --mode sync \
+  --worker-role reviewer \
+  --task-type review \
+  --instruction "PR #54 のコードレビューを実施してください。"
 ```
 
-## 本リポジトリのレビュー
+- `--mode sync`: Worker の結果提出が完了するまでブロッキング待機します。
+- `--mode async`: タスク登録後、待機せず即座に制御を返します。
 
-`.agents/skills/repo-review/` — sync `handoff`、`.review-inbox/`、短い `herdr-orchestrator` / `result-submit`（[AGENTS.md](AGENTS.md)）。
+### 2. タスクの状態を確認する
 
-## 関連
+```bash
+herdr-orchestrator task-status <task.id>
+```
 
-- [AGENTS.md](AGENTS.md) — リポジトリ作業ガイド
-- [skills/herdr-orchestrator/install/README.md](skills/herdr-orchestrator/install/README.md) — インストール入口
+### 3. Worker が実行結果を提出する (result-submit)
+
+Worker Agent は作業完了後、タスク結果を提出します。
+
+```bash
+herdr-orchestrator result-submit <task.id> \
+  --result-status succeeded \
+  --result-ref ".review-inbox/review-response.md" \
+  --summary "レビュー完了。指摘なし（GO）。"
+```
+
+### 4. Requester がタスク結果を取得する
+
+```bash
+herdr-orchestrator task-result <task.id>
+```
+
+詳細なコマンド仕様・全オプション: [public-cli.md](skills/herdr-orchestrator/references/public-cli.md)
+
+---
+
+## アップデート（更新方法）
+
+### 通常利用環境の更新
+
+> [!NOTE]
+> 設計書にある `herdr-orchestrator update` コマンドは**将来バージョンで提供予定の機能（現在未実装）**です。  
+> 現行バージョンでは、公式配布インストーラー `install.sh` を再実行することで最新版へ安全に更新できます。
+
+```bash
+# 事前確認（Dry-run）
+curl -fsSL 'https://raw.githubusercontent.com/okinawa-systembit/herdr-orchestration/main/install.sh' | bash -s -- --dry-run
+
+# 更新実行
+curl -fsSL 'https://raw.githubusercontent.com/okinawa-systembit/herdr-orchestration/main/install.sh' | bash
+```
+
+- **更新時の安全性**:
+  - `flock` による排他制御が行われ、同時並行実行を防ぎます。
+  - 既存環境をバックアップ退避した上でステージング経由でアトミックに配置するため、途中で失敗した場合も旧バージョンへ自動ロールバックされます。
+  - Task Registry に蓄積された過去のタスク履歴データ（`~/.local/state/herdr-orchestrator/`）は更新時も保持されます。
+- **更新時の注意点**:
+  - タスク実行中の予期せぬ競合を防ぐため、**未完了（実行中）のタスクが存在しない状態で更新を実行してください**。
+
+### 開発者環境の更新
+
+リポジトリを clone している場合は、以下のように更新します。
+
+```bash
+git pull --ff-only
+npm run test:orchestrator
+npm run install:orchestrator-dev
+```
+
+---
+
+## アンインストール方法
+
+現在、自動アンインストールスクリプトは提供されていません。不要になった場合は、以下の手順で手動削除してください。
+
+```bash
+# 1. インストール済み Skill ディレクトリの削除
+rm -rf ~/.agents/skills/herdr-orchestration
+
+# 2. CLI シンボリックリンクの削除
+rm -f ~/.local/bin/herdr-orchestrator
+```
+
+- **Task Registry 永続データの削除（任意）**:  
+  過去のタスクログや状態履歴を完全に消去したい場合のみ、手動で削除してください（通常は保持が推奨されます）。
+  ```bash
+  rm -rf ~/.local/state/herdr-orchestrator
+  ```
+- **Agent 設定の清掃（任意）**:  
+  Codex を利用していた場合は、`~/.codex/rules/default.rules` に追加した `herdr-orchestrator` 関連のルールを手動で削除してください。
+
+---
+
+## トラブルシューティング
+
+| 症状                                                                   | 主な原因                                  | 確認・対処方法                                                                                                                                                  |
+| ---------------------------------------------------------------------- | ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `herdr-orchestrator: command not found`                                | PATH が通っていない / インストール未完了  | `~/.local/bin` が `PATH` 環境変数に含まれているか確認してください（`export PATH="$HOME/.local/bin:$PATH"`）。                                                   |
+| Agent が Skill を認識しない                                            | Skill 配置パスの不一致 / 再読み込み未実施 | `~/.agents/skills/herdr-orchestration/SKILL.md` が存在するか確認し、Agent（Cursor / Codex 等）を再起動または再読み込みしてください。                            |
+| `{"error": "herdr_env_required"}`                                      | Herdr ペイン外での実行                    | タスク操作コマンド（`handoff` や `task-status` 等）は、`HERDR_ENV=1` が設定された Herdr のセッションペイン内で実行してください。                                |
+| `{"error": "git_repository_not_initialized"}`                          | 非 Git ディレクトリでの実行               | `identity` コマンドは Git 管理下のリポジトリ内で実行してください（`git init` を実行）。                                                                         |
+| `{"error": "live_agent_not_found"}` 等                                 | 宛先エージェントの未起動 / 命名不一致     | Herdr 上で対象ロールのエージェントが起動しているか確認してください。                                                                                            |
+| インストーラーが `Another installation... is currently running` で失敗 | ロックファイルの競合                      | 他のインストールプロセスが走っていないか確認し、異常終了で残ったロックファイル（`~/.agents/skills/.herdr-orchestrator.install.lock`）がないか確認してください。 |
+
+---
+
+## 制限事項・注意事項
+
+- **OS 制約**: WSL2（Ubuntu）を前提に設計・検証されています。Windows ネイティブ（Command Prompt/PowerShell）や macOS での動作は保証されません。
+- **Herdr への依存**: 単独のタスクスケジューラではなく、Herdr のエージェントセッション管理および tmux ペイン連携を前提としています。
+- **並列競合のリスク**: 同一ワークツリー内で複数の Worker Agent が同時にファイル編集を行うと競合が発生する可能性があるため、適切なブランチ運用や作業分担を推奨します。
+- **バージョン表示コマンド**: 現在 CLI にバージョン番号を表示するオプション（`--version`）は未実装です。導入バージョンは GitHub Releases またはインストール時の出力で確認してください。
+
+---
+
+## リリース情報
+
+- **GitHub Releases**: [https://github.com/okinawa-systembit/herdr-orchestration/releases](https://github.com/okinawa-systembit/herdr-orchestration/releases)
+- **最新バージョン**: `v0.2.0`（Repository Identity UUID 対応、安全な更新インストーラー、CLI ヘルプ日本語化）
+
+---
+
+## 問題報告・フィードバック
+
+不具合の報告や改善提案は、GitHub Issues にて受け付けています。
+
+- **Issue Tracker**: [https://github.com/okinawa-systembit/herdr-orchestration/issues](https://github.com/okinawa-systembit/herdr-orchestration/issues)
+
+> [!CAUTION]
+> 不具合報告時には、OS 環境、herdr バージョン、実行コマンド、エラーメッセージ、再現手順を記載してください。**API トークンや秘密鍵などの機密情報を Issue に貼り付けないよう十分にご注意ください。**
+
+---
+
+## ライセンス
+
+現在、本リポジトリにライセンスファイルは設定されていません（未設定）。利用や再配布の条件等については、リポジトリ管理者まで直接お問い合わせください。
+
+---
+
+## 開発者・Agent 向けドキュメント
+
+### 開発者向け
+
+- [AGENTS.md](AGENTS.md) — リポジトリ作業ガイド・開発規約
+- [docs/herdr-orchestrator-design.md](docs/herdr-orchestrator-design.md) — アーキテクチャ設計書目次
+- [docs/herdr-orchestrator-implementation-index.md](docs/herdr-orchestrator-implementation-index.md) — 実装計画・フェーズ INDEX
+- [dev-local-install.md](skills/herdr-orchestrator/references/dev-local-install.md) — ローカル開発インストール仕様
+
+### Agent 向け
+
+- [skills/herdr-orchestrator/SKILL.md](skills/herdr-orchestrator/SKILL.md) — Herdr Orchestration Skill 定義
+- [skills/herdr-orchestrator/references/](skills/herdr-orchestrator/references/) — エージェント受信用リファレンス
+  - [roles.md](skills/herdr-orchestrator/references/roles.md) — 論理ロール仕様
+  - [handoff.md](skills/herdr-orchestrator/references/handoff.md) — タスク委託
+  - [worker-receive.md](skills/herdr-orchestrator/references/worker-receive.md) — Worker 側処理手順
+  - [requester-receive.md](skills/herdr-orchestrator/references/requester-receive.md) — Requester 側処理手順
+  - [public-cli.md](skills/herdr-orchestrator/references/public-cli.md) — CLI コマンド仕様
+- [.agents/skills/repo-review/SKILL.md](.agents/skills/repo-review/SKILL.md) — 本リポジトリ専用レビュー Skill
+
+### 内部仕様・運用
+
+- [distribution-install.md](skills/herdr-orchestrator/references/distribution-install.md) — 配布・更新仕様書
+- [docs/herdr-orchestrator-identity-uuid.md](docs/herdr-orchestrator-identity-uuid.md) — Repository Identity UUID 仕様書
