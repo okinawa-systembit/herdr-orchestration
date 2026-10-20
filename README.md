@@ -192,6 +192,8 @@ Codex Agent を利用する場合、各 Agent 製品のユーザー設定とし�
 > [!NOTE]
 > タスク操作を行うコマンド（`handoff`, `result-submit` 等）は、**`HERDR_ENV=1` が設定された Herdr のペイン内**で実行する必要があります。
 
+以下は各コマンドの基本的な実行例です。実際の運用では、`handoff` 実行時に返されるタスク ID（以下の例では `task_example` と表記）を使用します。結果提出は Worker 側で行われ、`sync` モード（Requester が完了まで待機）と `async` モード（Requester が後から `task-result` で取得）によって処理フローが異なります。
+
 ### 1. Worker へタスクを委託する (handoff)
 
 Requester Agent から Worker Agent（例: reviewer）へタスクを委託します。
@@ -210,15 +212,15 @@ herdr-orchestrator handoff \
 ### 2. タスクの状態を確認する
 
 ```bash
-herdr-orchestrator task-status <task.id>
+herdr-orchestrator task-status task_example
 ```
 
 ### 3. Worker が実行結果を提出する (result-submit)
 
-Worker Agent は作業完了後、タスク結果を提出します。
+Worker Agent は作業完了後、タスク結果を提出します（Requester ではなく Worker が実行します）。
 
 ```bash
-herdr-orchestrator result-submit <task.id> \
+herdr-orchestrator result-submit task_example \
   --result-status succeeded \
   --result-ref ".review-inbox/review-response.md" \
   --summary "レビュー完了。指摘なし（GO）。"
@@ -227,7 +229,7 @@ herdr-orchestrator result-submit <task.id> \
 ### 4. Requester がタスク結果を取得する
 
 ```bash
-herdr-orchestrator task-result <task.id>
+herdr-orchestrator task-result task_example
 ```
 
 詳細なコマンド仕様・全オプション: [public-cli.md](skills/herdr-orchestrator/references/public-cli.md)
@@ -271,18 +273,38 @@ npm run install:orchestrator-dev
 
 ## アンインストール方法
 
-現在、自動アンインストールスクリプトは提供されていません。不要になった場合は、以下の手順で手動削除してください。
+現在、自動アンインストールスクリプトは提供されていません。不要になった場合は、以下の手順で配置先を確認した上で手動削除してください。
+
+> [!WARNING]
+>
+> - 未完了（実行中）のタスクが存在しないことを確認してからアンインストールを実行してください。
+> - カスタムインストール先（`--dest` や `--bin-dir`）を指定していた場合は、実際の配置先を確認してください。
+> - シンボリックリンクが本ツール（`herdr-orchestrator`）を指していることを確認してから削除してください。
+
+### 1. 配置先・リンク先の確認
 
 ```bash
-# 1. インストール済み Skill ディレクトリの削除
+# インストール先ディレクトリの確認
+ls -ld ~/.agents/skills/herdr-orchestration
+
+# CLI シンボリックリンクの確認（本ツールを指しているか）
+ls -l ~/.local/bin/herdr-orchestrator
+```
+
+### 2. Skill および CLI リンクの削除
+
+```bash
+# Skill ディレクトリの削除
 rm -rf ~/.agents/skills/herdr-orchestration
 
-# 2. CLI シンボリックリンクの削除
+# CLI シンボリックリンクの削除
 rm -f ~/.local/bin/herdr-orchestrator
 ```
 
+### 3. 永続データ・設定の清掃（任意）
+
 - **Task Registry 永続データの削除（任意）**:  
-  過去のタスクログや状態履歴を完全に消去したい場合のみ、手動で削除してください（通常は保持が推奨されます）。
+  過去のタスクログや状態履歴を完全に消去したい場合のみ、手動で削除してください。**一度削除すると過去のタスク履歴は復元できません**（通常は保持が推奨されます）。
   ```bash
   rm -rf ~/.local/state/herdr-orchestrator
   ```
@@ -293,14 +315,14 @@ rm -f ~/.local/bin/herdr-orchestrator
 
 ## トラブルシューティング
 
-| 症状                                                                   | 主な原因                                  | 確認・対処方法                                                                                                                                                  |
-| ---------------------------------------------------------------------- | ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `herdr-orchestrator: command not found`                                | PATH が通っていない / インストール未完了  | `~/.local/bin` が `PATH` 環境変数に含まれているか確認してください（`export PATH="$HOME/.local/bin:$PATH"`）。                                                   |
-| Agent が Skill を認識しない                                            | Skill 配置パスの不一致 / 再読み込み未実施 | `~/.agents/skills/herdr-orchestration/SKILL.md` が存在するか確認し、Agent（Cursor / Codex 等）を再起動または再読み込みしてください。                            |
-| `{"error": "herdr_env_required"}`                                      | Herdr ペイン外での実行                    | タスク操作コマンド（`handoff` や `task-status` 等）は、`HERDR_ENV=1` が設定された Herdr のセッションペイン内で実行してください。                                |
-| `{"error": "git_repository_not_initialized"}`                          | 非 Git ディレクトリでの実行               | `identity` コマンドは Git 管理下のリポジトリ内で実行してください（`git init` を実行）。                                                                         |
-| `{"error": "live_agent_not_found"}` 等                                 | 宛先エージェントの未起動 / 命名不一致     | Herdr 上で対象ロールのエージェントが起動しているか確認してください。                                                                                            |
-| インストーラーが `Another installation... is currently running` で失敗 | ロックファイルの競合                      | 他のインストールプロセスが走っていないか確認し、異常終了で残ったロックファイル（`~/.agents/skills/.herdr-orchestrator.install.lock`）がないか確認してください。 |
+| 症状                                                                   | 主な原因                                      | 確認・対処方法                                                                                                                                                                                                                                                                  |
+| ---------------------------------------------------------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `herdr-orchestrator: command not found`                                | PATH が通っていない / インストール未完了      | `~/.local/bin` が `PATH` 環境変数に含まれているか確認してください（`export PATH="$HOME/.local/bin:$PATH"`）。                                                                                                                                                                   |
+| Agent が Skill を認識しない                                            | Skill 配置パスの不一致 / 再読み込み未実施     | `~/.agents/skills/herdr-orchestration/SKILL.md` が存在するか確認し、Agent（Cursor / Codex 等）を再起動または再読み込みしてください。                                                                                                                                            |
+| `{"error": "herdr_env_required"}`                                      | Herdr ペイン外での実行                        | タスク操作コマンド（`handoff` や `task-status` 等）は、`HERDR_ENV=1` が設定された Herdr のセッションペイン内で実行してください。                                                                                                                                                |
+| `{"error": "git_repository_not_initialized"}`                          | 非 Git ディレクトリでの実行                   | `identity` コマンドは Git 管理下のリポジトリ内で実行してください（`git init` を実行）。                                                                                                                                                                                         |
+| `{"error": "live_agent_not_found"}` 等                                 | 宛先エージェントの未起動 / 命名不一致         | Herdr 上で対象ロールのエージェントが起動しているか確認してください。                                                                                                                                                                                                            |
+| インストーラーが `Another installation... is currently running` で失敗 | 別のインストール処理の同時実行 / ロック保持中 | 別のインストール・更新処理が実行中でないか確認してください。`flock` による排他ロックは通常、保持プロセスの終了時に自動解放されます。ロックファイル（`~/.agents/skills/.herdr-orchestrator.install.lock`）が存在していること自体は正常な状態であり、安易に削除しないでください。 |
 
 ---
 
@@ -316,7 +338,7 @@ rm -f ~/.local/bin/herdr-orchestrator
 ## リリース情報
 
 - **GitHub Releases**: [https://github.com/okinawa-systembit/herdr-orchestration/releases](https://github.com/okinawa-systembit/herdr-orchestration/releases)
-- **最新バージョン**: `v0.2.0`（Repository Identity UUID 対応、安全な更新インストーラー、CLI ヘルプ日本語化）
+- **バージョン・変更履歴**: 最新バージョン、リリースノート、および破壊的変更の情報は、上記の GitHub Releases を参照してください。
 
 ---
 
