@@ -156,7 +156,7 @@ class DistributionInstallerTests(unittest.TestCase):
                 check=False,
             )
             self.assertEqual(cli_proc.returncode, 0, cli_proc.stderr)
-            self.assertIn("Herdr Orchestrator public CLI", cli_proc.stdout)
+            self.assertIn("Herdr Orchestrator 公開 CLI", cli_proc.stdout)
 
     def test_checksum_mismatch_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

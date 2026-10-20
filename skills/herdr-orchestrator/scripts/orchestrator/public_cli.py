@@ -35,6 +35,7 @@ from orchestrator.registry.task_id import validate_task_id
 from orchestrator.result_commands import ResultCommandError, result_submit, task_result, task_status
 
 PUBLIC_COMMANDS = (
+    "doctor",
     "handoff",
     "result-submit",
     "task-status",
@@ -42,21 +43,21 @@ PUBLIC_COMMANDS = (
     "resume-task",
     "reset-completion",
     "recover-completion",
-    "doctor",
     "reconcile-dispatch",
     "identity",
 )
 
 _COMMAND_HELP: dict[str, str] = {
-    "handoff": "Dispatch task to worker (sync or async)",
-    "result-submit": "Worker submits result to Registry",
-    "task-status": "Read task Registry snapshot",
-    "task-result": "Read task result fields",
-    "resume-task": "Claim and prompt requester after result (§9.3)",
-    "reset-completion": "Reset completion for retry (§9.14)",
-    "recover-completion": "Reset then resume completion when eligible",
-    "reconcile-dispatch": "Recover stale dispatch (§6.12)",
-    "identity": "Manage repository identity UUID (init or show)",
+    "doctor": "環境診断を実行（JSON を標準出力に出力。HERDR_ENV≠1 の場合は終了コード 1）",
+    "handoff": "Worker エージェントへタスクを委託（同期または非同期）",
+    "result-submit": "Worker がタスク結果を Registry に提出",
+    "task-status": "Task Registry のスナップショットを取得",
+    "task-result": "タスクの結果フィールドを取得",
+    "resume-task": "結果確認後、Requester の completion を再開してプロンプト",
+    "reset-completion": "再試行のために completion 状態をリセット",
+    "recover-completion": "再開可能な場合に completion をリセットして自動再開",
+    "reconcile-dispatch": "応答のない未確定 dispatch を安全に復旧",
+    "identity": "リポジトリ識別子（Repository Identity UUID）を管理（init または show）",
 }
 
 
@@ -241,53 +242,90 @@ def _cmd_identity(ns: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="herdr-orchestrator",
-        description="Herdr Orchestrator public CLI (see docs/herdr-orchestrator-design.md)",
+        description="Herdr Orchestrator 公開 CLI",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    sub.add_parser(
-        "doctor",
-        help="Environment diagnostics (stdout JSON; exit 1 if HERDR_ENV≠1)",
-    )
-
     for name in PUBLIC_COMMANDS:
+        p = sub.add_parser(
+            name,
+            help=_COMMAND_HELP.get(name, name),
+            description=_COMMAND_HELP.get(name),
+        )
         if name == "doctor":
             continue
-        p = sub.add_parser(name, help=_COMMAND_HELP.get(name, name))
-        if name == "reconcile-dispatch":
-            p.add_argument("task_id", metavar="task.id")
-            p.add_argument("--dispatch-outcome", choices=("uncertain", "failed"))
-            p.add_argument("--dispatch-reason")
+        elif name == "reconcile-dispatch":
+            p.add_argument("task_id", metavar="task.id", help="対象タスクID")
+            p.add_argument(
+                "--dispatch-outcome",
+                choices=("uncertain", "failed"),
+                help="dispatch 確定結果のステータス",
+            )
+            p.add_argument(
+                "--dispatch-reason",
+                help="dispatch 結果の理由または説明",
+            )
         elif name == "handoff":
-            p.add_argument("--mode", required=True, choices=("sync", "async"))
+            p.add_argument(
+                "--mode",
+                required=True,
+                choices=("sync", "async"),
+                help="委託方式（sync: 完了待機, async: 即時返還）",
+            )
             p.add_argument(
                 "--worker-role",
                 required=True,
                 choices=("design", "reviewer", "implementer", "orchestrator"),
+                help="委託先 Worker の論理ロール",
             )
-            p.add_argument("--task-type", required=True)
-            p.add_argument("--instruction", required=True)
+            p.add_argument(
+                "--task-type",
+                required=True,
+                help="タスク種別（例: review, implementation）",
+            )
+            p.add_argument(
+                "--instruction",
+                required=True,
+                help="Worker への指示内容",
+            )
             p.add_argument(
                 "--result-wait-timeout-sec",
                 type=int,
                 default=30 * 60,
-                help="sync only: wait for terminal result (default 30m)",
+                help="sync モード時の結果待機タイムアウト秒（デフォルト: 1800秒 / 30分）",
             )
         elif name == "result-submit":
-            p.add_argument("task_id", nargs="?", metavar="task.id")
+            p.add_argument("task_id", nargs="?", metavar="task.id", help="対象タスクID")
             p.add_argument(
                 "--result-status",
                 required=True,
                 choices=("succeeded", "failed", "unavailable"),
+                help="タスク結果ステータス",
             )
-            p.add_argument("--result-ref", default=None)
-            p.add_argument("--summary", default=None)
+            p.add_argument(
+                "--result-ref",
+                default=None,
+                help="成果物への参照パスまたは URI",
+            )
+            p.add_argument(
+                "--summary",
+                default=None,
+                help="タスク結果の要約メッセージ",
+            )
         elif name == "identity":
             id_sub = p.add_subparsers(dest="identity_action", required=True)
-            id_sub.add_parser("init", help="Initialize or retrieve repository identity UUID")
-            id_sub.add_parser("show", help="Show registered repository identity UUID")
+            id_sub.add_parser(
+                "init",
+                help="リポジトリ固有の UUID を初期化または取得",
+                description="リポジトリ固有の UUID を初期化または取得",
+            )
+            id_sub.add_parser(
+                "show",
+                help="登録済みのリポジトリ UUID を表示",
+                description="登録済みのリポジトリ UUID を表示",
+            )
         else:
-            p.add_argument("task_id", nargs="?", metavar="task.id")
+            p.add_argument("task_id", nargs="?", metavar="task.id", help="対象タスクID")
 
     return parser
 
