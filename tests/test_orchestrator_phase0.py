@@ -97,16 +97,31 @@ class Phase0EnvGuardTests(unittest.TestCase):
                 proc = run_cli(cmd, "--help", env=self.env_without_herdr())
                 self.assertEqual(proc.returncode, 0, f"{cmd} --help failed: {proc.stderr}")
                 self.assertNotIn("§", proc.stdout, f"{cmd} help contains section number: {proc.stdout}")
+
+        # Verify identity subactions help
+        for action in ("init", "show"):
+            with self.subTest(identity_action=action):
+                proc = run_cli("identity", action, "--help", env=self.env_without_herdr())
+                self.assertEqual(proc.returncode, 0, f"identity {action} --help failed: {proc.stderr}")
+                self.assertNotIn("§", proc.stdout, f"identity {action} help contains section number: {proc.stdout}")
         
         # Verify specific option help messages in Japanese
         handoff_help = run_cli("handoff", "--help", env=self.env_without_herdr()).stdout
+        self.assertIn("Worker エージェントへタスクを委託", handoff_help)
         self.assertIn("委託方式", handoff_help)
         self.assertIn("Worker の論理ロール", handoff_help)
         self.assertIn("タスク種別", handoff_help)
 
         submit_help = run_cli("result-submit", "--help", env=self.env_without_herdr()).stdout
+        self.assertIn("Worker がタスク結果を Registry に提出", submit_help)
         self.assertIn("対象タスクID", submit_help)
         self.assertIn("タスク結果ステータス", submit_help)
+
+        identity_init_help = run_cli("identity", "init", "--help", env=self.env_without_herdr()).stdout
+        self.assertIn("リポジトリ固有の UUID を初期化または取得", identity_init_help)
+
+        identity_show_help = run_cli("identity", "show", "--help", env=self.env_without_herdr()).stdout
+        self.assertIn("登録済みのリポジトリ UUID を表示", identity_show_help)
 
     def test_doctor_without_herdr_env_skips_herdr_cli(self) -> None:
         proc = run_cli("doctor", env=self.env_without_herdr())

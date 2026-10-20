@@ -247,7 +247,11 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     for name in PUBLIC_COMMANDS:
-        p = sub.add_parser(name, help=_COMMAND_HELP.get(name, name))
+        p = sub.add_parser(
+            name,
+            help=_COMMAND_HELP.get(name, name),
+            description=_COMMAND_HELP.get(name),
+        )
         if name == "doctor":
             continue
         elif name == "reconcile-dispatch":
@@ -310,8 +314,16 @@ def build_parser() -> argparse.ArgumentParser:
             )
         elif name == "identity":
             id_sub = p.add_subparsers(dest="identity_action", required=True)
-            id_sub.add_parser("init", help="リポジトリ固有の UUID を初期化または取得")
-            id_sub.add_parser("show", help="登録済みのリポジトリ UUID を表示")
+            id_sub.add_parser(
+                "init",
+                help="リポジトリ固有の UUID を初期化または取得",
+                description="リポジトリ固有の UUID を初期化または取得",
+            )
+            id_sub.add_parser(
+                "show",
+                help="登録済みのリポジトリ UUID を表示",
+                description="登録済みのリポジトリ UUID を表示",
+            )
         else:
             p.add_argument("task_id", nargs="?", metavar="task.id", help="対象タスクID")
 
