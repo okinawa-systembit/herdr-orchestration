@@ -19,9 +19,12 @@ herdr-orchestrator --help
 
 ---
 
-## 2. Codex 承認設定（execpolicy）
+## 2. Codex 承認設定（任意・設定例）
 
-Codex Agent が `herdr-orchestrator` を自律的に実行できるようにするため、`~/.codex/rules/default.rules` への承認ルールの追加を推奨しています。
+herdr-orchestration は複数の Agent（Codex、Cursor、Antigravity 等）での利用を想定しています。  
+本節は、**Codex Agent を利用する場合のみの任意設定例（テンプレート）**です。Codex を利用しない場合は設定不要であり、Codex CLI のインストールも本ツールの必須要件ではありません。プロジェクト全体の CI やテスト要件にも含まれません。
+
+Codex Agent が `herdr-orchestrator` を自律的に実行する際の承認プロンプトによる中断を防ぐため、`~/.codex/rules/default.rules` への承認ルールの追加設定例を提供しています。
 
 設定用テンプレート: [codex-execpolicy-snippet.rules](codex-execpolicy-snippet.rules)
 
@@ -52,9 +55,9 @@ Codex Agent が `herdr-orchestrator` を自律的に実行できるようにす�
    - 通常配布（標準）: `/home/<user>/.agents/skills/herdr-orchestration`
    - Cursor レガシー: `/home/<user>/.cursor/skills/herdr-orchestrator`
 
-### 2.3 設定の検証方法
+### 2.3 設定の検証方法（Codex 利用者向けの任意手順）
 
-`codex execpolicy check` コマンドを使用して、ルールが正しく適用されているか検証できます。
+Codex CLI が利用可能な環境では、`codex execpolicy check` コマンドを使用して、ルールが正しく適用されているか任意で検証できます。
 
 ```bash
 # 1. 診断・読み取り系（allow になることを確認）
