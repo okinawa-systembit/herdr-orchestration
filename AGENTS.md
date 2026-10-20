@@ -8,6 +8,8 @@
 
 sync handoff + `.review-inbox/` + `herdr-orchestrator` CLI: [repo-review](.agents/skills/repo-review/SKILL.md)。Finding起票・品質検証: [review-finding](.agents/skills/review-finding/SKILL.md)。汎用 handoff/復旧: [repo-workflow](.agents/skills/repo-workflow/SKILL.md)。
 
+Issue #61 の内部レビュー改善設計（実装承認待ち）: [内部レビュースキル改善 Phase 1 設計書](docs/reviews/REVIEW_SKILL_PHASE1_DESIGN.md)。
+
 ## Herdr Orchestrator のレビュー
 
 Herdr Orchestrator の設計書・実装・テスト仕様をレビューするときは、レビュー開始前に[エージェントレビューガイドライン](docs/herdr-agent-review-guidelines.md)を読み、その基準に従う。特に Herdr の公式仕様と独自設計を区別し、必要に応じて現行の公式資料・実機仕様を確認する。
