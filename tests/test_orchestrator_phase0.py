@@ -75,6 +75,38 @@ class Phase0EnvGuardTests(unittest.TestCase):
         proc = run_cli("--help", env=self.env_without_herdr())
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("handoff", proc.stdout)
+        self.assertIn("Herdr Orchestrator 公開 CLI", proc.stdout)
+        self.assertIn("Worker エージェントへタスクを委託", proc.stdout)
+        self.assertNotIn("§", proc.stdout)
+
+    def test_subcommands_help_japanese_and_no_section_numbers(self) -> None:
+        subcommands = [
+            "doctor",
+            "handoff",
+            "result-submit",
+            "task-status",
+            "task-result",
+            "resume-task",
+            "reset-completion",
+            "recover-completion",
+            "reconcile-dispatch",
+            "identity",
+        ]
+        for cmd in subcommands:
+            with self.subTest(command=cmd):
+                proc = run_cli(cmd, "--help", env=self.env_without_herdr())
+                self.assertEqual(proc.returncode, 0, f"{cmd} --help failed: {proc.stderr}")
+                self.assertNotIn("§", proc.stdout, f"{cmd} help contains section number: {proc.stdout}")
+        
+        # Verify specific option help messages in Japanese
+        handoff_help = run_cli("handoff", "--help", env=self.env_without_herdr()).stdout
+        self.assertIn("委託方式", handoff_help)
+        self.assertIn("Worker の論理ロール", handoff_help)
+        self.assertIn("タスク種別", handoff_help)
+
+        submit_help = run_cli("result-submit", "--help", env=self.env_without_herdr()).stdout
+        self.assertIn("対象タスクID", submit_help)
+        self.assertIn("タスク結果ステータス", submit_help)
 
     def test_doctor_without_herdr_env_skips_herdr_cli(self) -> None:
         proc = run_cli("doctor", env=self.env_without_herdr())
