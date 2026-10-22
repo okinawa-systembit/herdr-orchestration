@@ -356,8 +356,9 @@ Issue #62 の受け入れ条件「完了済み・未完了・不確定な task �
    - `completion.status = failed` は requester への復帰配送が失敗した terminal 状態だが、`reset-completion` / `recover-completion` による対応余地があるため `open` に分類する。
    - `completion.status = uncertain` は復帰配送の成否が不明であるため、安全のため第1行で `uncertain` に分類する。
 4. **到達不能な4軸組み合わせ（状態不整合）の判定基準（不変条件リスト）**:
+   - **正本と位置付け**: 不変条件の正本は既存の Task Registry 状態遷移仕様（[§6.3](herdr-orchestrator/03-task-registry.md#sec-6-3)）および completion 仕様（[§9.13](herdr-orchestrator/05-completion-and-recovery.md#sec-9-13), [§9.14](herdr-orchestrator/05-completion-and-recovery.md#sec-9-14)）である。本節の不変条件 I1〜I7 は、正本仕様から導出した「診断用派生ルール」であり、独立した新たな状態管理の正本ではない。将来、主設計書の状態遷移仕様が改訂された場合は、本リストおよびテスト判定も合わせて見直し同期する。
    - canonical schema の `validate_loaded_task()` は各軸の Enum 値と `validate_mode_action_consistency` を検査するが、状態遷移マトリクスの全組み合わせ整合までは拘束しない。
-   - クラッシュや外部手動改変等により、状態遷移マトリクス（[§6.3](herdr-orchestrator/03-task-registry.md#sec-6-3)）および completion 仕様（[§9.13](herdr-orchestrator/05-completion-and-recovery.md#sec-9-13), [§9.14](herdr-orchestrator/05-completion-and-recovery.md#sec-9-14)）に反する状態不整合が存在する場合、schema 上はロード可能なため anomaly（exit 3）とはせず一覧に含めつつ、`overview.warnings` に `"inconsistent_state_combination"` を付与する。
+   - クラッシュや外部手動改変等により、状態遷移仕様に反する状態不整合が存在する場合、schema 上はロード可能なため anomaly（exit 3）とはせず一覧に含めつつ、`overview.warnings` に `"inconsistent_state_combination"` を付与する。
    - **判定に用いる不変条件リスト（以下のいずれかに違反した場合に warning 付与）**:
      - **I1（初回作成と配送）**: `dispatch.status = pending` ⇔ `task.status = created`
      - **I2（未完了タスクの結果待ち）**: `task.status ∈ {created, in_progress, unknown}` ⇒ `result.status = pending`
@@ -378,10 +379,11 @@ Issue #62 の受け入れ条件「完了済み・未完了・不確定な task �
      - 遅延 result 到達時: `dispatch=uncertain`, `task=succeeded|failed`, `result=succeeded|failed` は I1〜I7 すべてを満たし warning 対象外。
      - worker unavailable: `task=failed`, `dispatch=sent`, `result=unavailable` は I1〜I7 を満たし warning 対象外。
      - completion リセット後: `reset-completion` により `completion.status` が `pending` に戻った状態も I1〜I7 を満たし warning 対象外。
-   - **状態分類（`overview.state`）の決定**:
-     - 不整合が検出された場合でも、`overview.state` は安全側に倒し、判定表の優先順位（1: `uncertain` → 2: `open` → 3: `closed`）に従って機械的・決定的に判定する（未完了軸が1つでも残っていれば `open` または `uncertain` となる）。
+   - **状態分類（`overview.state`）と警告優先の運用方針**:
+     - `overview.state` は既存の 3 分類（`uncertain` / `open` / `closed`）を維持し、判定表の優先順位（1: `uncertain` → 2: `open` → 3: `closed`）に従って機械的に決定する。
+     - **不整合 Task の正常完了扱いの禁止**: `overview.warnings` に `inconsistent_state_combination` が付与された Task は、仮に `overview.state` が `closed` であっても **「正常完了」として扱ってはならない**。Agent は `overview.state` だけでなく必ず `overview.warnings` を確認し、警告がある Task は状態不整合の要確認対象として扱う（[§7.1](#71-想定手順)）。
 5. **注意点**:
-   - `closed` は「Orchestrator 上の処理が終わった」ことを示し、タスクの成功を意味しない。成否は `task.status` / `result.status` で確認する。
+   - `closed` は「Orchestrator 上の処理が終わった」ことを示し、タスクの成功を意味しない。また、warnings に状態不整合（`inconsistent_state_combination`）がある場合は正常完了とはみなさない。成否・健全性は `task.status` / `result.status` / `overview.warnings` で確認する。
    - `open` であっても worker が現在稼働中とは限らない。`task.status=in_progress` のまま worker が失われている可能性がある（[§7](#7-クラッシュ後の利用シナリオ)）。
    - 分類規則を変更する場合は `list_format_version` を上げる。
 
@@ -586,22 +588,24 @@ Registry 外の主体が非 atomic に直接書き込んだ途中のファイル
 7. **切り詰めと並行変更の確認**:
    - `truncated=true` の場合、Agent は最大件数で切り詰められている旨を利用者へ報告する。対象 task が見当たらない場合、`truncated=false` でない限り不存在と断定せず、`--limit` を増やすかフィルタ条件（`--status` 等）で絞り込んで再実行する。
    - `concurrent_changes` に削除記録がある場合、並行クリーンアップ等の影響を考慮する。
-8. **未完了・不確定 task の詳細確認**:
-   - `overview.state` が `open` / `uncertain` の task について `task-status <task-id>` / `task-result <task-id>` で詳細を確認する。
+8. **`overview.warnings` と未完了・不確定 task の詳細確認**:
+   - 各 task について `overview.warnings` を必ず確認する。`inconsistent_state_combination` の警告が付与された task は、`overview.state` が `closed` であっても **正常完了とみなしてはならない**。`created_at_unparseable` のみを持つ task は、状態遷移自体に問題はないがソート順が不確定な旨を把握しておく。
+   - `overview.state` が `open` / `uncertain` の task、および `overview.warnings` が空でない task について `task-status <task-id>` / `task-result <task-id>` で詳細を確認する。
 9. **報告と判断**:
-   - 確定済み・未完了・不確定の task を利用者へ報告する。
+   - 確定済み（`inconsistent_state_combination` 警告なしの `closed`。`created_at_unparseable` がある場合はソート順不確かの注記を添える）・未完了（`open`）・不確定（`uncertain`）・状態不整合（`inconsistent_state_combination` 警告あり）の各 task を利用者へ報告する。
    - 利用者の判断または既存の運用ルールに従い、継続（`result-submit` 待ち・`recover-completion` 等）・放棄・新規 handoff を選ぶ。
 
 ### 7.2 分類ごとの読み方
 
-| 典型的な状態                                                      | `overview.state` | 次の確認・操作（すべて人間または明示的な判断を経る）                                                                                 |
-| ----------------------------------------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `task=created`, `dispatch=pending`                                | `open`           | `doctor` の stale dispatch 候補と照合し、[§6.12](herdr-orchestrator/03-task-registry.md#sec-6-12) の `reconcile-dispatch` を検討     |
-| `task=in_progress`, `dispatch=sent`, `result=pending`             | `open`           | worker の生存・成果物を確認。worker 消失時は [§10.2](herdr-orchestrator/06-results-and-workflows.md#sec-10-2) の再登録または人間判断 |
-| `task=unknown`, `dispatch=uncertain`                              | `uncertain`      | blind resend しない。worker 側の痕跡・成果物を確認                                                                                   |
-| `task=succeeded`, `completion=pending` / `processing` / `failed`  | `open`           | `recover-completion` / `resume-task` を検討（[§9](herdr-orchestrator/05-completion-and-recovery.md#sec-9)）                          |
-| `completion=uncertain`                                            | `uncertain`      | requester への到達を確認してから `reset-completion` を検討                                                                           |
-| `task=succeeded/failed`, `completion=not_applicable/sent/skipped` | `closed`         | 必要なら `task-result` で成果物を確認                                                                                                |
+| 典型的な状態                                                                  | `overview.state`                    | 次の確認・操作（すべて人間または明示的な判断を経る）                                                                                 |
+| ----------------------------------------------------------------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `task=created`, `dispatch=pending`                                            | `open`                              | `doctor` の stale dispatch 候補と照合し、[§6.12](herdr-orchestrator/03-task-registry.md#sec-6-12) の `reconcile-dispatch` を検討     |
+| `task=in_progress`, `dispatch=sent`, `result=pending`                         | `open`                              | worker の生存・成果物を確認。worker 消失時は [§10.2](herdr-orchestrator/06-results-and-workflows.md#sec-10-2) の再登録または人間判断 |
+| `task=unknown`, `dispatch=uncertain`                                          | `uncertain`                         | blind resend しない。worker 側の痕跡・成果物を確認                                                                                   |
+| `task=succeeded`, `completion=pending` / `processing` / `failed`              | `open`                              | `recover-completion` / `resume-task` を検討（[§9](herdr-orchestrator/05-completion-and-recovery.md#sec-9)）                          |
+| `completion=uncertain`                                                        | `uncertain`                         | requester への到達を確認してから `reset-completion` を検討                                                                           |
+| `task=succeeded/failed`, `completion=not_applicable/sent/skipped`（警告なし） | `closed`                            | 処理完結済み。必要なら `task-result` で成果物を確認                                                                                  |
+| `overview.warnings` に `inconsistent_state_combination` あり                  | 判定表どおり（`closed` もあり得る） | **正常完了とみなさない**。`task-status` 等で詳細を確認し、人間へ状態不整合を報告して手動判断・再実行を仰ぐ                           |
 
 ### 7.3 重要な制約
 
@@ -619,6 +623,7 @@ Registry 外の主体が非 atomic に直接書き込んだ途中のファイル
 
 | 対象                                                                       | 更新内容                                                                                                                                                                      |
 | -------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [§6.3 状態遷移マトリクス](herdr-orchestrator/03-task-registry.md#sec-6-3)  | 本コマンドの診断用不変条件 I1〜I7（[§4.4](#44-派生分類-overviewstate)）の正本。将来の本節改訂時に task-list 側の I1〜I7 とテストを見直す旨の注記を追加（実装時）              |
 | [§6.5 Public CLI Contract](herdr-orchestrator/03-task-registry.md#sec-6-5) | 表に `task-list` 行を追加（入力: フィルタ・`limit`、副作用: none、出力: 一覧 JSON、終了コード: 0 / 1 / 2 / 3。exit 3 は部分成功専用コードとして新設）。詳細は本設計書へリンク |
 | [設計書の目次](herdr-orchestrator-design.md)                               | 「機能設計・改訂案」に本設計書を追加                                                                                                                                          |
 | `skills/herdr-orchestrator/SKILL.md` / `references/public-cli.md`          | 読み取り系コマンドとして `task-list` を追記。クラッシュ後の確認手順に [§7.1](#71-想定手順) を要約して記載                                                                     |
@@ -671,7 +676,7 @@ Registry 外の主体が非 atomic に直接書き込んだ途中のファイル
 - `overview.state` の判定表（[§4.4](#44-派生分類-overviewstate)）の全条件（`uncertain` / `open` / `closed`）、`dispatch.status=uncertain` の結果到達前後の遷移。
 - 不変条件 I1〜I7 の検証:
   - 正当到達ケース（遅延 result、worker unavailable、reset 後 pending）で `inconsistent_state_combination` が付与されないこと。
-  - 各不変条件（I1〜I7）への違反ケースで `overview.warnings` に `inconsistent_state_combination` が付与され、優先順位に従って安全側に分類されること。
+  - 各不変条件（I1〜I7）への違反ケースで `overview.warnings` に `inconsistent_state_combination` が付与され、判定表どおりに分類されること（I5 違反等で `closed` に分類される場合でも警告が付与されることを含む）。
 - lock / handoff.lock / 一時ファイル / cleanup stamp / 無関係ファイルが一覧にも anomaly にも現れない。
 
 ### 10.2 異常系
