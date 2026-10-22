@@ -7,7 +7,7 @@ from typing import Any
 
 from orchestrator.errors import emit_error
 from orchestrator.registry.errors import RegistryError
-from orchestrator.registry.listing import read_task_candidates, verify_registry_directory
+from orchestrator.registry.listing import read_task_candidates
 
 
 def _parse_registry_timestamp(raw: str) -> datetime | None:
@@ -186,9 +186,9 @@ def run_task_list(
 
     listed_at = datetime.now(timezone.utc).isoformat()
 
-    # 2. Verify registry directory safety
+    # 2. Open verified tasks directory and read candidates via dir_fd (R62-08)
     try:
-        registry_exists = verify_registry_directory()
+        registry_exists, valid_docs, anomalies, concurrent_changes = read_task_candidates()
     except RegistryError as exc:
         emit_error(exc.code, retryable=False, message=exc.message)
 
@@ -217,12 +217,6 @@ def run_task_list(
             "concurrent_changes": [],
         }
         return payload, 0
-
-    # 3. Read candidates safely
-    try:
-        valid_docs, anomalies, concurrent_changes = read_task_candidates()
-    except RegistryError as exc:
-        emit_error(exc.code, retryable=False, message=exc.message)
 
     matched_tasks: list[tuple[datetime | None, str, dict[str, Any]]] = []
 

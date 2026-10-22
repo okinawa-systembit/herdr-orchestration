@@ -428,30 +428,30 @@ tasks ディレクトリの直下エントリを `os.scandir()` で列挙し、�
 | `code`     | 下表のいずれか                                                                                                  |
 | `message`  | 原因の短い説明。`RegistryError.message` または OSError の `strerror` を用い、**ファイル内容の断片を含めない**   |
 
-| `code`               | 条件                                                                                                            |
-| -------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `invalid_filename`   | ファイル名 stem が `task_<uuidv4>` 形式でない                                                                   |
-| `unsafe_entry`       | symlink、通常ファイル以外、所有者が現在ユーザーでない（[§6.9](herdr-orchestrator/03-task-registry.md#sec-6-9)） |
-| `read_error`         | `open` / `read` が `ENOENT` 以外の OSError で失敗（権限不足など）                                               |
-| `invalid_encoding`   | UTF-8 として復号できない                                                                                        |
-| `invalid_json`       | JSON として解析できない、またはルートがオブジェクトでない                                                       |
-| `unsupported_schema` | `schema_version` が `1` でない                                                                                  |
-| `invalid_schema`     | `validate_loaded_task()` が `invalid_schema` / `invalid_task_id` で失敗                                         |
-| `task_id_mismatch`   | 内容の `task.id` がファイル名 stem と一致しない                                                                 |
+| `code`               | 条件                                                                                                               |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `invalid_filename`   | ファイル名 stem が `task_<uuidv4>` 形式でない                                                                      |
+| `unsafe_entry`       | symlink、通常ファイル以外、所有者が現在ユーザーでない（[§6.9](herdr-orchestrator/03-task-registry.md#sec-6-9)）    |
+| `read_error`         | `open` / `read` が `ENOENT` 以外の OSError で失敗（権限不足など）、またはファイルサイズが最大許容上限（1MB）を超過 |
+| `invalid_encoding`   | UTF-8 として復号できない                                                                                           |
+| `invalid_json`       | JSON として解析できない、またはルートがオブジェクトでない                                                          |
+| `unsupported_schema` | `schema_version` が `1` でない                                                                                     |
+| `invalid_schema`     | `validate_loaded_task()` が `invalid_schema` / `invalid_task_id` で失敗                                            |
+| `task_id_mismatch`   | 内容の `task.id` がファイル名 stem と一致しない                                                                    |
 
 ### 5.3 task 候補の読み取り手順
 
 ```text
-1. os.open(path, O_RDONLY | O_NOFOLLOW)            # symlink を開かない（ELOOP → unsafe_entry）
+1. os.open(name, O_RDONLY | O_NOFOLLOW | O_NONBLOCK, dir_fd=tasks_fd)  # 検証済み tasks_fd に対して相対オープン（TOCTOU競合窓防止）
    ENOENT → concurrent_changes へ記録して次へ
-2. os.fstat(fd) で通常ファイル・所有者 uid を検証   # 開いた inode 自体を検証する
-3. fd から全量を読み、UTF-8 で復号、json.loads
+2. os.fstat(fd) で通常ファイル・所有者 uid・ファイルサイズ（<= 1MB）を検証  # 開いた inode 自体を検証する
+3. fd から最大 1MB までバイト列を読み取り、UTF-8 で復号、json.loads
 4. ルートがオブジェクトであること、schema_version、validate_loaded_task()
 5. task.id とファイル名 stem の一致
 6. フィルタ判定・射影・overview 計算
 ```
 
-`validate_loaded_task()` は既存の検証ロジックをそのまま再利用し、`task-status` と同じ基準で「正常な task」を判定する。一方 `read_task_document_unlocked()` は path ベースの `is_symlink()` 検査と `read_text()` の間に競合窓があり、内部で `ensure_registry_layout()` を経由する呼び出し経路もあるため、`task-list` では使わずに上記の fd ベース読み取りを新設する。
+`validate_loaded_task()` は既存の検証ロジックをそのまま再利用し、`task-status` と同じ基準で「正常な task」を判定する。一方 `read_task_document_unlocked()` は path ベースの `is_symlink()` 検査と `read_text()` の間に競合窓があり、内部で `ensure_registry_layout()` を経由する呼び出し経路もあるため、`task-list` では使わずに上記の fd ベース読み取りを新設する。また、悪意のある極大ファイルやクラッシュ時の肥大化ファイルからプロセスを保護するため、読み取りサイズ上限を 1MB（1,048,576 バイト）と定め、超過時は `read_error` の anomaly として記録する。
 
 ### 5.4 フィルタとの関係
 
@@ -491,7 +491,7 @@ anomaly となったエントリは内容を信頼できず、所属 repository 
 | `herdr_env_required`   | `HERDR_ENV=1` でない（既存 `HerdrEnvError` の code に従う）                                                                                                                         | `false`     |
 | `invalid_input`        | `--worktree` が相対 path                                                                                                                                                            | `false`     |
 | `registry_unsafe_path` | tasks ディレクトリまたはその親（`herdr-orchestrator/`）が symlink・ディレクトリでない・所有者不一致・group/world writable（[§6.9](herdr-orchestrator/03-task-registry.md#sec-6-9)） | `false`     |
-| `registry_unreadable`  | tasks ディレクトリの列挙（`scandir`）が OSError で失敗                                                                                                                              | `false`     |
+| `registry_unreadable`  | tasks ディレクトリまたはその親を開けない（symlink 以外の OSError。権限不足など）、または列挙（`scandir`）が OSError で失敗                                                          | `false`     |
 
 これらの場合は一覧 JSON を出さず、既存の `{"error": ..., "retryable": ..., "message": ...}` 形式で exit 1 とする。Registry ディレクトリ自体を信頼できない状態で部分的な一覧を返すと、利用側が誤って「該当 task なし」と判断し得るためである。
 
@@ -513,17 +513,26 @@ anomaly となったエントリは内容を信頼できず、所属 repository 
 
 ### 6.2 Registry ディレクトリの読み取り
 
-`ensure_registry_layout()` は作成・`chmod` を伴うため使わない。`listing.py` に副作用のない検証関数を用意する。
+`ensure_registry_layout()` は作成・`chmod` を伴うため使わない。`listing.py` に副作用のない安全な読み取り処理を用意する。
+ディレクトリ検証と列挙・ファイルオープンの間での置換攻撃や TOCTOU 競合窓（R62-08）を完全に排除するため、ファイルディスクリプタ（`dir_fd`）を保持して相対オープンを行う。なお、`state_parent`（`~/.local/state`）は既存 writer と同様にパスベースで事前検証する。
 
 ```text
 1. paths.tasks_dir() で tasks ディレクトリを得る
-2. tasks ディレクトリが存在しない（lstat が ENOENT）
-     → registry.exists=false、tasks=[]、complete=true、exit 0
-3. 親 herdr-orchestrator/ と tasks ディレクトリについて lstat で次を検証
-     - symlink でない / ディレクトリである / 所有者が現在ユーザー / group・world writable でない
-   不一致 → registry_unsafe_path（exit 1）
-4. os.scandir(tasks_dir) で直下エントリを列挙
+2. 親 herdr-orchestrator/ を O_RDONLY | O_DIRECTORY | O_NOFOLLOW でオープン
+   ENOENT → registry.exists=false、tasks=[]、complete=true、exit 0
+   O_NOFOLLOW により symlink を拒否（ELOOP/ENOTDIR → registry_unsafe_path）
+   開いた fd の fstat でディレクトリであること・所有者が現在ユーザー・group/world writable でないことを検証
+   違反時 → registry_unsafe_path（exit 1）
+   EACCES 等の権限不足エラー時 → registry_unreadable（exit 1）
+3. 親 fd から tasks ディレクトリを dir_fd を指定してオープン
+   ENOENT → registry.exists=false、tasks=[]、complete=true、exit 0
+   O_NOFOLLOW により symlink を拒否（ELOOP/ENOTDIR → registry_unsafe_path）
+   開いた fd の fstat でディレクトリであること・所有者が現在ユーザー・group/world writable でないことを検証
+   違反時 → registry_unsafe_path（exit 1）
+   EACCES 等の権限不足エラー時 → registry_unreadable（exit 1）
+4. 検証済み tasks_fd に対して直接 os.scandir(tasks_fd) を行いエントリを列挙
    OSError → registry_unreadable（exit 1）
+5. 各 task 候補ファイルも検証済み tasks_fd に対する dir_fd 相対オープンで開く（§5.3）
 ```
 
 検証条件は既存 `_assert_private_directory()` と同等とし、判定ロジックを共通化する場合も **作成・`chmod` を行わない経路** を分離する。

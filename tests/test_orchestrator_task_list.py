@@ -646,6 +646,23 @@ class OrchestratorTaskListTests(unittest.TestCase):
         finally:
             os.chmod(self.tasks_dir, 0o700)
 
+    def test_registry_directory_unreadable_on_permission_denied(self) -> None:
+        """When tasks directory has no read permissions (mode 000), return registry_unreadable (E-1 fix)."""
+        if hasattr(os, "geteuid") and os.geteuid() == 0:
+            self.skipTest("root user ignores permission bits")
+
+        self.tasks_dir.mkdir(parents=True, exist_ok=True)
+        os.chmod(self.state_home, 0o700)
+        os.chmod(self.tasks_dir.parent, 0o700)
+        os.chmod(self.tasks_dir, 0o000)
+        try:
+            proc = self.run_cli("task-list")
+            self.assertEqual(proc.returncode, 1)
+            data = json.loads(proc.stdout)
+            self.assertEqual(data["error"], "registry_unreadable")
+        finally:
+            os.chmod(self.tasks_dir, 0o700)
+
     def test_concurrent_changes_removed(self) -> None:
         """When an entry disappears between scandir and open (ENOENT), record in concurrent_changes and keep complete=True."""
         from orchestrator.list_commands import run_task_list
@@ -737,6 +754,35 @@ class OrchestratorTaskListTests(unittest.TestCase):
         data = json.loads(proc.stdout)
         anom = next(a for a in data["anomalies"] if a["file"] == f"task_{uuid_no_task}.json")
         self.assertEqual(anom["code"], "invalid_schema")
+
+
+    def test_file_size_exceeding_limit_recorded_as_read_error(self) -> None:
+        """Task file exceeding 1MB limit must be recorded as read_error anomaly (R62-09)."""
+        uuid_valid = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+        uuid_huge = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        self.tasks_dir.mkdir(parents=True, exist_ok=True)
+        os.chmod(self.state_home, 0o700)
+        os.chmod(self.tasks_dir.parent, 0o700)
+        os.chmod(self.tasks_dir, 0o700)
+
+        # 1. Valid task
+        doc_valid = _make_canonical_task_doc(task_id=f"task_{uuid_valid}")
+        self.write_task_file(f"task_{uuid_valid}", doc_valid)
+
+        # 2. Huge file (> 1MB)
+        huge_bytes = b"x" * (1024 * 1024 + 100)
+        (self.tasks_dir / f"task_{uuid_huge}.json").write_bytes(huge_bytes)
+
+        proc = self.run_cli("task-list")
+        self.assertEqual(proc.returncode, 3)
+        data = json.loads(proc.stdout)
+        self.assertFalse(data["complete"])
+        self.assertEqual(data["returned"], 1)
+        self.assertEqual(data["tasks"][0]["task"]["id"], f"task_{uuid_valid}")
+
+        huge_anom = next(a for a in data["anomalies"] if a["file"] == f"task_{uuid_huge}.json")
+        self.assertEqual(huge_anom["code"], "read_error")
+        self.assertIn("exceeds maximum allowed limit", huge_anom["message"])
 
 
 if __name__ == "__main__":
