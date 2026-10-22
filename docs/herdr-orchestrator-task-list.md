@@ -1,7 +1,7 @@
 # Herdr Orchestrator Task 一覧参照コマンド `task-list` 設計書
 
 - **対象 Issue**: [#62 — Task Registry一覧参照コマンド task-list の追加](https://github.com/okinawa-systembit/herdr-orchestration/issues/62)
-- **ステータス**: 実装前設計案
+- **ステータス**: 承認済み（外部レビュー GO）
 - **関連 Issue**: [#61 — レビューSkillのPhase 1改善](https://github.com/okinawa-systembit/herdr-orchestration/issues/61)（クラッシュ後の状態確認で本コマンドを利用する想定）
 - **関連ドキュメント**:
   - [03-task-registry.md](herdr-orchestrator/03-task-registry.md#sec-6) (§6: Task Registry / Canonical Schema / 4軸状態遷移)

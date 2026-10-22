@@ -5,7 +5,7 @@
 # Codex Agent が Herdr Orchestrator を自律実行する際の承認プロンプトを制御します。
 #
 # 【許可方針の分類と設計意図】
-# 1. 診断・読み取り系 (doctor, task-status, task-result, identity show):
+# 1. 診断・読み取り系 (doctor, task-status, task-result, task-list, identity show):
 #    - 副作用のない安全な情報参照コマンドとして自動許可 (allow) します。
 #    - ※ identity init は Git 設定変更を伴うため自動許可に含めません。
 # 2. 自動化のための書き込み例外 (result-submit):
@@ -21,7 +21,7 @@
 # ==============================================================================
 
 # --- 1. 診断・読み取り系 (PATH 経由: ~/.local/bin -> ~/.agents/skills/...) ---
-prefix_rule(pattern=["herdr-orchestrator", ["doctor", "task-status", "task-result"]], decision="allow", justification="Orchestrator CLI on PATH: Read-only diagnostics and status checks")
+prefix_rule(pattern=["herdr-orchestrator", ["doctor", "task-status", "task-result", "task-list"]], decision="allow", justification="Orchestrator CLI on PATH: Read-only diagnostics and status checks")
 prefix_rule(pattern=["herdr-orchestrator", "identity", "show"], decision="allow", justification="Orchestrator CLI on PATH: Read-only repository identity inspection (identity init is intentionally excluded)")
 
 # --- 2. 自動化のための書き込み例外 (PATH 経由) ---
@@ -32,7 +32,7 @@ prefix_rule(pattern=["herdr-orchestrator", "result-submit"], decision="allow", j
 # --- 3. 絶対パスフォールバック (Agent が PATH ではなく絶対パスで実行する場合用) ---
 # ※ GLOBAL_INSTALL_ABS を実際のインストール先ディレクトリに置換して利用してください。
 #   例: /home/<user>/.agents/skills/herdr-orchestration
-prefix_rule(pattern=["GLOBAL_INSTALL_ABS/scripts/herdr-orchestrator", ["doctor", "task-status", "task-result"]], decision="allow", justification="Orchestrator CLI absolute path fallback: Read-only diagnostics and status checks")
+prefix_rule(pattern=["GLOBAL_INSTALL_ABS/scripts/herdr-orchestrator", ["doctor", "task-status", "task-result", "task-list"]], decision="allow", justification="Orchestrator CLI absolute path fallback: Read-only diagnostics and status checks")
 prefix_rule(pattern=["GLOBAL_INSTALL_ABS/scripts/herdr-orchestrator", "identity", "show"], decision="allow", justification="Orchestrator CLI absolute path fallback: Read-only repository identity inspection")
 prefix_rule(pattern=["GLOBAL_INSTALL_ABS/scripts/herdr-orchestrator", "result-submit"], decision="allow", justification="Orchestrator CLI absolute path fallback: Automated worker result submission and completion triggering")
 

@@ -6,23 +6,23 @@
 
 ## 実装範囲と進め方
 
-- 対象は [§4 の初期4 role](herdr-orchestrator/02-roles-and-task-contract.md#sec-4) を使う MVP。専任 `tester` / `researcher`、task cancellation CLI、`task-list` は初期実装に含めない。
+- 対象は [§4 の初期4 role](herdr-orchestrator/02-roles-and-task-contract.md#sec-4) を使う MVP。専任 `tester` / `researcher`、task cancellation CLI は初期実装に含めない（`task-list` は Issue #62 にて段階 3 の追加機能として実装）。
 - 中央 Skill と wrapper のソースを、このリポジトリの `skills/herdr-orchestrator/` に置く。[§14 の構成](herdr-orchestrator/07-skill-and-implementation.md#sec-14) に従い、`SKILL.md`、`scripts/herdr-orchestrator`、`scripts/task-registry.py`、`references/` を用意する。既存のリポジトリ固有 Skill への導入は最終段階で行う。
 - Python 3.10 と標準ライブラリを基準にし、Herdr の操作仕様は利用中の公式 CLI / Skill で確認する（[§14.3](herdr-orchestrator/07-skill-and-implementation.md#sec-14-3)、[§20.2](herdr-orchestrator/09-maintenance-and-roadmap.md#sec-20-2)）。
 - 下表の順に実装し、各段階の完了ゲートを満たしてから次へ進む。各段階では、その機能に関係する [§18 の検証項目](herdr-orchestrator/08-adoption-and-verification.md#sec-18) を自動テストまたは実機確認に対応付け、結果を記録する。
 - Agent への実送信を伴う試験は、テスト用の repository / worktree と Agent で行う。`uncertain` の自動再送、Registry JSON の直接編集、未検証の別 target への fallback は行わない（[§6](herdr-orchestrator/03-task-registry.md#sec-6)、[§11.4](herdr-orchestrator/06-results-and-workflows.md#sec-11-4)）。
 
-| 順序 | 実装単位                        | 主な成果物                                         | 完了ゲート                                                                                                                                    |
-| ---- | ------------------------------- | -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0    | 実行基盤と仕様確認              | Skill / CLI の骨格、テスト環境                     | 利用中 Herdr と公開 API を確認し、CLI が安全に失敗する                                                                                        |
-| 1    | role・repository・worktree 解決 | 共通の名前生成と context 検証                      | 同一入力が同一 identity に解決され、曖昧な入力を拒否する                                                                                      |
-| 2    | Task Registry                   | schema v1、4軸遷移、atomic writer                  | 競合・不正遷移・path 攻撃でも Registry が壊れない                                                                                             |
-| 3    | 結果と読み取り CLI              | `task-status`、`task-result`、`result-submit`      | 正規 result のみ登録し、同一 payload の再登録が冪等になる                                                                                     |
-| 4    | handoff と sync 完了待ち        | `handoff`、worker 受信手順                         | 最小 prompt を送り、Registry の result 確定で sync が終了する                                                                                 |
-| 5    | dispatch 診断・復旧             | `doctor`、`reconcile-dispatch`                     | クラッシュ窓から未配送・結果不明を区別して復旧できる                                                                                          |
-| 6    | async completion・復旧          | requester 再開、`resume-task`、reset / recover     | result 確定後のみ claim し、重複入力を防ぐ                                                                                                    |
-| 7    | 中央 Skill と repository 接続   | `SKILL.md`、`references/`、repository 側の利用手順 | worker / requester が Registry を検証してから作業する                                                                                         |
-| 8    | 導入・移行・総合確認            | installer、移行手順、検証記録                      | [§18](herdr-orchestrator/08-adoption-and-verification.md#sec-18) と [§19](herdr-orchestrator/08-adoption-and-verification.md#sec-19) を満たす |
+| 順序 | 実装単位                        | 主な成果物                                                 | 完了ゲート                                                                                                                                    |
+| ---- | ------------------------------- | ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0    | 実行基盤と仕様確認              | Skill / CLI の骨格、テスト環境                             | 利用中 Herdr と公開 API を確認し、CLI が安全に失敗する                                                                                        |
+| 1    | role・repository・worktree 解決 | 共通の名前生成と context 検証                              | 同一入力が同一 identity に解決され、曖昧な入力を拒否する                                                                                      |
+| 2    | Task Registry                   | schema v1、4軸遷移、atomic writer                          | 競合・不正遷移・path 攻撃でも Registry が壊れない                                                                                             |
+| 3    | 結果と読み取り CLI              | `task-status`、`task-result`、`result-submit`、`task-list` | 正規 result のみ登録し、同一 payload の再登録が冪等になる。`task-list` により残存 task を安全に一覧参照できる                                 |
+| 4    | handoff と sync 完了待ち        | `handoff`、worker 受信手順                                 | 最小 prompt を送り、Registry の result 確定で sync が終了する                                                                                 |
+| 5    | dispatch 診断・復旧             | `doctor`、`reconcile-dispatch`                             | クラッシュ窓から未配送・結果不明を区別して復旧できる                                                                                          |
+| 6    | async completion・復旧          | requester 再開、`resume-task`、reset / recover             | result 確定後のみ claim し、重複入力を防ぐ                                                                                                    |
+| 7    | 中央 Skill と repository 接続   | `SKILL.md`、`references/`、repository 側の利用手順         | worker / requester が Registry を検証してから作業する                                                                                         |
+| 8    | 導入・移行・総合確認            | installer、移行手順、検証記録                              | [§18](herdr-orchestrator/08-adoption-and-verification.md#sec-18) と [§19](herdr-orchestrator/08-adoption-and-verification.md#sec-19) を満たす |
 
 ## 0. 実行基盤と仕様確認
 
@@ -53,8 +53,9 @@
 1. [§6.5](herdr-orchestrator/03-task-registry.md#sec-6-5) の `task-status` / `task-result` を実装し、`task.id` の厳格検証と安全な `result.ref` 解決を行う。
 2. [§10](herdr-orchestrator/06-results-and-workflows.md#sec-10) の Result Contract、submit 元の Agent / repository / worktree 検証、terminal result の冪等 replay を実装する。
 3. `dispatch=pending` の早着 `result-submit` は retryable に拒否し、同一 payload での bounded retry と reconcile 後の再登録を受けられるようにする（[§10.2](herdr-orchestrator/06-results-and-workflows.md#sec-10-2)）。
+4. [task-list 設計書](herdr-orchestrator-task-list.md) に従い、Task Registry の残存 task を読み取り専用で一覧取得する `task-list` を実装する（フィルタ、ソート、limit、`overview.state` 派生、不変条件 I1〜I7 診断警告、異常データ検出 exit 3）。
 
-**完了ゲート:** 正規結果、重複 submit、別 Agent / worktree、artifact 不在、path escape を検証する（[§18.3](herdr-orchestrator/08-adoption-and-verification.md#sec-18-3) の項目 19–22・59・63・67–68・78–80）。
+**完了ゲート:** 正規結果、重複 submit、別 Agent / worktree、artifact 不在、path escape、および `task-list` の正常系・異常系・並行変更・不変条件診断を検証する（[§18.3](herdr-orchestrator/08-adoption-and-verification.md#sec-18-3) の項目 19–22・59・63・67–68・78–80）。
 
 ## 4. Handoff と sync
 
