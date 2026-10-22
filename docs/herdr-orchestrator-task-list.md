@@ -373,6 +373,7 @@ Issue #62 の受け入れ条件「完了済み・未完了・不確定な task �
        - `completion.status ∈ {processing, sent, failed, uncertain}` ⇒ `result.status ∈ {succeeded, failed, unavailable}` ∧ `dispatch.status ∈ {sent, uncertain}`
      - **I7（MVP 未実装状態の検出）**:
        - `task.status = cancelled` は MVP では遷移イベントが無効（将来拡張用）であるため、検出された場合は warning 対象とする。
+     - ※ 本リストは違反時に確実に不整合と言える最小限の条件を定めたものであり、すべての到達不能な組み合わせを網羅的に検出するものではない（warning が付与されないことは 4軸の完全な整合を保証するものではない）。
    - **正当に到達し得るケース（誤判定してはならない正常状態）**:
      - 遅延 result 到達時: `dispatch=uncertain`, `task=succeeded|failed`, `result=succeeded|failed` は I1〜I7 すべてを満たし warning 対象外。
      - worker unavailable: `task=failed`, `dispatch=sent`, `result=unavailable` は I1〜I7 を満たし warning 対象外。
