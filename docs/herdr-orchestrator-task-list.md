@@ -142,6 +142,7 @@ herdr-orchestrator task-list [OPTIONS]
 1. **切り詰め通知**: `truncated=true` の場合、Agent は「取得結果が最大件数（`limit`）で切り詰められている」旨を利用者に報告する。
 2. **安易な不存在断定の禁止**: `truncated=false`（全件取得）でない限り、「対象の task が存在しない」と断定してはならない。
 3. **絞り込み・上限変更による再確認**: 目的の task が一覧に見当たらない場合、`--limit` を増やす（例: `--limit 500`）、または `--repository` / `--worktree` / `--type` / `--status` などのフィルタを指定して照合対象を絞り込んで再実行する。MVP でのページング機能は提供しない。
+4. **上限 1000 件超過時の人間へのエスカレーション**: フィルタで最大限絞り込んでも一致件数が `--limit` の最大値（1000 件）を超え、目的の task が切り詰めから漏れている可能性がある場合、Agent は独断で不存在と判断せず、利用者（人間）に対象 task の ID または詳細条件を報告して指示を仰ぐ。必要に応じて将来拡張（[§9.2](#92-将来拡張の候補)）の `--since` やページングの導入、または手動調査を検討する。
 
 ### 3.5 出力形式
 
@@ -354,11 +355,30 @@ Issue #62 の受け入れ条件「完了済み・未完了・不確定な task �
 3. **`completion.status` の扱い**:
    - `completion.status = failed` は requester への復帰配送が失敗した terminal 状態だが、`reset-completion` / `recover-completion` による対応余地があるため `open` に分類する。
    - `completion.status = uncertain` は復帰配送の成否が不明であるため、安全のため第1行で `uncertain` に分類する。
-4. **到達不能な4軸組み合わせ（状態不整合）の扱い**:
-   - canonical schema の `validate_loaded_task()` は各軸の Enum 値と `validate_mode_action_consistency` を検査するが、状態遷移マトリクスの全組み合わせ整合までは拒否しない。
-   - クラッシュや外部改変等により、到達不能な不整合（例: `task.status=succeeded` だが `result.status=pending`、`task.status=created` だが `completion.status=sent` 等）が存在した場合、schema 上はロード可能なため anomaly（exit 3）とはせず一覧に含める。
-   - その代わり、`overview.warnings` に `"inconsistent_state_combination"` を付与する。
-   - `overview.state` は安全側に倒し、上記判定表の優先順位（1: `uncertain` → 2: `open` → 3: `closed`）に従って機械的に決定する（未完了軸が1つでもあれば `open` または `uncertain` となる）。
+4. **到達不能な4軸組み合わせ（状態不整合）の判定基準（不変条件リスト）**:
+   - canonical schema の `validate_loaded_task()` は各軸の Enum 値と `validate_mode_action_consistency` を検査するが、状態遷移マトリクスの全組み合わせ整合までは拘束しない。
+   - クラッシュや外部手動改変等により、状態遷移マトリクス（[§6.3](herdr-orchestrator/03-task-registry.md#sec-6-3)）および completion 仕様（[§9.13](herdr-orchestrator/05-completion-and-recovery.md#sec-9-13), [§9.14](herdr-orchestrator/05-completion-and-recovery.md#sec-9-14)）に反する状態不整合が存在する場合、schema 上はロード可能なため anomaly（exit 3）とはせず一覧に含めつつ、`overview.warnings` に `"inconsistent_state_combination"` を付与する。
+   - **判定に用いる不変条件リスト（以下のいずれかに違反した場合に warning 付与）**:
+     - **I1（初回作成と配送）**: `dispatch.status = pending` ⇔ `task.status = created`
+     - **I2（未完了タスクの結果待ち）**: `task.status ∈ {created, in_progress, unknown}` ⇒ `result.status = pending`
+     - **I3（タスク完了と結果終端の整合）**:
+       - `task.status = succeeded` ⇔ `result.status = succeeded`
+       - `task.status = failed` ⇔ `result.status ∈ {failed, unavailable}`
+     - **I4（進行中・不確定時の配送状態）**:
+       - `task.status = in_progress` ⇒ `dispatch.status = sent`
+       - `task.status = unknown` ⇒ `dispatch.status = uncertain`
+     - **I5（初回配送失敗・スキップ時の終端整合）**:
+       - `dispatch.status ∈ {failed, skipped}` ⇒ `task.status = failed` ∧ `result.status = unavailable` ∧ `completion.status ∈ {skipped, not_applicable}`
+     - **I6（完了復帰処理と結果終端性）**:
+       - `completion.status ∈ {processing, sent, failed, uncertain}` ⇒ `result.status ∈ {succeeded, failed, unavailable}` ∧ `dispatch.status ∈ {sent, uncertain}`
+     - **I7（MVP 未実装状態の検出）**:
+       - `task.status = cancelled` は MVP では遷移イベントが無効（将来拡張用）であるため、検出された場合は warning 対象とする。
+   - **正当に到達し得るケース（誤判定してはならない正常状態）**:
+     - 遅延 result 到達時: `dispatch=uncertain`, `task=succeeded|failed`, `result=succeeded|failed` は I1〜I7 すべてを満たし warning 対象外。
+     - worker unavailable: `task=failed`, `dispatch=sent`, `result=unavailable` は I1〜I7 を満たし warning 対象外。
+     - completion リセット後: `reset-completion` により `completion.status` が `pending` に戻った状態も I1〜I7 を満たし warning 対象外。
+   - **状態分類（`overview.state`）の決定**:
+     - 不整合が検出された場合でも、`overview.state` は安全側に倒し、判定表の優先順位（1: `uncertain` → 2: `open` → 3: `closed`）に従って機械的・決定的に判定する（未完了軸が1つでも残っていれば `open` または `uncertain` となる）。
 5. **注意点**:
    - `closed` は「Orchestrator 上の処理が終わった」ことを示し、タスクの成功を意味しない。成否は `task.status` / `result.status` で確認する。
    - `open` であっても worker が現在稼働中とは限らない。`task.status=in_progress` のまま worker が失われている可能性がある（[§7](#7-クラッシュ後の利用シナリオ)）。
@@ -367,7 +387,7 @@ Issue #62 の受け入れ条件「完了済み・未完了・不確定な task �
 `overview.warnings` は task 単位の注意事項を列挙する。MVP で定義する値は次の2点とする。
 
 - `created_at_unparseable`: `timestamps.created_at` を ISO 8601 時刻として解析できなかった場合。
-- `inconsistent_state_combination`: 4軸状態の組み合わせが状態遷移マトリクスの到達可能パターンと整合しない場合。
+- `inconsistent_state_combination`: 4軸状態の組み合わせが不変条件 I1〜I7 のいずれかに違反している場合。
 
 ---
 
@@ -438,14 +458,14 @@ anomaly となったエントリは内容を信頼できず、所属 repository 
 
 ### 5.5 終了コード
 
-Orchestrator 公開 CLI の共通仕様に基づき、終了コードと出力先・出力形式を厳密に分離する。
+本コマンドの終了コード契約を次のとおり定める（exit 3 は本コマンドで新設）。
 
-| exit code | 状態                          | 条件                                                                                                                                             | 出力先 | 出力形式                                                     |
-| --------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | ------ | ------------------------------------------------------------ |
-| `0`       | 正常（完全一覧）              | 一覧取得に成功し、`anomalies` が空（`complete=true`）。0件・`truncated` を含む                                                                   | stdout | [§4.1](#41-正常時の出力例) の一覧 JSON                       |
-| `3`       | 部分成功（不完全一覧）        | 一覧取得は行えたが、`anomalies` が1件以上（`complete=false`）                                                                                    | stdout | 一覧 JSON（正常取得できた task と `anomalies` の両方を含む） |
-| `1`       | 実行時エラー / 入力検証エラー | 前提条件違反（`HERDR_ENV` 不足）、CLI 内部でのセマンティック入力検証エラー（`--worktree` 相対パス等）、Registry ディレクトリ自体の検証・列挙失敗 | stdout | 既存形式の error JSON (`{"error": ..., "message": ...}`)     |
-| `2`       | CLI 構文エラー                | argparse の引数パースエラー（未知のオプション、`choices` 違反、型変換失敗等）                                                                    | stderr | argparse 既定の usage / エラーテキスト（非 JSON）            |
+| exit code | 状態                          | 条件                                                                                                                                             | 出力先 | 出力形式                                                                     |
+| --------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | ------ | ---------------------------------------------------------------------------- |
+| `0`       | 正常（完全一覧）              | 一覧取得に成功し、`anomalies` が空（`complete=true`）。0件・`truncated` を含む                                                                   | stdout | [§4.1](#41-正常時の出力例) の一覧 JSON                                       |
+| `3`       | 部分成功（不完全一覧）        | 一覧取得は行えたが、`anomalies` が1件以上（`complete=false`）                                                                                    | stdout | 一覧 JSON（正常取得できた task と `anomalies` の両方を含む）                 |
+| `1`       | 実行時エラー / 入力検証エラー | 前提条件違反（`HERDR_ENV` 不足）、CLI 内部でのセマンティック入力検証エラー（`--worktree` 相対パス等）、Registry ディレクトリ自体の検証・列挙失敗 | stdout | 既存形式の error JSON (`{"error": ..., "retryable": false, "message": ...}`) |
+| `2`       | CLI 構文エラー                | argparse の引数パースエラー（未知のオプション、`choices` 違反、型変換失敗等）                                                                    | stderr | argparse 既定の usage / エラーテキスト（非 JSON）                            |
 
 #### 終了コードと出力形式の契約保証
 
@@ -596,14 +616,14 @@ Registry 外の主体が非 atomic に直接書き込んだ途中のファイル
 
 本設計を実装する際、正本の一箇所性（[AGENTS.md](../AGENTS.md) 文書編集ルール）を保つため次を更新する。出力契約の正本は本設計書とし、主設計書からはリンクする。
 
-| 対象                                                                       | 更新内容                                                                                                    |
-| -------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| [§6.5 Public CLI Contract](herdr-orchestrator/03-task-registry.md#sec-6-5) | 表に `task-list` 行を追加（入力: フィルタ・`limit`、副作用: none、出力: 一覧 JSON）。詳細は本設計書へリンク |
-| [設計書の目次](herdr-orchestrator-design.md)                               | 「機能設計・改訂案」に本設計書を追加                                                                        |
-| `skills/herdr-orchestrator/SKILL.md` / `references/public-cli.md`          | 読み取り系コマンドとして `task-list` を追記。クラッシュ後の確認手順に [§7.1](#71-想定手順) を要約して記載   |
-| `skills/herdr-orchestrator/install/codex-execpolicy-snippet.rules`         | 読み取り系 allow ルール（`doctor` / `task-status` / `task-result`）に `task-list` を追加                    |
-| `README.md`                                                                | コマンド一覧に `task-list` を追加                                                                           |
-| [実装 INDEX](herdr-orchestrator-implementation-index.md)                   | 段階 3（読み取り CLI）の追加項目として記載                                                                  |
+| 対象                                                                       | 更新内容                                                                                                                                                                      |
+| -------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [§6.5 Public CLI Contract](herdr-orchestrator/03-task-registry.md#sec-6-5) | 表に `task-list` 行を追加（入力: フィルタ・`limit`、副作用: none、出力: 一覧 JSON、終了コード: 0 / 1 / 2 / 3。exit 3 は部分成功専用コードとして新設）。詳細は本設計書へリンク |
+| [設計書の目次](herdr-orchestrator-design.md)                               | 「機能設計・改訂案」に本設計書を追加                                                                                                                                          |
+| `skills/herdr-orchestrator/SKILL.md` / `references/public-cli.md`          | 読み取り系コマンドとして `task-list` を追記。クラッシュ後の確認手順に [§7.1](#71-想定手順) を要約して記載                                                                     |
+| `skills/herdr-orchestrator/install/codex-execpolicy-snippet.rules`         | 読み取り系 allow ルール（`doctor` / `task-status` / `task-result`）に `task-list` を追加                                                                                      |
+| `README.md`                                                                | コマンド一覧に `task-list` を追加                                                                                                                                             |
+| [実装 INDEX](herdr-orchestrator-implementation-index.md)                   | 段階 3（読み取り CLI）の追加項目として記載                                                                                                                                    |
 
 `task-status` / `task-result` / `handoff` / `result-submit` / completion 系コマンドの動作、および Task Registry schema v1 は変更しない。
 
@@ -648,7 +668,9 @@ Registry 外の主体が非 atomic に直接書き込んだ途中のファイル
 - `created_at` 降順・同時刻の `task.id` 昇順。タイムゾーン混在（`+09:00` と `+00:00`）でも時刻順になる。
 - `--limit` による切り詰めで `truncated=true`、`total_matched` が上限前の件数、`complete=true` のまま。
 - `overview.state` の判定表（[§4.4](#44-派生分類-overviewstate)）の全条件（`uncertain` / `open` / `closed`）、`dispatch.status=uncertain` の結果到達前後の遷移。
-- 4軸状態の到達不能な不整合組み合わせにおいて、一覧に含まれ `overview.warnings` に `inconsistent_state_combination` が付与され、優先順位に従って分類されること。
+- 不変条件 I1〜I7 の検証:
+  - 正当到達ケース（遅延 result、worker unavailable、reset 後 pending）で `inconsistent_state_combination` が付与されないこと。
+  - 各不変条件（I1〜I7）への違反ケースで `overview.warnings` に `inconsistent_state_combination` が付与され、優先順位に従って安全側に分類されること。
 - lock / handoff.lock / 一時ファイル / cleanup stamp / 無関係ファイルが一覧にも anomaly にも現れない。
 
 ### 10.2 異常系
