@@ -112,8 +112,9 @@ herdr-orchestrator task-list [OPTIONS]
 
 - 異なるオプション間は **AND** 条件とする。
 - フィルタは canonical schema v1 に存在する項目に限定する。派生分類 `overview.state` によるフィルタは MVP では提供しない（[§9](#9-対象外と将来拡張)）。
-- `--status` に `TASK_STATUSES` 外の値、`--limit` に範囲外の値を与えた場合は argparse の `choices` / 型検証で拒否する（exit 2、argparse 既定）。
-- `--worktree` に相対 path を与えた場合は `invalid_input` で exit 1 とする。
+- 入力エラーの検証境界と終了コードは次のように分ける（[§5.5](#55-終了コード)）。
+  - argparse で検証する CLI 構文エラー（`--status` に `TASK_STATUSES` 外の値、`--limit` に範囲外の値や非整数値、未知のオプションなど）は **exit 2** とし、stderr に usage を出力する。
+  - CLI ハンドラ内部で検証するセマンティックな入力エラー（`--worktree` に相対 path を与えた場合など）は **exit 1** とし、stdout に `invalid_input` の error JSON を出力する。
 
 ### 3.3 フィルタの照合規則
 
@@ -133,6 +134,14 @@ herdr-orchestrator task-list [OPTIONS]
 3. ソート後、先頭から `--limit` 件を返す。
 
 件数制限による切り詰め（`truncated`）と、読み取り失敗による不完全性（`complete`）は **別のフィールドで表現** し、混同しない（[§4.2](#42-トップレベルフィールド)）。
+
+#### `truncated=true` 時の Agent 利用手順
+
+`--limit`（既定値: 100）を超える task が存在する場合、`truncated=true` となり古い task が結果から除外される。クラッシュ後の調査において対象 task が一覧に含まれない可能性があるため、Agent は次の規則に従う。
+
+1. **切り詰め通知**: `truncated=true` の場合、Agent は「取得結果が最大件数（`limit`）で切り詰められている」旨を利用者に報告する。
+2. **安易な不存在断定の禁止**: `truncated=false`（全件取得）でない限り、「対象の task が存在しない」と断定してはならない。
+3. **絞り込み・上限変更による再確認**: 目的の task が一覧に見当たらない場合、`--limit` を増やす（例: `--limit 500`）、または `--repository` / `--worktree` / `--type` / `--status` などのフィルタを指定して照合対象を絞り込んで再実行する。MVP でのページング機能は提供しない。
 
 ### 3.5 出力形式
 
@@ -229,6 +238,48 @@ herdr-orchestrator task-list --status created --status in_progress --status unkn
         "state": "open",
         "warnings": []
       }
+    },
+    {
+      "task": {
+        "id": "task_2a1b3c4d-5e6f-4a5b-8c7d-9e0f1a2b3c4d",
+        "type": "review",
+        "mode": "async",
+        "status": "succeeded"
+      },
+      "context": {
+        "repository": { "identity": "4f1c2d3e-5a6b-4c7d-8e9f-0a1b2c3d4e5f" },
+        "worktree": {
+          "path": "/home/user/Gitrepo/repo",
+          "branch": "development"
+        }
+      },
+      "requester": {
+        "role": "design",
+        "agent_name": "r-0123456789abcdef-design"
+      },
+      "worker": {
+        "role": "reviewer",
+        "agent_name": "r-0123456789abcdef-reviewer",
+        "pane_id": "w1:p2"
+      },
+      "dispatch": {
+        "status": "sent",
+        "herdr_prompt_started_at": "2026-10-22T02:30:00+00:00"
+      },
+      "result": { "status": "succeeded" },
+      "completion": {
+        "action": "resume_requester",
+        "status": "sent",
+        "recovery_count": 0
+      },
+      "timestamps": {
+        "created_at": "2026-10-22T02:30:00+00:00",
+        "updated_at": "2026-10-22T02:45:00+00:00"
+      },
+      "overview": {
+        "state": "closed",
+        "warnings": []
+      }
     }
   ],
   "anomalies": [],
@@ -238,22 +289,22 @@ herdr-orchestrator task-list --status created --status in_progress --status unkn
 
 ### 4.2 トップレベルフィールド
 
-| フィールド            | 型             | 意味                                                                                                         |
-| --------------------- | -------------- | ------------------------------------------------------------------------------------------------------------ |
-| `command`             | `"task-list"`  | 既存 CLI と同じくコマンド名                                                                                  |
-| `list_format_version` | 整数           | 本出力形式のバージョン。MVP は `1`。Registry の `schema_version` とは独立                                    |
-| `listed_at`           | ISO 8601 (UTC) | ディレクトリ列挙を開始した時刻。一覧はこの時刻以降の各ファイル単位の状態であり、全体スナップショットではない |
-| `registry.exists`     | 真偽値         | tasks ディレクトリが存在したか。`false` の場合 `tasks` は空で `complete=true`                                |
-| `filters`             | オブジェクト   | 適用したフィルタ（正規化後の `worktree` を含む）。未指定は `null` / 空配列                                   |
-| `sort`                | 文字列         | MVP は `"created_at_desc"` 固定                                                                              |
-| `limit`               | 整数           | 適用した上限                                                                                                 |
-| `complete`            | 真偽値         | **`anomalies` が空のときに限り `true`**。フィルタ・`limit` の影響を受けない                                  |
-| `total_matched`       | 整数           | 正常に読めた task のうちフィルタに一致した件数（`limit` 適用前）                                             |
-| `returned`            | 整数           | `tasks` の要素数                                                                                             |
-| `truncated`           | 真偽値         | `total_matched > returned` のとき `true`                                                                     |
-| `tasks`               | 配列           | [§4.3](#43-task-要素のフィールド) の要素                                                                     |
-| `anomalies`           | 配列           | 読み取り・検証に失敗したエントリ（[§5.2](#52-anomaly-の表現)）。**フィルタに関係なくすべて報告する**         |
-| `concurrent_changes`  | 配列           | 列挙後・読み取り前に消えたエントリ（[§6.4](#64-並行更新との整合性)）。完全性には影響しない                   |
+| フィールド            | 型             | 意味                                                                                                                                                                                                                |
+| --------------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `command`             | `"task-list"`  | 既存 CLI と同じくコマンド名                                                                                                                                                                                         |
+| `list_format_version` | 整数           | 本出力形式のバージョン。MVP は `1`。Registry の `schema_version` とは独立                                                                                                                                           |
+| `listed_at`           | ISO 8601 (UTC) | ディレクトリ列挙を開始した時刻。一覧はこの時刻以降の各ファイル単位の状態であり、全体スナップショットではない                                                                                                        |
+| `registry.exists`     | 真偽値         | tasks ディレクトリが存在したか。`false` の場合 `tasks` は空で `complete=true`                                                                                                                                       |
+| `filters`             | オブジェクト   | 適用したフィルタ（正規化後の `worktree` を含む）。未指定は `null` / 空配列                                                                                                                                          |
+| `sort`                | 文字列         | MVP は `"created_at_desc"` 固定                                                                                                                                                                                     |
+| `limit`               | 整数           | 適用した上限                                                                                                                                                                                                        |
+| `complete`            | 真偽値         | **`anomalies` が空のときに限り `true`**。読み取り対象として残存していた task に対する検証の完全性を示す。並行削除は `concurrent_changes` で通知され、本フラグは `true` を維持する（[§6.4](#64-並行更新との整合性)） |
+| `total_matched`       | 整数           | 正常に読めた task のうちフィルタに一致した件数（`limit` 適用前）                                                                                                                                                    |
+| `returned`            | 整数           | `tasks` の要素数                                                                                                                                                                                                    |
+| `truncated`           | 真偽値         | `total_matched > returned` のとき `true`                                                                                                                                                                            |
+| `tasks`               | 配列           | [§4.3](#43-task-要素のフィールド) の要素                                                                                                                                                                            |
+| `anomalies`           | 配列           | 読み取り・検証に失敗したエントリ（[§5.2](#52-anomaly-の表現)）。**フィルタに関係なくすべて報告する**                                                                                                                |
+| `concurrent_changes`  | 配列           | 列挙後・読み取り前に消えたエントリ（[§6.4](#64-並行更新との整合性)）。完全性には影響しない                                                                                                                          |
 
 利用側は次の順で判定する。
 
@@ -284,20 +335,39 @@ canonical schema v1 から次のキーだけを射影する。キーが Registry
 
 ### 4.4 派生分類 `overview.state`
 
-Issue #62 の受け入れ条件「完了済み・未完了・不確定な task を区別して確認できる」を満たすため、4軸から決定的に計算する派生分類を付与する。**Registry には保存しない。** 判定は上の行から順に評価し、最初に一致した分類を採用する。
+Issue #62 の受け入れ条件「完了済み・未完了・不確定な task を区別して確認できる」を満たすため、4軸（`task.status`, `dispatch.status`, `result.status`, `completion.status`）から決定的に計算する派生分類を付与する。**Registry には保存しない。** 判定は上の行から順に評価し、最初に一致した分類を採用する。
 
-| 順  | `overview.state` | 条件                                                                                                                  | 意味                                                            |
-| --- | ---------------- | --------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| 1   | `uncertain`      | `task.status = unknown`、または `completion.status = uncertain`                                                       | 配送・完了通知の成否が観測できていない。blind resend 禁止の対象 |
-| 2   | `open`           | `task.status ∈ {created, in_progress}`、または `completion.status ∈ {pending, processing, failed}`                    | 通常フローまたは明示的な復旧操作による続きが残っている          |
-| 3   | `closed`         | 上記以外（`task.status ∈ {succeeded, failed, cancelled}` かつ `completion.status ∈ {not_applicable, sent, skipped}`） | task と completion がともに terminal。成功・失敗は問わない      |
+| 順  | `overview.state` | 判定条件（4軸照合）                                                                                                                                                                      | 意味                                                                                                |
+| --- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| 1   | `uncertain`      | `task.status = unknown`、または (`dispatch.status = uncertain` かつ `result.status = pending`)、または `completion.status = uncertain`                                                   | worker への配送成否または requester への復帰配送成否が観測できていない。blind resend 禁止の対象     |
+| 2   | `open`           | `task.status ∈ {created, in_progress}`、または `result.status = pending`、または `completion.status ∈ {pending, processing, failed}`                                                     | 通常フロー（タスク処理中・結果待ち）または明示的な復旧操作（completion 再開）による続きが残っている |
+| 3   | `closed`         | 上記以外（正常系では `task.status ∈ {succeeded, failed, cancelled}` かつ `result.status ∈ {succeeded, failed, unavailable}` かつ `completion.status ∈ {not_applicable, sent, skipped}`） | task・result・completion がすべて terminal。処理は完結している（成功・失敗は問わない）              |
 
-- `closed` は「処理が終わった」ことを示し、成功を意味しない。成否は `task.status` / `result.status` で確認する。
-- `completion.status = failed` は requester への復帰配送が失敗した terminal 状態だが、`reset-completion` / `recover-completion` による対応余地があるため `open` に分類する。
-- `open` であっても worker が稼働中とは限らない。`task.status=in_progress` のまま worker が失われている可能性がある（[§7](#7-クラッシュ後の利用シナリオ)）。
-- 分類規則を変更する場合は `list_format_version` を上げる。
+#### 条件の詳細と4軸状態遷移との整合性
 
-`overview.warnings` は task 単位の注意事項（例: `created_at_unparseable`）を列挙する。MVP で定義する値は `created_at_unparseable` のみとする。
+1. **`dispatch.status = uncertain` の扱い**:
+   - 初回 dispatch が timeout / stalled となった直後は `task=unknown`, `dispatch=uncertain`, `result=pending` となり、第1行により `uncertain` に分類される。
+   - その後、worker から遅れて成果物が提出（`result-submit`）された場合、マトリクス（[§6.3](herdr-orchestrator/03-task-registry.md#sec-6-3)）に従って `dispatch.status=uncertain` は履歴として保持されたまま `task.status` が `succeeded` / `failed`、`result.status` が `succeeded` / `failed` へ遷移する。このとき結果が確定しているため第1行の `result.status = pending` 条件を満たさず、第2行（completion 未完了なら `open`）または第3行（completion 完了なら `closed`）へ適切に遷移する。
+2. **`result.status` の影響**:
+   - `result.status = pending` は worker の処理が未完了、または成果物提出待ちであることを示すため、`open`（または dispatch 未確定時は `uncertain`）の判定根拠として機能する。
+   - `result.status` が `succeeded` / `failed` / `unavailable` に到達して初めて `closed` の候補となる。
+3. **`completion.status` の扱い**:
+   - `completion.status = failed` は requester への復帰配送が失敗した terminal 状態だが、`reset-completion` / `recover-completion` による対応余地があるため `open` に分類する。
+   - `completion.status = uncertain` は復帰配送の成否が不明であるため、安全のため第1行で `uncertain` に分類する。
+4. **到達不能な4軸組み合わせ（状態不整合）の扱い**:
+   - canonical schema の `validate_loaded_task()` は各軸の Enum 値と `validate_mode_action_consistency` を検査するが、状態遷移マトリクスの全組み合わせ整合までは拒否しない。
+   - クラッシュや外部改変等により、到達不能な不整合（例: `task.status=succeeded` だが `result.status=pending`、`task.status=created` だが `completion.status=sent` 等）が存在した場合、schema 上はロード可能なため anomaly（exit 3）とはせず一覧に含める。
+   - その代わり、`overview.warnings` に `"inconsistent_state_combination"` を付与する。
+   - `overview.state` は安全側に倒し、上記判定表の優先順位（1: `uncertain` → 2: `open` → 3: `closed`）に従って機械的に決定する（未完了軸が1つでもあれば `open` または `uncertain` となる）。
+5. **注意点**:
+   - `closed` は「Orchestrator 上の処理が終わった」ことを示し、タスクの成功を意味しない。成否は `task.status` / `result.status` で確認する。
+   - `open` であっても worker が現在稼働中とは限らない。`task.status=in_progress` のまま worker が失われている可能性がある（[§7](#7-クラッシュ後の利用シナリオ)）。
+   - 分類規則を変更する場合は `list_format_version` を上げる。
+
+`overview.warnings` は task 単位の注意事項を列挙する。MVP で定義する値は次の2点とする。
+
+- `created_at_unparseable`: `timestamps.created_at` を ISO 8601 時刻として解析できなかった場合。
+- `inconsistent_state_combination`: 4軸状態の組み合わせが状態遷移マトリクスの到達可能パターンと整合しない場合。
 
 ---
 
@@ -368,14 +438,28 @@ anomaly となったエントリは内容を信頼できず、所属 repository 
 
 ### 5.5 終了コード
 
-| exit code | 条件                                                                           | 標準出力                                           |
-| --------- | ------------------------------------------------------------------------------ | -------------------------------------------------- |
-| `0`       | 一覧取得に成功し、`anomalies` が空（`complete=true`）。0件・`truncated` を含む | [§4.1](#41-正常時の出力例) の一覧 JSON             |
-| `3`       | 一覧取得は行えたが、`anomalies` が1件以上（`complete=false`）                  | 一覧 JSON（読めた task と `anomalies` を両方含む） |
-| `1`       | 前提条件違反・入力不正・Registry ディレクトリ自体の異常                        | 既存形式の error JSON                              |
-| `2`       | argparse の引数エラー（`choices` / 型違反）                                    | argparse 既定の usage（stderr）                    |
+Orchestrator 公開 CLI の共通仕様に基づき、終了コードと出力先・出力形式を厳密に分離する。
 
-exit `3` は既存の公開 CLI で未使用の値であり、「部分的な結果あり」を表す専用コードとして割り当てる。exit `1` と分けることで、呼び出し側は「一覧が全く取れていない」状況と「一覧は取れたが不完全」な状況を区別できる。
+| exit code | 状態                          | 条件                                                                                                                                             | 出力先 | 出力形式                                                     |
+| --------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | ------ | ------------------------------------------------------------ |
+| `0`       | 正常（完全一覧）              | 一覧取得に成功し、`anomalies` が空（`complete=true`）。0件・`truncated` を含む                                                                   | stdout | [§4.1](#41-正常時の出力例) の一覧 JSON                       |
+| `3`       | 部分成功（不完全一覧）        | 一覧取得は行えたが、`anomalies` が1件以上（`complete=false`）                                                                                    | stdout | 一覧 JSON（正常取得できた task と `anomalies` の両方を含む） |
+| `1`       | 実行時エラー / 入力検証エラー | 前提条件違反（`HERDR_ENV` 不足）、CLI 内部でのセマンティック入力検証エラー（`--worktree` 相対パス等）、Registry ディレクトリ自体の検証・列挙失敗 | stdout | 既存形式の error JSON (`{"error": ..., "message": ...}`)     |
+| `2`       | CLI 構文エラー                | argparse の引数パースエラー（未知のオプション、`choices` 違反、型変換失敗等）                                                                    | stderr | argparse 既定の usage / エラーテキスト（非 JSON）            |
+
+#### 終了コードと出力形式の契約保証
+
+1. **exit 3 の保証**:
+   - exit 3 は「一覧取得自体は実行できたが、破損や不正なエントリが存在した」ことを表す専用コードである。
+   - **契約保証**: exit 3 の場合であっても、検証を通過した正常な task は `tasks` 配列に格納され、`anomalies` とともに標準出力の一覧 JSON として必ず返却される。
+2. **exit 2 と exit 1 の検証境界**:
+   - **exit 2（argparse 構文エラー）**: CLI 呼び出しの構文レベルの不備（例: `--status` に未定義の値を指定、`--limit` に数値以外を指定など）。argparse の標準機能により stderr に使用方法が出力される。
+   - **exit 1（セマンティック入力・環境エラー）**: 引数の構文は正しいが、ドメイン要件を満たさない場合（例: `--worktree` に相対パスが渡された場合、`HERDR_ENV=1` が未設定の場合）や、Registry ディレクトリ自体のアクセス権・symlink 不正。stdout に機械可読な error JSON が出力される。
+3. **呼び出し Agent による機械的エラー処理手順**:
+   - `exit = 0`: stdout の JSON を取得。`complete=true` であり完全な一覧として処理する（`truncated=true` なら件数切り詰めを認識）。
+   - `exit = 3`: stdout の JSON を取得。`complete=false` を認識し、取得できた task と `anomalies` の内容を利用者へ報告する。
+   - `exit = 1`: stdout の JSON を parse し、`error` / `message` を取得して利用者に失敗原因を報告する。
+   - `exit = 2`: stderr のテキストを取得し、CLI 呼び出し構文の誤りとして利用者に報告またはコマンドを修正する。
 
 ### 5.6 一覧取得自体のエラー
 
@@ -442,12 +526,21 @@ emit_json(payload, exit_code = 0 if complete else 3)
 
 Registry の更新は一時ファイルへの書き込みと `os.replace()` による atomic replace で行われる（[§6.4](herdr-orchestrator/03-task-registry.md#sec-6-4)、`io._atomic_write_json()`）。このため `task-list` は lock を取らず、次の性質に依拠する。
 
-- **ファイル単位の整合性**: `open` した fd は特定の inode を指す。読み取り中に replace されても、旧 inode の完全な内容を読み切る。書きかけの JSON を読むことはない。
-- **全体スナップショットではない**: 列挙後に作成された task は含まれず、各 task は読み取り時点の状態を示す。`listed_at` はその起点を示す。
-- **列挙後の削除**: lazy cleanup（[§6.8](herdr-orchestrator/03-task-registry.md#sec-6-8)）等により列挙後に消えたファイルは `concurrent_changes` に `{"file": ..., "task_id": ..., "change": "removed"}` として記録する。存在しなくなった task は一覧の欠落ではないため `complete` には影響しない。
-- **lock を取らない理由**: 既存の `task_mutation_lock()` は lock file を `O_CREAT` で作成し、排他 lock のため writer を待たせる。読み取り専用・非干渉の原則（[§2.1](#21-厳密な読み取り専用)）に反するため使わない。
+1. **`complete` の定義と完全性の範囲**:
+   - `complete` は **「読み取り対象として残存していた task に対する検証の完全性（破損・検証失敗した anomaly が 0 件であること）」** と定義する。
+   - Registry 全体の原子的スナップショットであることを保証するものではない。
+2. **列挙後の並行削除と `concurrent_changes`**:
+   - `os.scandir()` の列挙開始から個々のファイル `open` までの間に、lazy cleanup（[§6.8](herdr-orchestrator/03-task-registry.md#sec-6-8)）や別プロセスによってファイルが削除された場合（`open` が `ENOENT`）、そのエントリは `concurrent_changes` に `{"file": ..., "task_id": ..., "change": "removed"}` として記録する。
+   - **`complete=true` を維持する理由**: 該当ファイルは Registry から正式に消滅したものであり、残存データの破損や読み取り失敗ではないため、データ整合性の観点では不完全（`anomaly`）と扱わない。
+   - **Agent の判断**: Agent は `complete=true` だけを見て「列挙開始時点に存在した全 task を取得できた」と誤認してはならない。`concurrent_changes` に要素が存在する場合、「読み取り処理の最中に並行して削除された task がある」と判断し、必要に応じて再取得またはログを確認する。
+3. **削除以外の並行更新の扱い**:
+   - **列挙後の新規作成**: `listed_at` 以降に作成された task は今回の一覧には含まれないが、完全性（`complete`）には影響しない。
+   - **読み取り中の atomic replace**: `open` に成功した fd は特定の inode を指す。読み取りの最中に別プロセスが `os.replace()` しても、旧 inode の完全な内容を読み切る。書きかけの断片を読むことはなく、完全性に影響しない。
+   - **読み取り完了後の更新**: 一覧は各エントリの読み取り時点の状態を反映する。
+4. **lock を取らない理由**:
+   - 既存の `task_mutation_lock()` は lock file を `O_CREAT` で作成し、排他 lock のため writer を待たせる。読み取り専用・非干渉の原則（[§2.1](#21-厳密な読み取り専用)）に反するため使わない。
 
-Registry 外の主体が非 atomic に書き込んだ途中のファイルを読んだ場合は `invalid_json` 等の anomaly として報告される。
+Registry 外の主体が非 atomic に直接書き込んだ途中のファイルを読んだ場合は `invalid_json` 等の anomaly として報告され、`complete=false`（exit 3）となる。
 
 ### 6.5 性能
 
@@ -461,13 +554,22 @@ Registry 外の主体が非 atomic に書き込んだ途中のファイルを読
 
 1. requester Agent が reviewer へ async task を handoff する。
 2. WSL の OOM または Windows の強制終了で処理が中断する。
-3. PC / WSL を再起動し、Herdr と Agent を起動し直す。
+3. PC / WSL を再起動し、Herdr と Agent を起動し直す（環境変数 `HERDR_ENV=1` が有効な状態）。
 4. 人間が Agent へ作業再開を指示する。
 5. Agent が `herdr-orchestrator task-list --worktree "$(git rev-parse --show-toplevel)"` を実行する。
-6. exit code と `complete` を確認する。`complete=false` なら `anomalies` を利用者へ報告し、一覧が不完全であることを明示する。
-7. `overview.state` が `open` / `uncertain` の task について `task-status` / `task-result` で詳細を確認する。
-8. 確定済み・未完了・不確定の task を利用者へ報告する。
-9. 利用者の判断または既存の運用ルールに従い、継続（`result-submit` 待ち・`recover-completion` 等）・放棄・新規 handoff を選ぶ。
+6. **exit code と出力の確認**:
+   - `exit = 0` かつ `complete=true`: 正常に一覧を取得完了。
+   - `exit = 3`（`complete=false`）: 一覧取得はできたが一部ファイルが破損。`anomalies` を利用者へ報告し、一覧が不完全であることを明示した上で、取得できた `tasks` を確認する。
+   - `exit = 1`: 一覧取得自体が失敗（ディレクトリ権限不正等）。エラーメッセージを利用者へ報告して停止する。
+   - `exit = 2`: コマンド引数エラー。引数指定を修正する。
+7. **切り詰めと並行変更の確認**:
+   - `truncated=true` の場合、Agent は最大件数で切り詰められている旨を利用者へ報告する。対象 task が見当たらない場合、`truncated=false` でない限り不存在と断定せず、`--limit` を増やすかフィルタ条件（`--status` 等）で絞り込んで再実行する。
+   - `concurrent_changes` に削除記録がある場合、並行クリーンアップ等の影響を考慮する。
+8. **未完了・不確定 task の詳細確認**:
+   - `overview.state` が `open` / `uncertain` の task について `task-status <task-id>` / `task-result <task-id>` で詳細を確認する。
+9. **報告と判断**:
+   - 確定済み・未完了・不確定の task を利用者へ報告する。
+   - 利用者の判断または既存の運用ルールに従い、継続（`result-submit` 待ち・`recover-completion` 等）・放棄・新規 handoff を選ぶ。
 
 ### 7.2 分類ごとの読み方
 
@@ -542,20 +644,23 @@ Registry 外の主体が非 atomic に書き込んだ途中のファイルを読
 - ディレクトリは存在し task 0 件 → 空一覧、`complete=true`、exit 0。
 - 複数 task → 4軸・射影フィールドが canonical 値と一致し、`instruction` / `result.ref` / `result.summary` / `reason` が含まれない。
 - `--repository` / `--worktree` / `--type` / `--status`（単独・複数指定・組み合わせ）の AND / OR 条件。
-- `--worktree` の正規化（末尾スラッシュ、`..` を含む絶対 path、存在しない path）と相対 path の拒否。
+- `--worktree` の正規化（末尾スラッシュ、`..` を含む絶対 path、存在しない path）と相対 path の拒否（exit 1、error JSON）。
 - `created_at` 降順・同時刻の `task.id` 昇順。タイムゾーン混在（`+09:00` と `+00:00`）でも時刻順になる。
 - `--limit` による切り詰めで `truncated=true`、`total_matched` が上限前の件数、`complete=true` のまま。
-- `overview.state` の判定表（[§4.4](#44-派生分類-overviewstate)）の全行。
+- `overview.state` の判定表（[§4.4](#44-派生分類-overviewstate)）の全条件（`uncertain` / `open` / `closed`）、`dispatch.status=uncertain` の結果到達前後の遷移。
+- 4軸状態の到達不能な不整合組み合わせにおいて、一覧に含まれ `overview.warnings` に `inconsistent_state_combination` が付与され、優先順位に従って分類されること。
 - lock / handoff.lock / 一時ファイル / cleanup stamp / 無関係ファイルが一覧にも anomaly にも現れない。
 
 ### 10.2 異常系
 
-- 各 anomaly code（[§5.2](#52-anomaly-の表現)）を発生させ、`complete=false`・exit 3・正常な task は一覧に残ること。
+- 各 anomaly code（[§5.2](#52-anomaly-の表現)）を発生させ、`complete=false`・exit 3・正常な task は一覧に残り、**標準出力の JSON に tasks と anomalies の双方が含まれること**。
 - フィルタで対象外になるはずの repository に属する破損ファイルでも `complete=false` になること。
 - `message` にファイル内容の断片が含まれないこと。
 - tasks ディレクトリが symlink / group writable / 所有者不一致 → `registry_unsafe_path`、exit 1、一覧 JSON なし。
 - `scandir` 失敗（権限 `0000`）→ `registry_unreadable`、exit 1。
 - `HERDR_ENV` 未設定 → exit 1。
+- argparse による CLI 構文エラー（未定義オプション、型・choices 違反）→ exit 2、stderr に usage（非 JSON）。
+- CLI 内部でのセマンティック入力エラー（`--worktree` 相対パス）→ exit 1、stdout に `invalid_input` error JSON。
 
 ### 10.3 読み取り専用性・並行性
 
