@@ -137,7 +137,7 @@ Phase 1 設計書で「実装着手前の詳細実装設計で定める」と保
 
 1. 一時ファイル `docs/reviews/internal/<instance-id>/.tmp.RVNNN.md.<pid>.<token>` にレビュー記録本文を書き出す。
 2. `os.fsync` でディスクに確実にフラッシュする。
-3. `os.replace` により `docs/reviews/internal/<instance-id>/RVNNN.md` へ原子的に移動・公開する。権限は `0600`。
+3. 不可分リンク `os.link` により `docs/reviews/internal/<instance-id>/RVNNN.md` へ原子的に公開後、一時ファイルを unlink する。既存ファイルが存在する場合は上書きせず `ReviewRecordExistsError` となり、既存記録の上書き破壊を防止する。権限は `0600`。
 4. 書き込み途中の不完全ファイルが完成データとして扱われることはない。
 
 ### 5.3 INDEX の派生更新
@@ -152,13 +152,13 @@ repository 固有の操作をカプセル化する CLI として `scripts/repo-r
 
 ### サブコマンド仕様
 
-| コマンド         | 役割                                          | 主な引数・動作                                                                              |
-| ---------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `init`           | 補助状態の初期化・検証                        | `--worktree <path>`, `--abandon-old-tasks`（不確定時の強制初期化）                          |
-| `status`         | 現在の補助状態・worktree 登録・最新採番を表示 | 出力は JSON または人向けサマリ                                                              |
-| `request-create` | 配送依頼ファイルを一時領域に原子的作成        | `--tier <LIGHT\|STANDARD\|DEEP>`, `--target-commit <SHA>`, `--output-token`（作成パス出力） |
-| `record-save`    | 採番、個別記録の原子的保存、INDEX更新         | `--task-id <ID>`, `--body-file <path>`, `--result-status <status>`                          |
-| `reindex`        | 個別記録から INDEX.md を再生成                | `--instance-id <ID>`（省略時は現 active instance）                                          |
+| コマンド         | 役割                                          | 主な引数・動作                                                                                                                       |
+| ---------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `init`           | 補助状態の初期化・検証                        | `--worktree <path>`, `--abandon-old-tasks`（不確定時の強制初期化）, `--force`（既存状態の上書き初期化）                              |
+| `status`         | 現在の補助状態・worktree 登録・最新採番を表示 | 出力は JSON または人向けサマリ                                                                                                       |
+| `request-create` | 配送依頼ファイルを一時領域に原子的作成        | `--tier <LIGHT\|STANDARD\|DEEP>`, `--target-commit <SHA>`, `--summary <text>`, `--output-token`（作成パス出力）                      |
+| `record-save`    | 採番、個別記録の原子的保存、INDEX更新         | `--task-id <ID>`, `--body-file <path>` (または `--body <text>`), `--outcome <GO\|要修正\|NO-GO>` (必須), `--task-status <status>` 等 |
+| `reindex`        | 個別記録から INDEX.md を再生成                | `--instance-id <ID>`（省略時は現 active instance）                                                                                   |
 
 <a id="sec-7"></a>
 

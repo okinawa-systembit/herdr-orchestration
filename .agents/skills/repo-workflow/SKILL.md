@@ -42,7 +42,7 @@ herdr-orchestrator --help
 
 [requester-receive.md](../../../skills/herdr-orchestrator/references/requester-receive.md) に従う。
 
-- `task-status` / `task-result` で result terminal を確認してから inbox や review response を開始する。
+- `task-status` / `task-result` で result terminal を確認してから、指摘対応や次作業を開始する。
 
 ## 復旧
 

@@ -329,7 +329,7 @@ Worker Agent は作業完了後、タスク結果を提出します（Requester 
 ```bash
 herdr-orchestrator result-submit task_example \
   --result-status succeeded \
-  --result-ref ".review-inbox/review-response.md" \
+  --result-ref "docs/review-result.md" \
   --summary "レビュー完了。指摘なし（GO）。"
 ```
 
