@@ -1,1 +1,5 @@
 # prettierの対象外を登録する
+.inbox/
+docs/reviews/internal/
+.review-inbox/
+
