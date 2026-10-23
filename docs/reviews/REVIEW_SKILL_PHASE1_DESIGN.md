@@ -1,10 +1,10 @@
 # 内部レビュースキル改善 Phase 1 設計書
 
-> 状態: コメント 6 に基づく簡素化改定に対する外部指摘（R61-12, R61-13）を反映。承認待ち。
+> 状態: Phase 1 設計承認済み（GO）。Issue #64 にて実装中。
 >
 > 対象: このリポジトリの内部レビュー。比較対象の固有情報は記載しない。
 
-本書は [Issue #61](https://github.com/okinawa-systembit/herdr-orchestration/issues/61) の計画、Issue コメント 6 の障害発生時のデータ喪失許容と再起動後の正常稼働方針、および R61-01〜R61-13 の設計対応を、このリポジトリ固有の仕様としてまとめる。中央 Orchestrator の共通 Task Contract、状態遷移、Result Contract、`task-list` 仕様は既存の[設計書目次](../herdr-orchestrator-design.md)から参照し、本書では複製しない。
+本書は [Issue #61](https://github.com/okinawa-systembit/herdr-orchestration/issues/61) および [Issue #64](https://github.com/okinawa-systembit/herdr-orchestration/issues/64) の計画、Issue コメント 6 の障害発生時のデータ喪失許容と再起動後の正常稼働方針、および R61-01〜R61-13 の設計対応を、このリポジトリ固有の仕様としてまとめる。中央 Orchestrator の共通 Task Contract、状態遷移、Result Contract、`task-list` 仕様は既存の[設計書目次](../herdr-orchestrator-design.md)から参照し、本書では複製しない。
 
 ## 目次
 
