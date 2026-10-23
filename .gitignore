@@ -14,3 +14,8 @@ __pycache__/
 .review-inbox/review-request.md
 .review-inbox/review-response.md
 .review-inbox/INDEX.md
+
+# 非公開内部レビュー領域（Phase 1）
+.inbox/
+docs/reviews/internal/
+

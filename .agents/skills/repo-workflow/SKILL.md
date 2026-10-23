@@ -26,8 +26,8 @@ herdr-orchestrator --help
 
 **本リポジトリのレビュー手順（Scope・inbox・result-submit 規約）**: [repo-review SKILL.md](../repo-review/SKILL.md)
 
-1. 同 Skill に従い `.review-inbox/review-request.md` を更新する。
-2. 同一 worktree・requester pane から `herdr-orchestrator handoff --mode sync --worker-role reviewer …`（instruction は inbox 参照の短文）。
+1. 同 Skill に従い `scripts/repo-review-helper request-create` で `.inbox/` に依頼ファイルを作成する。
+2. 同一 worktree・requester pane から `herdr-orchestrator handoff --mode sync --worker-role reviewer …`（instruction は生成された依頼ファイル参照の短文）。
    - CLI が `git_repository_not_initialized` を返した場合は、自動で `git init` せず [handoff.md](../../../skills/herdr-orchestrator/references/handoff.md) のテンプレートに従いチャットで人間に報告すること。
 3. sync 完了後 `task-result <task.id>`。requester 受信は [requester-receive.md](../../../skills/herdr-orchestrator/references/requester-receive.md)。
 

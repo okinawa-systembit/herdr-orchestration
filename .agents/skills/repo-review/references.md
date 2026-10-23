@@ -149,34 +149,32 @@ GO 判定は「問題が一切存在しないことの保証」ではない。
 
 <a id="review-request-body"></a>
 
-## review-request.md（requester）
+## レビュー依頼書（requester）
 
-`.review-inbox/review-request.example.md` を正本として更新する。
+`scripts/repo-review-helper request-create` により `.inbox/` に原子的生成する。
 
 - 必須項目: 対象リポジトリ、基準ブランチ/コミット、対象コミット/ブランチ（未コミット差分時は HEAD SHA、対象ファイル、変更範囲）、レビュー種別、変更目的、重点確認事項、テスト結果。
-- 再レビュー時: 前回レビューの参照先（ファイル、INDEX.md、または前回主要指摘の要約・引用）を必ず明記する。
+- 再レビュー時: 前回レビューの参照先（RVNNN.md、INDEX.md、または前回主要指摘の要約・引用）を必ず明記する。
 
 ---
 
 <a id="review-response-body"></a>
 
-## review-response.md（reviewer）
+## レビュー記録（RVNNN.md）（reviewer）
 
-先頭行 **固定（verbatim）**: `レビュー対応をして`  
-テンプレート: `.review-inbox/review-response.example.md`
+`scripts/repo-review-helper record-save` により `docs/reviews/internal/<instance-id>/RVNNN.md` に原子的保存する。
 
 構成:
 
-1. `レビュー対応をして`
-2. `## レビュー条件・メタデータ`（モデル名、対象コミットSHA または 未コミット差分識別情報、基準SHA、指摘分類サマリ）
-3. `## 判定`（GO / 要修正 / NO-GO）
-4. `## 総評`
-5. `## Blocking 指摘`（確認済み不具合 P0 / P1、または重大影響が裏付けられた P2）
-6. `## Non-blocking 指摘`（原則の確認済み不具合 P2 / P3、改善提案）
-7. `## 要確認事項`（未確認リスク、仕様確認事項）
-8. `## 再レビュー結果`（再レビュー時のみ）
-9. `## テスト・検証結果`（**実際に実行したコマンドのみ記載**し、未実行の項目は未実行欄に明記する。固定文言による誤報告禁止）
-10. `## 調査範囲と未確認事項`（事実と推論・仮説を厳格に区別して記載）
+1. `## レビュー条件・メタデータ`（モデル名、対象コミットSHA または 未コミット差分識別情報、基準SHA、指摘分類サマリ）
+2. `## 判定`（GO / 要修正 / NO-GO）
+3. `## 総評`
+4. `## Blocking 指摘`（確認済み不具合 P0 / P1、または重大影響が裏付けられた P2）
+5. `## Non-blocking 指摘`（原則の確認済み不具合 P2 / P3、改善提案）
+6. `## 要確認事項`（未確認リスク、仕様確認事項）
+7. `## 再レビュー結果`（再レビュー時のみ）
+8. `## テスト・検証結果`（**実際に実行したコマンドのみ記載**し、未実行の項目は未実行欄に明記する。固定文言による誤報告禁止）
+9. `## 調査範囲と未確認事項`（事実と推論・仮説を厳格に区別して記載）
 
 ※ 指摘が 0 件の場合も、確認範囲（ファイル・関数）と実施した検証を明記する（「問題が発見されなかったこと」と「問題が存在しないこと」を混同しない）。
 
@@ -186,7 +184,7 @@ GO 判定は「問題が一切存在しないことの保証」ではない。
 
 ## INDEX.md
 
-`# レビュー INDEX` 直下に **新しい見出しを先頭追記**（時刻 — テーマ、判定、一行要約）。
+個別記録の保存時に `scripts/repo-review-helper` により `docs/reviews/internal/<instance-id>/INDEX.md` が自動的に派生生成・更新される（手動更新不要）。
 
 ---
 
@@ -197,9 +195,9 @@ GO 判定は「問題が一切存在しないことの保証」ではない。
 ```markdown
 ## レビュー対応完了
 
-- 依頼: `.review-inbox/review-response.md`
+- レビュー記録: `docs/reviews/internal/<instance-id>/RVNNN.md`
 - 対応概要: …
-- INDEX: 最新行参照
+- INDEX: `docs/reviews/internal/<instance-id>/INDEX.md`
 - 未対応: なし | …
 ```
 
@@ -210,11 +208,11 @@ GO 判定は「問題が一切存在しないことの保証」ではない。
 sync handoff が prompt 配送するのが正。足りない場合のみ:
 
 ```bash
-herdr agent prompt "${HERDR_WORKSPACE_ID}:p2" '.review-inbox/review-request.md を読め'
+herdr agent prompt "${HERDR_WORKSPACE_ID}:p2" '.inbox/<request-file> を読め'
 ```
 
 ```bash
-herdr agent prompt "${HERDR_WORKSPACE_ID}:p1" '.review-inbox/review-response.md を読め'
+herdr agent prompt "${HERDR_WORKSPACE_ID}:p1" 'docs/reviews/internal/<instance-id>/RVNNN.md を読め'
 ```
 
 長文を prompt に載せない。

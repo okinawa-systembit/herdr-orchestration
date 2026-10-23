@@ -1,8 +1,8 @@
 ---
 name: repo-review
 description: >-
-  herdr-orchestration repo review via sync handoff, .review-inbox/ artifacts,
-  and herdr-orchestrator CLI. Use for レビュー依頼, 再レビュー依頼, レビュー対応,
+  herdr-orchestration repo review via sync handoff, repo-review-helper CLI,
+  and herdr-orchestrator. Use for レビュー依頼, 再レビュー依頼, レビュー対応,
   or reviewing Orchestrator design, implementation, and tests in this repository.
 ---
 
@@ -10,11 +10,13 @@ description: >-
 
 中央 Skill（グローバル）: **herdr-orchestration** + **herdr** 公式 Skill。  
 本 Skill は **このリポジトリ専用**の Review Scope・調査検証手順・成果物・連携フロー（設計 §12 / §11.4）。
+内部レビューの排他・補助状態・採番管理は `scripts/repo-review-helper` CLI を介して行う。
 
 ## 前提・資料読み込み
 
 - `HERDR_ENV=1` の pane のみ。
 - 事前: `npm run install:orchestrator-dev`（`herdr-orchestrator` on PATH）。
+- リポジトリ helper: `scripts/repo-review-helper`。
 - レビュー基準: [docs/herdr-agent-review-guidelines.md](../../../docs/herdr-agent-review-guidelines.md)（開始前に必ず精読）。
 - 詳細基準・テンプレート: [references.md](references.md)（開始前に必ず精読）。
 - Registry / handoff: [worker-receive.md](../../../skills/herdr-orchestrator/references/worker-receive.md) / [requester-receive.md](../../../skills/herdr-orchestrator/references/requester-receive.md)（複製しない）。
@@ -22,24 +24,28 @@ description: >-
 ## コマンド方針（Codex rule 汚染を避ける）
 
 - Orchestrator: **`herdr-orchestrator` のみ**（`bash -lc` で長文を載せない）。
-- **`result-submit` の `--summary` は 200 字以内**。詳細は inbox / `result.ref` 側。
-- **`--result-ref` はリポジトリ相対 1 パス**（例: `.review-inbox/review-response.md`）。
+- レビュー補助操作: **`scripts/repo-review-helper`** を使用し、直接のファイル手動配置・手動採番を避ける。
+- **`result-submit` の `--summary` は 200 字以内**。詳細は `result.ref` 側。
+- **`--result-ref` はリポジトリ相対 1 パス**（例: `docs/reviews/internal/<instance-id>/RV001.md`）。
 - Herdr 操作: 公式 **herdr** Skill。`herdr agent prompt` は **1 行・ファイル参照のみ**（[references.md](references.md)）。sync handoff 成功時は不要。
 
 ## レビュー運用の責務境界と成果物（正本）
 
-本リポジトリでは、運用の目的に応じて **「Herdr 内部レビュー」** と **「GitHub 管理対象レビュー」** を明確に区別する（設計書: [docs/reviews/CONTINUOUS_REVIEW_SIMPLIFIED_DESIGN.md](../../../docs/reviews/CONTINUOUS_REVIEW_SIMPLIFIED_DESIGN.md)）。
+本リポジトリでは、運用の目的に応じて **「Herdr 内部レビュー」** と **「GitHub 管理対象レビュー」** を明確に区別する（設計書: [docs/reviews/REVIEW_SKILL_PHASE1_DESIGN.md](../../../docs/reviews/REVIEW_SKILL_PHASE1_DESIGN.md)）。
 
 ### 1. Herdr 内部レビュー（エージェント間開発支援）
 
 - **対象**: リポジトリ内での日常的な実装支援、エージェント間の手戻り防止、sync handoff によるレビュー依頼と対応。
-- **正本・成果物**: ローカルの `.review-inbox/` ファイル群。
-  - `.review-inbox/review-request.md`: 依頼本文（基準、差分、目的等）
-  - `.review-inbox/review-response.md`: 指摘・判定・検証結果（先頭行固定）
-  - `.review-inbox/INDEX.md`: ラウンド履歴
-- **運用原則**: エージェント間で完結する閉じたローカルループであり、**Herdr 内部レビューはローカルの `.review-inbox/` への記録を標準とし、既定（デフォルト）では GitHub への外部書き込みを行わない**。
+- **正本・成果物**: 非公開作業領域のファイル群（Git 追跡除外）。
+  - `.inbox/review-request.<token>.md`: 一時依頼ファイル（ディレクトリ権限 0700、ファイル 0600）
+  - `docs/reviews/internal/<instance-id>/RVNNN.md`: 個別レビュー記録の正本（ディレクトリ 0700、ファイル 0600）
+  - `docs/reviews/internal/<instance-id>/INDEX.md`: 個別記録から派生生成される履歴一覧
+  - `<git-common-dir>/herdr-review/state.json`: 非公開補助状態（instance ID、worktree、採番カウンター）
+  - `<git-common-dir>/herdr-review.lock`: 排他制御用共有 lock（0600、削除厳禁）
+  - ※ 旧 `.review-inbox/` は読み取り専用の旧履歴として残存し、新規依頼には使用しない。
+- **運用原則**: エージェント間で完結する閉じたローカルループであり、**Herdr 内部レビューはローカルの非公開成果物への記録を標準とし、既定（デフォルト）では GitHub への外部書き込みを行わない**。
   - **GitHub Finding Issue へのコメント投稿条件（明示的指示時のみ許可）**:
-    1. **投稿トリガー**: 依頼元から明示的な指示（`review-request.md` または handoff の `--instruction` での指定）がある場合に限り、対象 Finding Issue へのレビュー結果コメント投稿（`gh issue comment`）を許可する。
+    1. **投稿トリガー**: 依頼元から明示的な指示（`review-request` または handoff の `--instruction` での指定）がある場合に限り、対象 Finding Issue へのレビュー結果コメント投稿（`gh issue comment`）を許可する。
     2. **事前確認**: コメント投稿前に、対象 Finding Issue の番号・リポジトリ・レビュー対象コミット SHA が一致していることを確認する。
     3. **投稿内容の限定**: 投稿内容は「判定・総評・指摘事項・検証結果ログ」に限定し、レビューGO を「Finding 解決完了」と表現せず「修正承認。PR マージ待ち」と明記する。
     4. **レビュアーの操作禁止事項**: **Finding Issue のクローズ（`gh issue close`）、再オープン、ラベル変更（`status:verified` 等）はレビュアー側で厳禁**とする（これらは PR マージ・再検証を経て依頼元のみが実施する）。
@@ -51,12 +57,12 @@ description: >-
 - **正本**: **GitHub（Pull Request, Issues, Reviews）**。
 - **運用原則**: 明示的に GitHub 管理対象として依頼された場合のみ適用し、同一レビュー情報をリポジトリ内台帳と二重管理しない。
 
-| レビュー種別               | 正本（Source of Truth） | 格納場所・管理単位                  | 連携インターフェース               |
-| -------------------------- | ----------------------- | ----------------------------------- | ---------------------------------- |
-| **Herdr 内部レビュー**     | **ローカル Markdown**   | `.review-inbox/review-response.md`  | `herdr-orchestrator result-submit` |
-| **通常 PR レビュー**       | **GitHub Pull Request** | PR 会話タイムライン / Files Changed | `gh pr review --comment`           |
-| **初回 20 Scope レビュー** | **GitHub Issues**       | Scope 単位の個別 Issue（`#101` 等） | `gh issue comment`                 |
-| **継続追跡する指摘**       | **GitHub Issues**       | 指摘単位の個別 Issue（`#105` 等）   | `gh issue create`                  |
+| レビュー種別               | 正本（Source of Truth） | 格納場所・管理単位                           | 連携インターフェース               |
+| -------------------------- | ----------------------- | -------------------------------------------- | ---------------------------------- |
+| **Herdr 内部レビュー**     | **ローカル Markdown**   | `docs/reviews/internal/<instance-id>/RV*.md` | `herdr-orchestrator result-submit` |
+| **通常 PR レビュー**       | **GitHub Pull Request** | PR 会話タイムライン / Files Changed          | `gh pr review --comment`           |
+| **初回 20 Scope レビュー** | **GitHub Issues**       | Scope 単位の個別 Issue（`#101` 等）          | `gh issue comment`                 |
+| **継続追跡する指摘**       | **GitHub Issues**       | 指摘単位の個別 Issue（`#105` 等）            | `gh issue create`                  |
 
 ※ いずれのレビュー種別であっても、適用する**レビュー品質基準（2段階レビュー、指摘分類、重大度判定、反証確認、未実施検証明記）は完全に共通**である。
 
@@ -64,38 +70,46 @@ description: >-
 
 ## Requester（implementer）— 「レビュー依頼を出して / 再レビュー依頼」
 
-1. [references.md#review-request-body](references.md#review-request-body) および [レビューガイドライン](../../../docs/herdr-agent-review-guidelines.md) に沿って **review-request.md** を作成・更新する。
-   - 基準ブランチ/コミット、対象コミット、レビュー種別（新規/再レビュー）、変更目的、重点確認事項、既知の制約を明記。
-   - 再レビュー時は前回レビュー結果の参照先（response / INDEX）を必ず明記。
-2. `npm run test:orchestrator`（必要なら `npm run verify:orchestrator`）を実行し、pass 数・結果を request に記載。
-3. 同一 worktree・requester pane から **sync handoff**（instruction は短く、inbox を指す）:
+1. 初期状態確認（必要なら初期化）:
+   ```bash
+   scripts/repo-review-helper init
+   ```
+   ※ 旧 Task が残存して停止した場合は人間に確認し、放棄合意があれば `--abandon-old-tasks` を付与。
+2. レビュー依頼ファイルを `.inbox/` に原子的作成:
+   ```bash
+   REQ_FILE=$(scripts/repo-review-helper request-create --tier STANDARD --summary "最新の変更内容についてのレビューを依頼します。")
+   ```
+   （必要に応じて生成された `$REQ_FILE` を編集し、重点確認事項や再レビュー参照先を追記）。
+3. テスト実行と結果確認:
+   `npm run test:orchestrator`（必要なら `npm run verify:orchestrator`）を実行。
+4. 同一 worktree・requester pane から **sync handoff**（instruction は短く、inbox を指す）:
 
 ```bash
 herdr-orchestrator handoff \
   --mode sync \
   --worker-role reviewer \
   --task-type review \
-  --instruction 'Read .review-inbox/review-request.md and review per repo-review SKILL. DO NOT close or modify any GitHub Finding issue.'
+  --instruction "Read $REQ_FILE and review per repo-review SKILL. Save record via repo-review-helper record-save. DO NOT close or modify any GitHub Finding issue."
 ```
 
 ※ **GitHub コメント投稿を明示的に依頼する場合（オプトイン）**:  
-内部レビュー結果を対象 Finding Issue に記録させたい場合のみ、依頼元が以下のように `--instruction` または `review-request.md` で明示的に指定する：
+内部レビュー結果を対象 Finding Issue に記録させたい場合のみ、依頼元が以下のように `--instruction` で明示的に指定する：
 
 ```bash
 herdr-orchestrator handoff \
   --mode sync \
   --worker-role reviewer \
   --task-type review \
-  --instruction 'Read .review-inbox/review-request.md and review per repo-review SKILL. Post review result as comment to Finding Issue #<no> after verifying target SHA. DO NOT close or modify any GitHub issue.'
+  --instruction "Read $REQ_FILE and review per repo-review SKILL. Save record via repo-review-helper record-save. Post review result as comment to Finding Issue #<no> after verifying target SHA. DO NOT close or modify any GitHub issue."
 ```
 
-4. sync 完了後:
+5. sync 完了後:
 
 ```bash
 herdr-orchestrator task-result <task.id>
 ```
 
-5. `result.status` / `result.ref` を確認してから人間へ報告。再依頼は 1 から（新 task）。
+6. `result.status` / `result.ref` を確認してから人間へ報告。再依頼は新 task として実施。
 
 handoff 失敗時: stderr を人間へ。blind 再送しない（設計 §9）。
 
@@ -201,27 +215,53 @@ handoff 失敗時: stderr を人間へ。blind 再送しない（設計 §9）�
 - **事実と推論の区別**:
   - 実行して確認した事実、コード読解の事実、仕様・設計に基づく判断、推測・未検証の仮説を明確に区別して記載する（ローカルテスト成功を理由にリモートActions実行成功まで保証しない）。
 - [references.md#review-principles](references.md#review-principles) に基づき重大度（P0〜P3）と確信度（高/中/低）を判定。
-- **review-response.md** を作成・更新（**先頭行 verbatim: `レビュー対応をして`**）。
-  - レビュー条件（モデル名、対象コミットSHA または 未コミット差分識別情報、基準SHA、指摘分類サマリ）、総評、判定（GO / 要修正 / NO-GO）、指摘分類サマリ、Blocking 指摘、Non-blocking 指摘、要確認事項、再レビュー結果、テスト結果、調査範囲と未確認事項を記載。
-- **INDEX.md** 先頭に新しいラウンドを追記。
+- レビュー結果本文を整形し、`scripts/repo-review-helper record-save` を使って保存する（自動採番、原子的保存、INDEX.md 派生更新）：
+  ```bash
+  # 安全な一時ファイル（0600）にレビュー本文を用意
+  TMP_BODY=$(mktemp)
+  chmod 0600 "$TMP_BODY"
+  cat << 'EOF' > "$TMP_BODY"
+  # 総合判定: GO
+
+  ## レビュー条件・メタデータ
+  - モデル名: ...
+  - 対象コミットSHA: ...
+
+  ## 総評
+  ...
+
+  ## 指摘事項
+  ...
+  EOF
+
+  # 採番・個別記録の原子的公開・INDEX更新
+  scripts/repo-review-helper record-save \
+    --task-id "<task.id>" \
+    --body-file "$TMP_BODY" \
+    --result-status "GO" \
+    --target-commit "<target_commit>"
+  rm -f "$TMP_BODY"
+  ```
 
 ### 7. 結果登録
+
+保存された個別記録パス（例: `docs/reviews/internal/<instance-id>/RV001.md`）を `--result-ref` に指定して提出する：
 
 ```bash
 herdr-orchestrator result-submit <task.id> \
   --result-status succeeded \
-  --result-ref .review-inbox/review-response.md \
-  --summary 'Review round recorded in inbox.'
+  --result-ref "docs/reviews/internal/<instance-id>/<review-id>.md" \
+  --summary 'Review record saved via repo-review-helper.'
 ```
 
-`--summary` は 200 字以内の簡潔な記録に留める（詳細は response ファイル側）。
+`--summary` は 200 字以内の簡潔な記録に留める（詳細は result.ref 側）。
 
 ---
 
 ## GitHub 連携運用（PR レビュー & Scope レビュー）
 
 GitHub を正本とするコードレビュー運用では、以下の手順で GitHub CLI (`gh`) を用いて記録・連携する。  
-※ **適用範囲の明確化**: 本手順は、通常 PR や初回 20 Scope などの「GitHub 管理対象レビュー」として明示的に依頼された場合にのみ適用する。通常の Herdr 内部レビュー（エージェント間 handoff）では本手順は不要であり、`.review-inbox/` への出力と `result-submit` だけで完結する（不要な GitHub 投稿は行わない）。  
+※ **適用範囲の明確化**: 本手順は、通常 PR や初回 20 Scope などの「GitHub 管理対象レビュー」として明示的に依頼された場合にのみ適用する。通常の Herdr 内部レビュー（エージェント間 handoff）では本手順は不要であり、`repo-review-helper` によるローカル記録と `result-submit` だけで完結する（不要な GitHub 投稿は行わない）。  
 ※ レビュー品質基準（2 段階レビュー、指摘 3 分類、重大度 P0〜P3、反証確認、未実施検証の明示）は Herdr 連携時と完全に同一の基準を適用する。
 
 ### A. 通常 Pull Request の継続的レビュー手順
@@ -273,13 +313,13 @@ GitHub を正本とするコードレビュー運用では、以下の手順で 
 
 ### C. オフライン・API 障害時のフォールバック
 
-GitHub API の一時停止や認証エラー時は、ローカルの `.review-inbox/review-response.md` に標準フォーマットで結果を出力し、人間へ手動反映を依頼する。
+GitHub API の一時停止や認証エラー時は、ローカルの `repo-review-helper record-save` で結果を出力し、人間へ手動反映を依頼する。
 
-## Requester — 「review-response.md を読め / レビュー対応」
+## Requester — 「レビュー結果の確認 / レビュー対応」
 
 [requester-receive.md](../../../skills/herdr-orchestrator/references/requester-receive.md) に従い `task-status` / `task-result` で terminal を確認後:
 
-1. **review-response.md** を正本として指摘対応。
+1. `result.ref`（`docs/reviews/internal/<instance-id>/RVNNN.md`）を正本として指摘対応。
 2. 人間チャットへ [references.md#human-report](references.md#human-report) 形式で報告。
 3. **コミット・プッシュの先走り禁止（責務境界の厳守）**:
    - レビュー対応完了および人間報告の時点で**必ず処理を停止する**。

@@ -2,6 +2,7 @@
 export default {
   // リポジトリ内の Markdown のみ（`**/*.md` だと node_modules 配下も拾う）
   globs: ["AGENTS.md", "docs/**/*.md"],
+  ignores: ["docs/reviews/internal/**"],
   config: {
     default: true,
     // 日本語の長文・ワイドな表は Prettier と併用し、行長はここでは enforce しない
