@@ -369,15 +369,16 @@ def record_save_atomic(
         else:
             new_body = content
 
-        # R64-02: Strict verification of target_commit, outcome, and payload body
+        # R64-02 & R64-07: Strict verification of target_commit, outcome, task_status, and payload body
         commit_match = (existing_meta.get("target_commit") == target_commit)
         existing_outcome = existing_meta.get("outcome")
         if existing_outcome == "UNKNOWN":
             existing_outcome = existing_meta.get("status")
         outcome_match = (existing_outcome == outcome)
+        status_match = (existing_meta.get("status") == task_status)
         body_match = (existing_body == new_body)
 
-        if commit_match and outcome_match and body_match:
+        if commit_match and outcome_match and status_match and body_match:
             # Idempotent replay: return existing record without altering any files
             return existing_rid, existing_path, False
         else:
@@ -389,6 +390,10 @@ def record_save_atomic(
             if not outcome_match:
                 diffs.append(
                     f"outcome mismatch (existing={existing_outcome}, requested={outcome})"
+                )
+            if not status_match:
+                diffs.append(
+                    f"task_status mismatch (existing={existing_meta.get('status')}, requested={task_status})"
                 )
             if not body_match:
                 diffs.append("body content mismatch")

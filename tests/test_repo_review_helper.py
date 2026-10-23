@@ -131,6 +131,26 @@ class TestReviewLock(unittest.TestCase):
             or "permission" in str(ctx.exception).lower()
         )
 
+    def test_lock_fd_closed_on_rejection(self):
+        """R64-08: Ensure file descriptor is closed when LockAcquisitionError is raised."""
+        lock_file = self.common_dir / ReviewLock.LOCK_FILENAME
+        lock_file.write_text("content", encoding="utf-8")
+        os.chmod(str(lock_file), 0o644)
+
+        closed_fds = []
+        orig_close = os.close
+
+        def tracking_close(fd):
+            closed_fds.append(fd)
+            return orig_close(fd)
+
+        with patch("os.close", side_effect=tracking_close):
+            lock = ReviewLock(self.common_dir)
+            with self.assertRaises(LockAcquisitionError):
+                lock.acquire()
+
+        self.assertGreaterEqual(len(closed_fds), 1)
+
     def test_lock_released_on_process_exit(self):
         ctx = multiprocessing.get_context("spawn")
         queue = ctx.Queue()
@@ -494,6 +514,40 @@ class TestRecorder(unittest.TestCase):
                     target_commit="commit_aaa",
                 )
             self.assertIn("outcome mismatch", str(ctx.exception))
+
+    def test_record_save_atomic_conflict_task_status(self):
+        """R64-07: Conflicting task_status raises TaskRecordConflictError and leaves existing record untouched."""
+        with ReviewLock(self.common_dir):
+            rid1, path1, is_new1 = record_save_atomic(
+                self.common_dir,
+                self.worktree,
+                "task_status_conflict",
+                "Review body text",
+                outcome="GO",
+                task_status="succeeded",
+                target_commit="commit_aaa",
+            )
+            self.assertTrue(is_new1)
+            initial_text = path1.read_text(encoding="utf-8")
+
+            # Same task_id, same body, commit, outcome, but different task_status
+            with self.assertRaises(TaskRecordConflictError) as ctx:
+                record_save_atomic(
+                    self.common_dir,
+                    self.worktree,
+                    "task_status_conflict",
+                    "Review body text",
+                    outcome="GO",
+                    task_status="failed",
+                    target_commit="commit_aaa",
+                )
+            self.assertIn("task_status mismatch", str(ctx.exception))
+
+            # Verify existing record content and metadata remain unchanged
+            self.assertEqual(path1.read_text(encoding="utf-8"), initial_text)
+            meta = parse_review_metadata(path1)
+            self.assertEqual(meta["status"], "succeeded")
+            self.assertEqual(meta["review_id"], rid1)
 
     def test_record_save_atomic_conflict_body_whitespace(self):
         """R64-02: Byte-level discrepancy in body content raises TaskRecordConflictError."""

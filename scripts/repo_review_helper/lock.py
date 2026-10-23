@@ -69,6 +69,7 @@ class ReviewLock:
                     f"Failed to open lock file {self.lock_path}: {e}"
                 ) from e
 
+            acquired = False
             try:
                 # Check symlink (double defense)
                 if os.path.islink(str(self.lock_path)):
@@ -119,21 +120,19 @@ class ReviewLock:
                     stat_res = os.stat(str(self.lock_path))
                 except FileNotFoundError:
                     # File was unlinked between open and stat
-                    os.close(fd)
                     time.sleep(self.RETRY_DELAY_SEC)
                     continue
 
                 if fstat_res.st_ino != stat_res.st_ino or fstat_res.st_dev != stat_res.st_dev:
                     # File was replaced by another process
-                    os.close(fd)
                     time.sleep(self.RETRY_DELAY_SEC)
                     continue
 
                 # Successfully acquired and verified
                 self.fd = fd
+                acquired = True
                 return
             except (BlockingIOError, OSError) as e:
-                os.close(fd)
                 if self.non_blocking and isinstance(e, BlockingIOError):
                     raise LockAcquisitionError(f"Could not acquire lock immediately on {self.lock_path}") from e
                 if attempts >= self.MAX_RETRIES:
@@ -141,6 +140,12 @@ class ReviewLock:
                         f"Failed to acquire lock after {self.MAX_RETRIES} attempts on {self.lock_path}: {e}"
                     ) from e
                 time.sleep(self.RETRY_DELAY_SEC)
+            finally:
+                if not acquired:
+                    try:
+                        os.close(fd)
+                    except OSError:
+                        pass
 
         raise LockAcquisitionError(f"Exceeded max retries acquiring lock on {self.lock_path}")
 
