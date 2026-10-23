@@ -192,7 +192,7 @@ Codex Agent を利用する場合、承認プロンプトによる中断を防�
 設定テンプレートは [codex-execpolicy-snippet.rules](skills/herdr-orchestrator/install/codex-execpolicy-snippet.rules) に用意されています。
 
 - **許可方針の分類**:
-  - **診断・読み取り系（自動許可）**: `doctor`, `task-status`, `task-result`, `identity show`。副作用のない参照操作として許可されます。
+  - **診断・読み取り系（自動許可）**: `doctor`, `task-status`, `task-result`, `task-list`, `identity show`。副作用のない参照操作として許可されます。
   - **自動化の書き込み例外（自動許可）**: `result-submit`。Task Registry の更新および completion 処理を伴いますが、Worker による結果提出の自律実行を維持するため例外的に許可されます。
   - **意図的に自動許可しないコマンド**: `handoff`（Worker 起動・タスク登録）、`identity init`（Git 設定変更）、`resume-task` や `reset-completion` などの復旧・状態変更コマンドは、影響範囲が大きいため無条件許可せず、Codex 側の通常承認・サンドボックス制御に委ねます。
   - **絶対パス実行への対応**: Agent が PATH を経由せず絶対パスで CLI を呼び出す場合に備え、テンプレート内の `GLOBAL_INSTALL_ABS` を実際のインストール先ディレクトリ（例: `/home/<user>/.agents/skills/herdr-orchestration`）に置換して登録します。
@@ -314,7 +314,15 @@ herdr-orchestrator handoff \
 herdr-orchestrator task-status task_example
 ```
 
-#### 3. Worker が実行結果を提出する (result-submit)
+#### 3. タスク一覧を確認する (task-list)
+
+Task Registry に残存するタスクを読み取り専用で一覧取得します（再起動後の状態確認や未完了タスクの把握に利用します）。
+
+```bash
+herdr-orchestrator task-list --worktree "$(git rev-parse --show-toplevel)"
+```
+
+#### 4. Worker が実行結果を提出する (result-submit)
 
 Worker Agent は作業完了後、タスク結果を提出します（Requester ではなく Worker が実行します）。
 
@@ -325,7 +333,7 @@ herdr-orchestrator result-submit task_example \
   --summary "レビュー完了。指摘なし（GO）。"
 ```
 
-#### 4. Requester がタスク結果を取得する
+#### 5. Requester がタスク結果を取得する
 
 ```bash
 herdr-orchestrator task-result task_example

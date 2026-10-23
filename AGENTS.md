@@ -30,6 +30,7 @@ Herdr Orchestrator の設計書は、関連するテーマごとに複数のフ�
 - [08-adoption-and-verification.md](docs/herdr-orchestrator/08-adoption-and-verification.md#sec-17): 導入、動作確認、repository 移行（§17–19）
 - [09-maintenance-and-roadmap.md](docs/herdr-orchestrator/09-maintenance-and-roadmap.md#sec-20): Herdr のバージョン方針、更新、制約、今後の検証、将来構成（§20–24）
 - [herdr-orchestrator-identity-uuid.md](docs/herdr-orchestrator-identity-uuid.md): Repository Identity UUID化 設計書（Issue #50 対応案）
+- [herdr-orchestrator-task-list.md](docs/herdr-orchestrator-task-list.md): Task 一覧参照コマンド `task-list` 設計書（Issue #62 対応案）
 
 ### 文書の編集ルール
 

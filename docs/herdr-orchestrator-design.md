@@ -23,6 +23,7 @@
 ## 機能設計・改訂案
 
 - [Repository Identity UUID化 設計書 (Issue #50)](herdr-orchestrator-identity-uuid.md): リモート origin 未設定のローカルリポジトリへの対応および UUID v4 移行設計案
+- [Task 一覧参照コマンド `task-list` 設計書 (Issue #62)](herdr-orchestrator-task-list.md): Task Registry に残存する task を読み取り専用で一覧取得する公開 CLI の設計案
 
 ## 基本方針
 
