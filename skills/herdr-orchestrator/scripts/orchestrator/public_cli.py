@@ -31,8 +31,10 @@ from orchestrator.identity import (
 from orchestrator.registry.errors import RegistryError
 from orchestrator.env import HerdrEnvError, require_herdr_env
 from orchestrator.errors import emit_error
+from orchestrator.registry.schema import TASK_STATUSES
 from orchestrator.registry.task_id import validate_task_id
 from orchestrator.result_commands import ResultCommandError, result_submit, task_result, task_status
+from orchestrator.list_commands import run_task_list
 
 PUBLIC_COMMANDS = (
     "doctor",
@@ -40,6 +42,7 @@ PUBLIC_COMMANDS = (
     "result-submit",
     "task-status",
     "task-result",
+    "task-list",
     "resume-task",
     "reset-completion",
     "recover-completion",
@@ -53,6 +56,7 @@ _COMMAND_HELP: dict[str, str] = {
     "result-submit": "Worker がタスク結果を Registry に提出",
     "task-status": "Task Registry のスナップショットを取得",
     "task-result": "タスクの結果フィールドを取得",
+    "task-list": "Task Registry のタスクを一覧取得（読み取り専用）",
     "resume-task": "結果確認後、Requester の completion を再開してプロンプト",
     "reset-completion": "再試行のために completion 状態をリセット",
     "recover-completion": "再開可能な場合に completion をリセットして自動再開",
@@ -108,6 +112,31 @@ def _cmd_task_status(ns: argparse.Namespace) -> int:
 
 def _cmd_task_result(ns: argparse.Namespace) -> int:
     return _run_read_command(ns, runner=task_result)
+
+
+def _limit_type(val: str) -> int:
+    try:
+        n = int(val)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"invalid int value: {val!r}")
+    if n < 1 or n > 1000:
+        raise argparse.ArgumentTypeError(f"--limit must be between 1 and 1000 (got {n})")
+    return n
+
+
+def _cmd_task_list(ns: argparse.Namespace) -> int:
+    try:
+        require_herdr_env()
+    except HerdrEnvError as exc:
+        emit_herdr_env_error(exc)
+    payload, exit_code = run_task_list(
+        repository=ns.repository,
+        worktree=ns.worktree,
+        type=ns.type,
+        statuses=ns.status,
+        limit=ns.limit,
+    )
+    return emit_json(payload, exit_code=exit_code)
 
 
 def _cmd_handoff(ns: argparse.Namespace) -> int:
@@ -312,6 +341,40 @@ def build_parser() -> argparse.ArgumentParser:
                 default=None,
                 help="タスク結果の要約メッセージ",
             )
+        elif name == "task-list":
+            p.add_argument(
+                "--repository",
+                default=None,
+                help="対象リポジトリ identity UUID で絞り込み",
+            )
+            p.add_argument(
+                "--worktree",
+                default=None,
+                help="対象 worktree 絶対パスで絞り込み",
+            )
+            p.add_argument(
+                "--type",
+                default=None,
+                help="タスク種別で絞り込み",
+            )
+            p.add_argument(
+                "--status",
+                action="append",
+                choices=sorted(TASK_STATUSES),
+                default=None,
+                help="タスクステータスで絞り込み（複数指定時は OR）",
+            )
+            p.add_argument(
+                "--limit",
+                type=_limit_type,
+                default=100,
+                help="返却するタスクの最大件数（1〜1000、既定値: 100）",
+            )
+            p.add_argument(
+                "--json",
+                action="store_true",
+                help="JSON 出力を明示（指定の有無に関わらず常に JSON 出力）",
+            )
         elif name == "identity":
             id_sub = p.add_subparsers(dest="identity_action", required=True)
             id_sub.add_parser(
@@ -338,6 +401,7 @@ def main(argv: list[str] | None = None) -> int:
         "handoff": _cmd_handoff,
         "task-status": _cmd_task_status,
         "task-result": _cmd_task_result,
+        "task-list": _cmd_task_list,
         "result-submit": _cmd_result_submit,
         "reconcile-dispatch": _cmd_reconcile_dispatch,
         "resume-task": _cmd_resume_task,

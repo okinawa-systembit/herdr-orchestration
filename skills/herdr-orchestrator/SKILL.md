@@ -20,7 +20,7 @@ description: >-
 
 install 後は PATH 上の **`herdr-orchestrator`**（`~/.local/bin` → `~/.agents/skills/herdr-orchestration/scripts/herdr-orchestrator`）。開発・配布で同一。未 install 時のソース: `skills/herdr-orchestrator/scripts/herdr-orchestrator`。
 
-コマンド一覧: [references/public-cli.md](references/public-cli.md)（正本は設計 [§6.5](../../docs/herdr-orchestrator/03-task-registry.md#sec-6-5)）。
+コマンド一覧およびクラッシュ再起動後のタスク状態確認手順: [references/public-cli.md](references/public-cli.md)（正本は設計 [§6.5](../../docs/herdr-orchestrator/03-task-registry.md#sec-6-5)）。
 
 ## 責務境界
 
