@@ -784,6 +784,51 @@ class OrchestratorTaskListTests(unittest.TestCase):
         self.assertEqual(huge_anom["code"], "read_error")
         self.assertIn("exceeds maximum allowed limit", huge_anom["message"])
 
+    def test_dir_fd_race_directory_replaced_after_open(self) -> None:
+        """
+        Verify that even if the tasks directory path is replaced/renamed during scanning,
+        listing continues reading from the verified inode via dir_fd (R62-10).
+        """
+        uuid_orig = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
+        uuid_fake = "ffffffff-ffff-4fff-8fff-ffffffffffff"
+        self.tasks_dir.mkdir(parents=True, exist_ok=True)
+        os.chmod(self.state_home, 0o700)
+        os.chmod(self.tasks_dir.parent, 0o700)
+        os.chmod(self.tasks_dir, 0o700)
+
+        # 1. Write original task in tasks_dir
+        doc_orig = _make_canonical_task_doc(task_id=f"task_{uuid_orig}")
+        self.write_task_file(f"task_{uuid_orig}", doc_orig)
+
+        real_scandir = os.scandir
+
+        def hooked_scandir(fd_or_path):
+            # Simulate directory replacement before scandir reads entries:
+            # move original tasks dir and create new one with fake doc
+            if self.tasks_dir.exists():
+                old_dir = self.tasks_dir.parent / "tasks_old"
+                os.rename(self.tasks_dir, old_dir)
+                self.tasks_dir.mkdir(mode=0o700)
+                doc_fake = _make_canonical_task_doc(task_id=f"task_{uuid_fake}")
+                (self.tasks_dir / f"task_{uuid_fake}.json").write_text(json.dumps(doc_fake), encoding="utf-8")
+            return real_scandir(fd_or_path)
+
+        from orchestrator.registry.listing import read_task_candidates
+
+        with unittest.mock.patch.dict(
+            os.environ,
+            {"XDG_STATE_HOME": str(self.state_home), "HERDR_ENV": "1"},
+        ):
+            with unittest.mock.patch("orchestrator.registry.listing.os.scandir", side_effect=hooked_scandir):
+                exists, valid_docs, anomalies, concurrent_changes = read_task_candidates()
+
+        self.assertTrue(exists)
+        self.assertEqual(len(valid_docs), 1)
+        # Must have read doc_orig from the verified inode, NOT doc_fake from the new path!
+        self.assertEqual(valid_docs[0]["task"]["id"], f"task_{uuid_orig}")
+        self.assertEqual(anomalies, [])
+        self.assertEqual(concurrent_changes, [])
+
 
 if __name__ == "__main__":
     unittest.main()
