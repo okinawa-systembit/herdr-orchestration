@@ -43,7 +43,7 @@ def fetch_task_list(
 
         if cli_bin:
             proc = subprocess.run(
-                [cli_bin, "task-list", "--repository", repo_identity, "--type", "review"],
+                [cli_bin, "task-list", "--repository", repo_identity, "--type", "review", "--limit", "1000"],
                 cwd=str(worktree),
                 capture_output=True,
                 text=True,
@@ -54,10 +54,11 @@ def fetch_task_list(
                 except json.JSONDecodeError:
                     pass
 
-    # Fallback to direct Python call
+    # Fallback to direct Python call with max limit 1000 (R64-01)
     payload, code = run_task_list(
         repository=repo_identity,
         type="review",
+        limit=1000,
     )
     if code != 0:
         return {"complete": False, "truncated": False, "tasks": [], "error_code": code}
@@ -101,6 +102,7 @@ def check_active_review_tasks(
 
     tasks = data.get("tasks", [])
     active_ids: list[str] = []
+    inconsistent_ids: list[str] = []
 
     for item in tasks:
         task_info = item.get("task", {})
@@ -115,10 +117,29 @@ def check_active_review_tasks(
         task_st = task_info.get("status")
         result_st = result_info.get("status")
         overview_st = overview.get("state")
+        warnings = overview.get("warnings", [])
+
+        # R64-06: Check for inconsistent_state_combination
+        if "inconsistent_state_combination" in warnings:
+            inconsistent_ids.append(task_id)
 
         # An active or incomplete task is open or uncertain
         if overview_st in ("open", "uncertain") or task_st in ("created", "in_progress", "unknown") or result_st == "pending":
             active_ids.append(task_id)
+
+    if inconsistent_ids:
+        return TaskCheckResult(
+            can_safely_initialize=False,
+            has_active_tasks=bool(active_ids),
+            uncertain=True,
+            active_task_ids=list(set(active_ids + inconsistent_ids)),
+            message=(
+                f"Found {len(inconsistent_ids)} review task(s) with inconsistent state combination: "
+                f"{', '.join(inconsistent_ids)}. Safety stop required. "
+                f"Resolve task state or specify --abandon-old-tasks to reinitialize."
+            ),
+            raw_data=data,
+        )
 
     if active_ids:
         return TaskCheckResult(

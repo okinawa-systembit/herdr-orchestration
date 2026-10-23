@@ -319,7 +319,25 @@ def cmd_record_save(args: argparse.Namespace) -> int:
                 return 1
 
             target_commit = args.target_commit or _get_head_commit(worktree)
-            status_str = args.result_status or "succeeded"
+            outcome = args.outcome
+            task_status = args.task_status or "succeeded"
+            if args.result_status:
+                if args.result_status in ("GO", "要修正", "NO-GO", "CONDITIONAL GO"):
+                    outcome = args.result_status
+                else:
+                    print(
+                        f"[ERROR] --result-status '{args.result_status}' is not a valid review outcome (choices: GO, 要修正, NO-GO, CONDITIONAL GO). "
+                        "Specify --outcome for review outcome and --task-status for task execution status.",
+                        file=sys.stderr,
+                    )
+                    return 2
+
+            if not outcome:
+                print(
+                    "[ERROR] --outcome is required (choices: GO, 要修正, NO-GO, CONDITIONAL GO)",
+                    file=sys.stderr,
+                )
+                return 2
 
             try:
                 review_id, out_path, is_new = record_save_atomic(
@@ -327,7 +345,8 @@ def cmd_record_save(args: argparse.Namespace) -> int:
                     worktree,
                     args.task_id,
                     body_content,
-                    result_status=status_str,
+                    outcome=outcome,
+                    task_status=task_status,
                     target_commit=target_commit,
                 )
             except TaskRecordConflictError as e:
@@ -401,7 +420,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_rec.add_argument("--task-id", required=True, help="Orchestrator Task ID (required)")
     p_rec.add_argument("--body-file", help="Path to file containing review content ('-' for stdin)")
     p_rec.add_argument("--body", help="Inline markdown review content")
-    p_rec.add_argument("--result-status", help="Review outcome / status (e.g. GO, CONDITIONAL GO, succeeded)")
+    p_rec.add_argument("--outcome", choices=["GO", "要修正", "NO-GO", "CONDITIONAL GO"], default=None, help="Review outcome / verdict (required, choices: GO, 要修正, NO-GO, CONDITIONAL GO)")
+    p_rec.add_argument("--task-status", choices=["succeeded", "failed"], default="succeeded", help="Orchestrator task execution status (default: succeeded)")
+    p_rec.add_argument("--result-status", help="Legacy alias for outcome (e.g. GO, 要修正, NO-GO)")
     p_rec.add_argument("--target-commit", help="Reviewed commit SHA")
     p_rec.set_defaults(func=cmd_record_save)
 

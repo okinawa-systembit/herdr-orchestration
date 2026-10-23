@@ -27,6 +27,10 @@ class TaskRecordConflictError(Exception):
     """Raised when re-recording an existing task ID with different content."""
 
 
+class ReviewRecordExistsError(Exception):
+    """Raised when attempting to overwrite an existing review record."""
+
+
 def get_internal_reviews_root(worktree: str | Path) -> Path:
     return Path(worktree).resolve() / "docs" / "reviews" / "internal"
 
@@ -120,7 +124,8 @@ def parse_review_metadata(file_path: Path) -> dict[str, Any]:
     meta: dict[str, Any] = {
         "review_id": file_path.stem,
         "filename": file_path.name,
-        "status": "UNKNOWN",
+        "outcome": "UNKNOWN",
+        "status": "succeeded",
         "task_id": "-",
         "target_commit": "-",
         "summary": "-",
@@ -141,12 +146,18 @@ def parse_review_metadata(file_path: Path) -> dict[str, Any]:
                     v = v.strip().strip('"').strip("'")
                     if k in meta:
                         meta[k] = v
+            # Backwards compatibility: if outcome not set but status is a review outcome
+            if meta["outcome"] == "UNKNOWN" and meta["status"] in ("GO", "要修正", "NO-GO", "CONDITIONAL GO"):
+                meta["outcome"] = meta["status"]
+                meta["status"] = "succeeded"
 
     # Fallback search in Markdown headers/bullets ONLY if no frontmatter exists
     if not has_frontmatter:
         for line in content.splitlines():
             line_clean = line.strip()
-            if line_clean.startswith("- **Status**:") or line_clean.startswith("- **総合判定**:"):
+            if line_clean.startswith("- **総合判定**:") or line_clean.startswith("- **判定**:"):
+                meta["outcome"] = line_clean.split(":", 1)[1].strip().strip("*").strip()
+            elif line_clean.startswith("- **Status**:") or line_clean.startswith("- **Task Status**:"):
                 meta["status"] = line_clean.split(":", 1)[1].strip().strip("*").strip()
             elif line_clean.startswith("- **Task ID**:"):
                 meta["task_id"] = line_clean.split(":", 1)[1].strip().strip("*").strip()
@@ -207,7 +218,7 @@ def update_index(
         dt = r["created_at"]
         tid = r["task_id"]
         commit = r["target_commit"]
-        st = r["status"]
+        st = r.get("outcome", r.get("status", "UNKNOWN"))
         lines.append(f"| {rid} | {dt} | {tid} | `{commit}` | **{st}** | [{fname}]({fname}) |")
 
     lines.append("")
@@ -254,9 +265,9 @@ def save_review_record(
     reviews_dir = get_instance_reviews_dir(current_worktree, instance_id)
     safe_ensure_dir(reviews_dir, 0o700, base_dir=current_worktree)
 
-    # Format document with metadata header if not already formatted
+    # Format document with metadata header
     final_content = content
-    if metadata and not content.startswith("---"):
+    if metadata:
         fm_lines = ["---"]
         for k, v in metadata.items():
             fm_lines.append(f"{k}: \"{v}\"")
@@ -275,7 +286,21 @@ def save_review_record(
     finally:
         os.close(fd)
 
-    os.replace(str(tmp_path), str(target_file))
+    # R64-05: Publish atomically without overwriting using os.link
+    try:
+        os.link(str(tmp_path), str(target_file))
+        os.unlink(str(tmp_path))
+    except FileExistsError as e:
+        if tmp_path.exists():
+            os.unlink(str(tmp_path))
+        raise ReviewRecordExistsError(
+            f"Review record already exists and cannot be overwritten: {target_file}"
+        ) from e
+    except Exception:
+        if tmp_path.exists():
+            os.unlink(str(tmp_path))
+        raise
+
     os.chmod(str(target_file), 0o600)
 
     # Derive INDEX.md
@@ -285,11 +310,22 @@ def save_review_record(
 
 
 def _extract_body_without_frontmatter(text: str) -> str:
+    """Extract body content without leading frontmatter, preserving exact bytes/whitespace."""
     if text.startswith("---"):
         parts = text.split("---", 2)
         if len(parts) >= 3:
-            return parts[2].strip()
-    return text.strip()
+            body = parts[2]
+            # Strip newline(s) immediately following frontmatter closing delimiter
+            if body.startswith("\r\n\r\n"):
+                return body[4:]
+            elif body.startswith("\n\n"):
+                return body[2:]
+            elif body.startswith("\r\n"):
+                return body[2:]
+            elif body.startswith("\n"):
+                return body[1:]
+            return body
+    return text
 
 
 def record_save_atomic(
@@ -298,14 +334,21 @@ def record_save_atomic(
     task_id: str,
     content: str,
     *,
-    result_status: str = "succeeded",
+    outcome: str = "GO",
+    task_status: str = "succeeded",
+    result_status: str | None = None,
     target_commit: str = "unknown",
 ) -> tuple[str, Path, bool]:
     """
     Idempotently save review record for task_id under lock.
     Returns (review_id, file_path, is_new).
-    Raises TaskRecordConflictError if task_id already recorded with different content.
+    Raises TaskRecordConflictError if task_id already recorded with different content, commit, or outcome.
     """
+    if result_status is not None:
+        if result_status in ("GO", "要修正", "NO-GO", "CONDITIONAL GO"):
+            outcome = result_status
+        else:
+            task_status = result_status
     current_worktree = Path(current_worktree).resolve()
     state = load_state(git_common_dir)
     if state is None:
@@ -318,17 +361,39 @@ def record_save_atomic(
     existing = find_existing_record_by_task_id(reviews_dir, task_id)
     if existing is not None:
         existing_rid, existing_path, existing_content = existing
-        existing_body = _extract_body_without_frontmatter(existing_content)
-        new_body = _extract_body_without_frontmatter(content)
         existing_meta = parse_review_metadata(existing_path)
+        existing_body = _extract_body_without_frontmatter(existing_content)
+        # If the input content already contains helper frontmatter header, strip it too
+        if content.startswith("---") and "task_id:" in content[:300]:
+            new_body = _extract_body_without_frontmatter(content)
+        else:
+            new_body = content
 
-        # Verify semantic content consistency
-        if existing_body == new_body and existing_meta.get("status") == result_status:
-            # Idempotent replay: return existing record without creating a new one
+        # R64-02: Strict verification of target_commit, outcome, and payload body
+        commit_match = (existing_meta.get("target_commit") == target_commit)
+        existing_outcome = existing_meta.get("outcome")
+        if existing_outcome == "UNKNOWN":
+            existing_outcome = existing_meta.get("status")
+        outcome_match = (existing_outcome == outcome)
+        body_match = (existing_body == new_body)
+
+        if commit_match and outcome_match and body_match:
+            # Idempotent replay: return existing record without altering any files
             return existing_rid, existing_path, False
         else:
+            diffs = []
+            if not commit_match:
+                diffs.append(
+                    f"target_commit mismatch (existing={existing_meta.get('target_commit')}, requested={target_commit})"
+                )
+            if not outcome_match:
+                diffs.append(
+                    f"outcome mismatch (existing={existing_outcome}, requested={outcome})"
+                )
+            if not body_match:
+                diffs.append("body content mismatch")
             raise TaskRecordConflictError(
-                f"Task ID '{task_id}' was already recorded in {existing_path} with different content or status"
+                f"Task ID '{task_id}' was already recorded in {existing_path} with conflicting payload: {'; '.join(diffs)}"
             )
 
     # 2. Allocate next ID (atomically increments counter)
@@ -338,7 +403,8 @@ def record_save_atomic(
         "review_id": review_id,
         "task_id": task_id,
         "instance_id": updated_state["instance_id"],
-        "status": result_status,
+        "outcome": outcome,
+        "status": task_status,
         "target_commit": target_commit,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }

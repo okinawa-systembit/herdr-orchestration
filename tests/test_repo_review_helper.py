@@ -26,6 +26,7 @@ if str(REPO_ROOT / "skills" / "herdr-orchestrator" / "scripts") not in sys.path:
 from repo_review_helper.cli import main as cli_main
 from repo_review_helper.lock import LockAcquisitionError, ReviewLock
 from repo_review_helper.recorder import (
+    ReviewRecordExistsError,
     TaskRecordConflictError,
     allocate_next_review_id,
     get_instance_reviews_dir,
@@ -49,7 +50,11 @@ from repo_review_helper.state import (
     load_state,
     save_state,
 )
-from repo_review_helper.task_checker import TaskCheckResult, check_active_review_tasks
+from repo_review_helper.task_checker import (
+    TaskCheckResult,
+    check_active_review_tasks,
+    fetch_task_list,
+)
 
 
 def _worker_acquire_lock_and_hold(git_common_dir_str: str, queue: multiprocessing.Queue):
@@ -99,6 +104,32 @@ class TestReviewLock(unittest.TestCase):
                 lock2.acquire()
         finally:
             lock1.release()
+
+    def test_lock_symlink_rejection(self):
+        """R64-04: Reject lock acquisition if lock file is a symlink."""
+        target_file = self.common_dir / "target.txt"
+        target_file.write_text("target", encoding="utf-8")
+        lock_file = self.common_dir / ReviewLock.LOCK_FILENAME
+        lock_file.symlink_to(target_file)
+
+        lock = ReviewLock(self.common_dir)
+        with self.assertRaises(LockAcquisitionError) as ctx:
+            lock.acquire()
+        self.assertIn("symlink", str(ctx.exception).lower())
+
+    def test_lock_non_regular_file_rejection(self):
+        """R64-04: Reject lock acquisition if lock file is not a regular file (e.g. directory)."""
+        lock_file = self.common_dir / ReviewLock.LOCK_FILENAME
+        lock_file.mkdir()
+
+        lock = ReviewLock(self.common_dir)
+        with self.assertRaises(LockAcquisitionError) as ctx:
+            lock.acquire()
+        self.assertTrue(
+            "not a regular file" in str(ctx.exception)
+            or "is a directory" in str(ctx.exception).lower()
+            or "permission" in str(ctx.exception).lower()
+        )
 
     def test_lock_released_on_process_exit(self):
         ctx = multiprocessing.get_context("spawn")
@@ -418,6 +449,106 @@ class TestRecorder(unittest.TestCase):
                     result_status="GO",
                 )
 
+    def test_record_save_atomic_conflict_commit(self):
+        """R64-02: Conflicting target_commit raises TaskRecordConflictError."""
+        with ReviewLock(self.common_dir):
+            record_save_atomic(
+                self.common_dir,
+                self.worktree,
+                "task_commit_conflict",
+                "Review body text",
+                outcome="GO",
+                target_commit="commit_aaa",
+            )
+
+            with self.assertRaises(TaskRecordConflictError) as ctx:
+                record_save_atomic(
+                    self.common_dir,
+                    self.worktree,
+                    "task_commit_conflict",
+                    "Review body text",
+                    outcome="GO",
+                    target_commit="commit_bbb",
+                )
+            self.assertIn("target_commit mismatch", str(ctx.exception))
+
+    def test_record_save_atomic_conflict_outcome(self):
+        """R64-02: Conflicting outcome raises TaskRecordConflictError."""
+        with ReviewLock(self.common_dir):
+            record_save_atomic(
+                self.common_dir,
+                self.worktree,
+                "task_outcome_conflict",
+                "Review body text",
+                outcome="GO",
+                target_commit="commit_aaa",
+            )
+
+            with self.assertRaises(TaskRecordConflictError) as ctx:
+                record_save_atomic(
+                    self.common_dir,
+                    self.worktree,
+                    "task_outcome_conflict",
+                    "Review body text",
+                    outcome="要修正",
+                    target_commit="commit_aaa",
+                )
+            self.assertIn("outcome mismatch", str(ctx.exception))
+
+    def test_record_save_atomic_conflict_body_whitespace(self):
+        """R64-02: Byte-level discrepancy in body content raises TaskRecordConflictError."""
+        with ReviewLock(self.common_dir):
+            record_save_atomic(
+                self.common_dir,
+                self.worktree,
+                "task_ws_conflict",
+                "Review body line\n",
+                outcome="GO",
+                target_commit="commit_aaa",
+            )
+
+            with self.assertRaises(TaskRecordConflictError) as ctx:
+                record_save_atomic(
+                    self.common_dir,
+                    self.worktree,
+                    "task_ws_conflict",
+                    "Review body line  \n",
+                    outcome="GO",
+                    target_commit="commit_aaa",
+                )
+            self.assertIn("body content mismatch", str(ctx.exception))
+
+    def test_save_review_record_prevent_overwrite(self):
+        """R64-05: save_review_record uses atomic link and raises ReviewRecordExistsError if destination exists."""
+        with ReviewLock(self.common_dir):
+            rid = "RV001"
+            path1 = save_review_record(
+                self.common_dir,
+                self.worktree,
+                rid,
+                "Initial review content",
+                metadata={"status": "GO"},
+            )
+            self.assertTrue(path1.exists())
+            self.assertEqual(path1.read_text(encoding="utf-8").strip().splitlines()[-1], "Initial review content")
+
+            with self.assertRaises(ReviewRecordExistsError):
+                save_review_record(
+                    self.common_dir,
+                    self.worktree,
+                    rid,
+                    "Overwriting content attempt",
+                    metadata={"status": "GO"},
+                )
+
+            # Target file content must be unchanged
+            self.assertEqual(path1.read_text(encoding="utf-8").strip().splitlines()[-1], "Initial review content")
+
+            # No dangling tmp files in reviews directory
+            reviews_dir = get_instance_reviews_dir(self.worktree, self.inst_id)
+            tmp_files = list(reviews_dir.glob(".tmp.*"))
+            self.assertEqual(len(tmp_files), 0)
+
     def test_skipped_number_tolerance(self):
         """Simulate crash after allocation: counter incremented but record not saved."""
         with ReviewLock(self.common_dir):
@@ -443,6 +574,40 @@ class TestRecorder(unittest.TestCase):
         with ReviewLock(self.common_dir):
             rid3, _ = allocate_next_review_id(self.common_dir, self.worktree)
             self.assertEqual(rid3, "RV003")
+
+    def test_record_save_atomic_content_starting_with_triple_dash(self):
+        """X-2: Content starting with '---' receives helper frontmatter and supports idempotent replay."""
+        body = "---\ntitle: Nested Frontmatter\n---\nActual content line."
+        with ReviewLock(self.common_dir):
+            rid1, path1, is_new1 = record_save_atomic(
+                self.common_dir,
+                self.worktree,
+                "task_triple_dash",
+                body,
+                outcome="GO",
+                task_status="succeeded",
+                target_commit="commit_dash",
+            )
+            self.assertTrue(is_new1)
+            self.assertTrue(path1.exists())
+
+            meta = parse_review_metadata(path1)
+            self.assertEqual(meta["task_id"], "task_triple_dash")
+            self.assertEqual(meta["outcome"], "GO")
+
+            # Re-saving same content must be idempotent
+            rid2, path2, is_new2 = record_save_atomic(
+                self.common_dir,
+                self.worktree,
+                "task_triple_dash",
+                body,
+                outcome="GO",
+                task_status="succeeded",
+                target_commit="commit_dash",
+            )
+            self.assertFalse(is_new2)
+            self.assertEqual(rid1, rid2)
+            self.assertEqual(path1, path2)
 
 
 class TestTaskChecker(unittest.TestCase):
@@ -508,6 +673,64 @@ class TestTaskChecker(unittest.TestCase):
         res = check_active_review_tasks(self.worktree)
         self.assertFalse(res.can_safely_initialize)
         self.assertTrue(res.uncertain)
+
+    @patch("repo_review_helper.task_checker.fetch_task_list")
+    @patch("repo_review_helper.task_checker.get_or_create_repository_identity")
+    def test_inconsistent_state_combination_warning(self, mock_identity, mock_fetch):
+        """R64-06: Task with inconsistent_state_combination warning triggers safety stop even if state is closed."""
+        mock_identity.return_value = "repo-id-123"
+        mock_fetch.return_value = {
+            "complete": True,
+            "truncated": False,
+            "tasks": [
+                {
+                    "task": {"id": "task_inconsistent", "type": "review", "status": "succeeded"},
+                    "result": {"status": "succeeded"},
+                    "overview": {
+                        "state": "closed",
+                        "warnings": ["inconsistent_state_combination"],
+                    },
+                }
+            ],
+        }
+
+        res = check_active_review_tasks(self.worktree)
+        self.assertFalse(res.can_safely_initialize)
+        self.assertTrue(res.uncertain)
+        self.assertIn("task_inconsistent", res.active_task_ids)
+        self.assertIn("inconsistent state combination", res.message)
+
+    @patch("repo_review_helper.task_checker.run_task_list")
+    def test_fetch_task_list_passes_limit_1000(self, mock_run_task_list):
+        """R64-01: fetch_task_list specifies limit=1000 to prevent truncated list under 1000 tasks."""
+        mock_run_task_list.return_value = ({"complete": True, "truncated": False, "tasks": []}, 0)
+
+        data = fetch_task_list(self.worktree, "repo-id-123")
+        self.assertTrue(data.get("complete"))
+        mock_run_task_list.assert_called_once_with(
+            repository="repo-id-123",
+            type="review",
+            limit=1000,
+        )
+
+    @patch("subprocess.run")
+    @patch("shutil.which")
+    def test_fetch_task_list_cli_passes_limit_1000(self, mock_which, mock_subproc):
+        """R64-01: fetch_task_list via CLI passes '--limit 1000' argument."""
+        mock_which.return_value = "/usr/local/bin/herdr-orchestrator"
+        mock_subproc.return_value = MagicMock(
+            stdout=json.dumps({"complete": True, "truncated": False, "tasks": []}),
+            returncode=0,
+        )
+
+        data = fetch_task_list(self.worktree, "repo-id-123", use_cli=True)
+        self.assertTrue(data.get("complete"))
+        self.assertTrue(mock_subproc.called)
+        args, kwargs = mock_subproc.call_args
+        cmd = args[0]
+        self.assertIn("--limit", cmd)
+        limit_idx = cmd.index("--limit")
+        self.assertEqual(cmd[limit_idx + 1], "1000")
 
 
 class TestCliIntegration(unittest.TestCase):
@@ -678,6 +901,74 @@ class TestCliIntegration(unittest.TestCase):
 
         code_json = cli_main(["status", "--worktree", wt_str, "--json"])
         self.assertEqual(code_json, 2)
+
+    @patch("repo_review_helper.cli.check_active_review_tasks")
+    def test_cli_record_save_outcome_and_task_status(self, mock_check):
+        """R64-03: Separation of review outcome (--outcome) and task status (--task-status)."""
+        mock_check.return_value = TaskCheckResult(
+            can_safely_initialize=True,
+            has_active_tasks=False,
+            uncertain=False,
+        )
+        wt_str = str(self.worktree)
+        cli_main(["init", "--worktree", wt_str])
+
+        code = cli_main([
+            "record-save",
+            "--worktree", wt_str,
+            "--task-id", "task_r64_03",
+            "--body", "## Review Summary\n\nChanges requested.",
+            "--outcome", "要修正",
+            "--task-status", "succeeded",
+            "--target-commit", "fedcba9876",
+        ])
+        self.assertEqual(code, 0)
+
+        state = load_state(get_git_common_dir(self.worktree))
+        inst_dir = get_instance_reviews_dir(self.worktree, state["instance_id"])
+        rv1 = inst_dir / "RV001.md"
+        self.assertTrue(rv1.exists())
+
+        meta = parse_review_metadata(rv1)
+        self.assertEqual(meta["outcome"], "要修正")
+        self.assertEqual(meta["status"], "succeeded")
+        self.assertEqual(meta["target_commit"], "fedcba9876")
+
+        index_file = inst_dir / "INDEX.md"
+        self.assertTrue(index_file.exists())
+        index_text = index_file.read_text(encoding="utf-8")
+        self.assertIn("要修正", index_text)
+        self.assertIn("fedcba9876", index_text)
+
+    @patch("repo_review_helper.cli.check_active_review_tasks")
+    def test_cli_record_save_outcome_required_exit_2(self, mock_check):
+        """X-1: Omitting --outcome or providing invalid outcome via legacy --result-status exits 2."""
+        mock_check.return_value = TaskCheckResult(
+            can_safely_initialize=True,
+            has_active_tasks=False,
+            uncertain=False,
+        )
+        wt_str = str(self.worktree)
+        cli_main(["init", "--worktree", wt_str])
+
+        # 1. Omitting --outcome
+        code1 = cli_main([
+            "record-save",
+            "--worktree", wt_str,
+            "--task-id", "task_missing_outcome",
+            "--body", "Review content",
+        ])
+        self.assertEqual(code1, 2)
+
+        # 2. Specifying legacy --result-status succeeded (which is not an outcome)
+        code2 = cli_main([
+            "record-save",
+            "--worktree", wt_str,
+            "--task-id", "task_legacy_succeeded",
+            "--body", "Review content",
+            "--result-status", "succeeded",
+        ])
+        self.assertEqual(code2, 2)
 
 
 if __name__ == "__main__":

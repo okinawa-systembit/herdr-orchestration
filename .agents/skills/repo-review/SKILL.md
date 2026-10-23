@@ -234,11 +234,11 @@ handoff 失敗時: stderr を人間へ。blind 再送しない（設計 §9）�
   ...
   EOF
 
-  # 採番・個別記録の原子的公開・INDEX更新
+  # 採番・個別記録の原子的公開・INDEX更新（--outcome にレビュー判定 GO/要修正/NO-GO を指定）
   scripts/repo-review-helper record-save \
     --task-id "<task.id>" \
     --body-file "$TMP_BODY" \
-    --result-status "GO" \
+    --outcome "GO" \
     --target-commit "<target_commit>"
   rm -f "$TMP_BODY"
   ```
@@ -254,6 +254,8 @@ herdr-orchestrator result-submit <task.id> \
   --summary 'Review record saved via repo-review-helper.'
 ```
 
+※ **レビュー判定と Task 実行ステータスの分離**:  
+レビュー判定が `GO` 以外（`要修正` や `NO-GO`）であっても、レビュー作業・検証自体が正常に完了して記録が保存されていれば、Orchestrator の Task 実行ステータスは `--result-status succeeded` として提出する（Task 自体の実行失敗時のみ `failed` とする）。  
 `--summary` は 200 字以内の簡潔な記録に留める（詳細は result.ref 側）。
 
 ---

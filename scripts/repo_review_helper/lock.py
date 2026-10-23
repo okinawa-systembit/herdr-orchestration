@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import errno
 import fcntl
 import os
+import stat
 import time
 from pathlib import Path
 from types import TracebackType
@@ -46,18 +48,42 @@ class ReviewLock:
         start_time = time.monotonic()
 
         attempts = 0
+        open_flags = os.O_CREAT | os.O_RDWR
+        if hasattr(os, "O_NOFOLLOW"):
+            open_flags |= os.O_NOFOLLOW
+
         while attempts < self.MAX_RETRIES:
             attempts += 1
-            fd = os.open(str(self.lock_path), os.O_CREAT | os.O_RDWR, 0o600)
             try:
-                # Check symlink
+                fd = os.open(str(self.lock_path), open_flags, 0o600)
+            except OSError as e:
+                if e.errno == errno.ELOOP or os.path.islink(str(self.lock_path)):
+                    raise LockAcquisitionError(
+                        f"Security error: lock file {self.lock_path} is a symlink"
+                    ) from e
+                if e.errno == errno.EISDIR or os.path.isdir(str(self.lock_path)):
+                    raise LockAcquisitionError(
+                        f"Security error: lock file {self.lock_path} is a directory, not a regular file"
+                    ) from e
+                raise LockAcquisitionError(
+                    f"Failed to open lock file {self.lock_path}: {e}"
+                ) from e
+
+            try:
+                # Check symlink (double defense)
                 if os.path.islink(str(self.lock_path)):
                     raise LockAcquisitionError(
                         f"Security error: lock file {self.lock_path} is a symlink"
                     )
 
-                # Ensure permissions are strictly 0600 and owned by current user
+                # Ensure opened descriptor is a regular file
                 st = os.fstat(fd)
+                if not stat.S_ISREG(st.st_mode):
+                    raise LockAcquisitionError(
+                        f"Security error: lock file {self.lock_path} is not a regular file"
+                    )
+
+                # Ensure permissions are strictly 0600 and owned by current user
                 if st.st_uid != os.getuid():
                     raise LockAcquisitionError(
                         f"Security error: lock file {self.lock_path} is owned by UID {st.st_uid}, expected {os.getuid()}"
