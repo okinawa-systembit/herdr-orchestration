@@ -44,7 +44,7 @@ clone なし配布: [distribution-install.md](distribution-install.md)。
 | 4     | repo Skill 内 Herdr CLI 手順の削除（公式 herdr Skill へ）                        |
 | 5     | 各 repo で回帰確認後、中央方式へ切替                                             |
 
-本リポジトリ: [.review-inbox/](../../../.review-inbox/README.md) + [repo-review](../../../.agents/skills/repo-review/SKILL.md)（sync handoff レビュー）。
+本リポジトリ: [repo-review](../../../.agents/skills/repo-review/SKILL.md)（sync handoff レビュー。内部記録は `docs/reviews/internal/`）。
 
 ## 5. §18 検証記録
 

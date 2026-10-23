@@ -324,14 +324,19 @@ herdr-orchestrator task-list --worktree "$(git rev-parse --show-toplevel)"
 
 #### 4. Worker が実行結果を提出する (result-submit)
 
-Worker Agent は作業完了後、タスク結果を提出します（Requester ではなく Worker が実行します）。
+Worker Agent は作業完了後、タスク結果を提出します（Requester ではなく Worker が実行します）。  
+`--result-ref` には作業成果物ファイルの worktree 相対パス（本リポジトリの内部レビュー運用の場合は `repo-review-helper record-save` が出力した記録パス）を指定します。
 
 ```bash
+# 例: 内部レビュー（Phase 1）のレビュー記録を提出する場合
+# （※ <instance-id> や RV001.md は例示であり、実際には record-save が返したパスを指定します）
 herdr-orchestrator result-submit task_example \
   --result-status succeeded \
-  --result-ref ".review-inbox/review-response.md" \
+  --result-ref "docs/reviews/internal/<instance-id>/RV001.md" \
   --summary "レビュー完了。指摘なし（GO）。"
 ```
+
+※ 一般的なタスクでも、`--result-ref` には worktree 内に実在するファイルの相対パスを指定します（URL・絶対パス・worktree 外のパスは拒否されます）。
 
 #### 5. Requester がタスク結果を取得する
 

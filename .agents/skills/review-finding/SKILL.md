@@ -45,7 +45,7 @@ description: >-
   - 初回 20 Scope レビューなどの Scope Issue レビュー。
   - 通常 Pull Request のレビューにおいて、マージ前是正または将来追跡が必要な未解決指摘。
 - **Herdr 内部レビューでの扱い**:
-  - エージェント間の日常的な handoff レビュー（ローカル `.review-inbox/` 完結）では GitHub 起票は**不要**であり、本 Skill による GitHub 投稿は強制しない。
+  - エージェント間の日常的な handoff レビュー（ローカル内部レビュー完結）では GitHub 起票は**不要**であり、本 Skill による GitHub 投稿は強制しない。
 
 ---
 

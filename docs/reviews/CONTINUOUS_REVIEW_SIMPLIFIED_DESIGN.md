@@ -487,7 +487,7 @@ assignees: ""
 GitHub API の障害時やオフライン環境、認証エラーが発生した場合は、以下のフォールバック手順を実行する。
 
 1. **ローカル Markdown 生成**:
-   - レビュー結果をリポジトリ内のローカル一時ファイル（例: `.review-inbox/review-response.md`）に標準フォーマットで出力する。
+   - レビュー結果をリポジトリ内のローカル非公開領域（Phase 1: `docs/reviews/internal/<instance-id>/RVNNN.md`、`scripts/repo-review-helper record-save`）に標準フォーマットで出力する。
 2. **人間への通知・手動登録**:
    - エージェントは「GitHub への自動投稿に失敗したため、ローカルに結果を保存した」旨を報告し、人間が後から GitHub PR や Issue へコピー＆ペーストして登録できるようにする。
 

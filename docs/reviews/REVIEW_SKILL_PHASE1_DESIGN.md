@@ -72,7 +72,7 @@ Phase 1 はこのリポジトリの Herdr 内部レビューの品質基準、�
 | 情報                               | 正本                                                              | ID・参照                                                                  |
 | ---------------------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------- |
 | Task、dispatch、result、completion | [Task Registry](../herdr-orchestrator/03-task-registry.md#sec-6)  | Registry が発行する Task ID                                               |
-| 配送前の依頼と一時応答             | Git 除外した `.inbox/review/`                                     | 一時パストークン、発行後は Task ID                                        |
+| 配送前の依頼                       | Git 除外した `.inbox/`                                            | 一時パストークン (`review-request.<token>.md`)                            |
 | 内部レビューの個別記録             | worktree 内で Git 除外した `docs/reviews/internal/<instance-id>/` | Review ID、初回 Review ID を再利用する Chain ID                           |
 | 内部レビューの一覧                 | `docs/reviews/internal/<instance-id>/INDEX.md`                    | 個別記録から再構築できる派生索引                                          |
 | 採番と排他制御の補助状態           | Git common directory 内の非公開状態領域                           | 共有 lock (`flock`、固定パス)、instance ID、worktree 実パス、採番カウンタ |
@@ -87,13 +87,12 @@ Phase 1 はこのリポジトリの Herdr 内部レビューの品質基準、�
 
 ## 3. 配送とレビュー実行
 
-現行の `handoff` は Task ID を内部で発行してから worker に通知する。公開 CLI に Task ID の事前発行機能はないため、requester が `.inbox/review/<task-id>/request.md` を先に作る方式は採らない。Phase 1 の review handoff は必ず repository 固有 helper を経由し、[handoff の契約](../herdr-orchestrator/04-handoff-and-requester.md#sec-7)に従い、次の順序にする。
+現行の `handoff` は Task ID を内部で発行してから worker に通知する。公開 CLI に Task ID の事前発行機能はないため、requester が事前に Task ID 命名のファイルを直接作る方式は採らない。Phase 1 の review handoff は必ず repository 固有 helper を経由し、[handoff の契約](../herdr-orchestrator/04-handoff-and-requester.md#sec-7)に従い、次の順序にする。
 
-1. requester は helper を通じて[§4 の共有 lock](#sec-4)下で登録 worktree を確認し、一時ファイルに依頼内容を書き込んでから不可逆な rename 等で `.inbox/review/pending/<random-token>/request.md` として原子的に公開する。短い相対パスを `handoff --instruction` に載せる。一時パストークンは配送前の衝突回避用で、Task ID や Review ID の代わりに使用しない。`--instruction` はファイル内容を取り込む機能ではない。
+1. requester は helper（`scripts/repo-review-helper request-create`）を通じて[§4 の共有 lock](#sec-4)下で登録 worktree を確認し、一時ファイルに依頼内容を書き込んでから不可逆な rename / link 等で `.inbox/review-request.<random-token>.md` として原子的に公開する。短い相対パスを `handoff --instruction` に載せる。一時パストークンは配送前の衝突回避用で、Task ID や Review ID の代わりに使用しない。`--instruction` はファイル内容を取り込む機能ではない。
 2. worker は通知された Task ID で `task-status` を読み、Registry の instruction、worker、repository identity、worktree を照合する。一致しなければ依頼を読んだだけで作業を開始せず、既存の[worker 受信手順](../../skills/herdr-orchestrator/references/worker-receive.md)に従う。
-3. worker は仮置き依頼を読み、必要なら `.inbox/review/<task-id>/request.md` に排他的に写す。同名ファイルがあればハッシュ一致時だけ再利用し、異なれば停止する。移動・複写に失敗しても仮置き原本を残す。
-4. [repo-review Skill](../../.agents/skills/repo-review/SKILL.md) の2段階レビュー、指摘の反証確認、既存保証の確認を実施する。Tier は調査範囲を決めるが品質ゲートの省略には使わない。
-5. [§4](#sec-4)〜[§6](#sec-6) に従って記録・result 登録を行う。requester は sync handoff の終了だけを信用せず、`task-result` と記録を確認する。
+3. worker は公開された依頼書（`.inbox/review-request.<token>.md`）を読み、[repo-review Skill](../../.agents/skills/repo-review/SKILL.md) の2段階レビュー、指摘の反証確認、既存保証の確認を実施する。Tier は調査範囲を決めるが品質ゲートの省略には使わない（※ 依頼ファイルを別ディレクトリへ写す中間工程は採らず、公開ファイルを直接参照する）。
+4. [§4](#sec-4)〜[§6](#sec-6) に従って記録・result 登録を行う。requester は sync handoff の終了だけを信用せず、`task-result` と記録を確認する。
 
 仮置き依頼は Registry の terminal result、個別記録と `result.ref` の有効性を確認した後にのみ削除できる。公開前の一時ファイル（書き込み途中の未完成ファイル）は、異常終了後に破棄または隔離してよい。一方、正常に公開済みで Task ID が発行されなかった handoff 失敗や、dispatch/result が不確定な依頼は自動削除せず、手動で確認する。作成後30日の経過は手動確認の目印とし、依頼者または運用管理者が再依頼の有無を確認する。`uncertain` を未配送と断定して自動再送しない。
 
