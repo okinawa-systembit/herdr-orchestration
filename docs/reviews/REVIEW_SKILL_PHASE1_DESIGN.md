@@ -69,15 +69,15 @@ Phase 1 はこのリポジトリの Herdr 内部レビューの品質基準、�
 
 ## 2. 正本と識別子
 
-| 情報                               | 正本                                                              | ID・参照                                                                  |
-| ---------------------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| Task、dispatch、result、completion | [Task Registry](../herdr-orchestrator/03-task-registry.md#sec-6)  | Registry が発行する Task ID                                               |
-| 配送前の依頼                       | Git 除外した `.inbox/`                                            | 一時パストークン (`review-request.<token>.md`)                            |
-| 内部レビューの個別記録             | worktree 内で Git 除外した `docs/reviews/internal/<instance-id>/` | Review ID、初回 Review ID を再利用する Chain ID                           |
-| 内部レビューの一覧                 | `docs/reviews/internal/<instance-id>/INDEX.md`                    | 個別記録から再構築できる派生索引                                          |
-| 採番と排他制御の補助状態           | Git common directory 内の非公開状態領域                           | 共有 lock (`flock`、固定パス)、instance ID、worktree 実パス、採番カウンタ |
-| Scope と GitHub Issue の対応       | 既存の [docs/reviews/INDEX.md](INDEX.md) と GitHub                | 既存の R001〜R014、I001〜I005                                             |
-| PR レビュー・Finding Issue         | GitHub                                                            | 既存の番号、権限、クローズ条件                                            |
+| 情報                                     | 正本                                                              | ID・参照                                                                  |
+| ---------------------------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| Task、dispatch、result、completion       | [Task Registry](../herdr-orchestrator/03-task-registry.md#sec-6)  | Registry が発行する Task ID                                               |
+| 配送前の依頼                             | Git 除外した `.inbox/`                                            | 一時パストークン (`review-request.<token>.md`)                            |
+| 内部レビューの個別記録                   | worktree 内で Git 除外した `docs/reviews/internal/<instance-id>/` | Review ID、初回 Review ID を再利用する Chain ID                           |
+| 内部レビューの一覧                       | `docs/reviews/internal/<instance-id>/INDEX.md`                    | 個別記録から再構築できる派生索引                                          |
+| 採番と排他制御の補助状態                 | Git common directory 内の非公開状態領域                           | 共有 lock (`flock`、固定パス)、instance ID、worktree 実パス、採番カウンタ |
+| Scope と GitHub Issue の対応（完了済み） | GitHub Scope Issue (#15〜#34)                                     | 初回 20 Scope（R001〜R014、I001〜I005）                                   |
+| PR レビュー・Finding Issue               | GitHub                                                            | 既存の番号、権限、クローズ条件                                            |
 
 内部レビューには `RV001`、`RV002`、…、`RV1000` のように最小3桁で表示する Review ID を使用し、上限は設けない。Scope ID の `R001` と区別する。初回レビューの Chain ID はその Review ID と同じ値とし、Follow-up は新しい Task ID と Review ID を取得して元の Chain ID と直前の Review ID を記録する。共通 Task Registry に Review ID を追加しない。
 
@@ -211,7 +211,7 @@ CI は push 後の検出であり、公開済み情報の流出防止にはな�
 
 ## 8. 移行と改修対象
 
-実装承認後は新規依頼だけを新方式へ切り替える。旧 `.review-inbox/` の固定ファイルと履歴は読み取り専用で残し、進行中 task の有無を確認してから旧参照を廃止する。既存の[Scope INDEX](INDEX.md)と過去の検証記録は移動・削除しない。旧・新パスを同時に履歴の正本として更新しない。
+実装承認後は新規依頼だけを新方式へ切り替える。旧 `.review-inbox/` の固定ファイルと履歴は読み取り専用で残し、進行中 task の有無を確認してから旧参照を廃止する。過去の検証記録（GitHub Issues）は維持する。旧・新パスを同時に履歴の正本として更新しない。
 
 改修対象候補は `.agents/skills/repo-review/SKILL.md` と `references.md`、`.agents/skills/repo-workflow/SKILL.md`、repository 固有の handoff・記録・採番 helper とテスト、`.gitignore`、依頼・応答テンプレート、`AGENTS.md`、`README.md`、公開可能な運用文書である。Skill と運用文書には review handoff の helper 経由を必須として記載する。旧パス参照を検索し、運用上の参照を切り替える。中央 Orchestrator の Task Registry schema、handoff、result、completion、`task-list` は変更しない。
 
