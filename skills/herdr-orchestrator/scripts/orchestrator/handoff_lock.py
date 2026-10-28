@@ -10,7 +10,7 @@ from orchestrator.registry.task_id import validate_task_id
 
 
 class HandoffLockSession:
-    """§6.6: wrapper process holds handoff flock fd until release()."""
+    """§6.6: wrapper process holds handoff flock fd until release(). 非再入（入れ子不可）。"""
 
     def __init__(self, task_id: str) -> None:
         self.task_id = task_id

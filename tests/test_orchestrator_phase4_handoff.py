@@ -498,8 +498,15 @@ class Phase4HandoffTests(unittest.TestCase):
         import io as py_io
         from contextlib import redirect_stdout, redirect_stderr
 
+        real_os_open = os.open
+
+        def fake_open(path: Any, flags: int, *args: Any, **kwargs: Any) -> int:
+            if str(path).endswith(".handoff.lock"):
+                raise PermissionError("Permission denied on handoff lock")
+            return real_os_open(path, flags, *args, **kwargs)
+
         with patch.dict(os.environ, self.env):
-            with patch("orchestrator.handoff_lock.os.open", side_effect=PermissionError("Permission denied")):
+            with patch("orchestrator.handoff_lock.os.open", side_effect=fake_open):
                 stdout_buf = py_io.StringIO()
                 stderr_buf = py_io.StringIO()
                 with redirect_stdout(stdout_buf), redirect_stderr(stderr_buf):
@@ -518,7 +525,8 @@ class Phase4HandoffTests(unittest.TestCase):
                 self.assertEqual(ctx.exception.code, 1)
                 data = json.loads(stdout_buf.getvalue())
                 self.assertEqual(data.get("error"), "registry_write_failed")
-                self.assertIn("Permission denied", data.get("message", ""))
+                self.assertIn("cannot open handoff lock", data.get("message", ""))
+                self.assertIn("Permission denied on handoff lock", data.get("message", ""))
 
 
 if __name__ == "__main__":
