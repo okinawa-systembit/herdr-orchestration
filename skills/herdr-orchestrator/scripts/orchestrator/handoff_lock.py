@@ -17,6 +17,8 @@ class HandoffLockSession:
         self._fd: int | None = None
 
     def acquire(self) -> None:
+        if self._fd is not None:
+            return
         validate_task_id(self.task_id)
         ensure_registry_layout()
         lock_path = handoff_lock_path(self.task_id)
