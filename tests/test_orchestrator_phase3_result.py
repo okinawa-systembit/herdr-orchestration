@@ -176,7 +176,6 @@ class Phase3ResultCliTests(unittest.TestCase):
         self.env = os.environ.copy()
         self.env["HERDR_ENV"] = "1"
         self.env["HERDR_PANE_ID"] = "w11:p2"
-        self.env["FAKE_AGENT_CWD"] = str(self.worktree)
         self.env["XDG_STATE_HOME"] = str(self.state_home)
         self.env["PATH"] = f"{self.fake_bin}:{self.env.get('PATH', '')}"
         self.env["FAKE_AGENT_CWD"] = str(self.worktree / "sub")

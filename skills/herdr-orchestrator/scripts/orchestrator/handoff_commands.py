@@ -253,7 +253,13 @@ def run_handoff(handoff: HandoffInput) -> dict[str, Any]:
     dispatch_outcome: str | None = None
     dispatch_reason: str | None = None
 
-    with HandoffLockSession(task_id):
+    try:
+        lock_session = HandoffLockSession(task_id)
+        lock_session.acquire()
+    except RegistryError as exc:
+        raise _registry_to_handoff(exc) from exc
+
+    with lock_session:
         try:
             doc = registry_ops.record_prompt_start(task_id)
         except RegistryError as exc:

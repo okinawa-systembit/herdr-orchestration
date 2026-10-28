@@ -80,7 +80,7 @@ def ensure_registry_layout() -> Path:
             orchestrator_root.mkdir(parents=True, exist_ok=True)
         except OSError as exc:
             raise RegistryError(
-                "registry_unreadable",
+                "registry_write_failed",
                 message=f"cannot create directory: {orchestrator_root} ({exc.strerror or exc})",
             ) from exc
     _safe_chmod(orchestrator_root, _DIR_MODE)
@@ -92,7 +92,7 @@ def ensure_registry_layout() -> Path:
             root.mkdir(mode=_DIR_MODE, exist_ok=True)
         except OSError as exc:
             raise RegistryError(
-                "registry_unreadable",
+                "registry_write_failed",
                 message=f"cannot create tasks directory: {root} ({exc.strerror or exc})",
             ) from exc
     _safe_chmod(root, _DIR_MODE)
