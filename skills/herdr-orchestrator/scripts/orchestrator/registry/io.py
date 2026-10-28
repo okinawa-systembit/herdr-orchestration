@@ -15,8 +15,8 @@ from orchestrator.registry.errors import RegistryError
 from orchestrator.registry.schema import validate_loaded_task
 from orchestrator.registry.task_id import validate_task_id
 
-_DIR_MODE = 0o700
-_FILE_MODE = 0o600
+_DIR_MODE = 0o755
+_FILE_MODE = 0o644
 
 
 def utc_now_iso() -> str:
@@ -28,23 +28,15 @@ def _assert_safe_registry_path(path: Path, *, must_exist: bool = False) -> None:
         raise RegistryError("registry_unsafe_path", message=f"symlink rejected: {path!s}")
     if must_exist and not path.exists():
         raise RegistryError("registry_unsafe_path", message=f"missing path: {path!s}")
-    if path.exists() and path.stat().st_uid != os.getuid():
-        raise RegistryError("registry_unsafe_path", message=f"unexpected owner: {path!s}")
 
 
 def _assert_private_directory(path: Path, *, must_exist: bool = False) -> None:
-    """Reject group/world-writable directories (§6.9 shared writable)."""
+    """Verify registry directory safety (§6.9)."""
     _assert_safe_registry_path(path, must_exist=must_exist)
     if not path.exists():
         return
     if not path.is_dir():
         raise RegistryError("registry_unsafe_path", message=f"not a directory: {path!s}")
-    mode = stat_module.S_IMODE(path.stat().st_mode)
-    if mode & (stat_module.S_IWGRP | stat_module.S_IWOTH):
-        raise RegistryError(
-            "registry_unsafe_path",
-            message=f"shared writable directory rejected: {path!s}",
-        )
 
 
 def _write_all(fd: int, data: bytes) -> None:
@@ -56,12 +48,23 @@ def _write_all(fd: int, data: bytes) -> None:
         offset += written
 
 
-def _normalize_file_mode(path: Path) -> None:
+def _safe_chmod(path: Path, mode: int) -> None:
+    """Normalize file or directory mode if owned by the current process, ignoring PermissionError."""
     if not path.exists():
         return
-    mode = stat_module.S_IMODE(path.stat().st_mode)
-    if mode != _FILE_MODE:
-        os.chmod(path, _FILE_MODE)
+    try:
+        is_owner = path.stat().st_uid == os.getuid()
+        is_root = hasattr(os, "geteuid") and os.geteuid() == 0
+        if is_owner or is_root:
+            cur_mode = stat_module.S_IMODE(path.stat().st_mode)
+            if cur_mode != mode:
+                os.chmod(path, mode)
+    except (PermissionError, OSError):
+        pass
+
+
+def _normalize_file_mode(path: Path) -> None:
+    _safe_chmod(path, _FILE_MODE)
 
 
 def ensure_registry_layout() -> Path:
@@ -73,14 +76,26 @@ def ensure_registry_layout() -> Path:
     if orchestrator_root.exists():
         _assert_private_directory(orchestrator_root, must_exist=True)
     else:
-        orchestrator_root.mkdir(parents=True, exist_ok=True)
-    os.chmod(orchestrator_root, _DIR_MODE)
+        try:
+            orchestrator_root.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise RegistryError(
+                "registry_write_failed",
+                message=f"cannot create directory: {orchestrator_root} ({exc.strerror or exc})",
+            ) from exc
+    _safe_chmod(orchestrator_root, _DIR_MODE)
 
     if root.exists():
         _assert_private_directory(root, must_exist=True)
     else:
-        root.mkdir(mode=_DIR_MODE)
-    os.chmod(root, _DIR_MODE)
+        try:
+            root.mkdir(mode=_DIR_MODE, exist_ok=True)
+        except OSError as exc:
+            raise RegistryError(
+                "registry_write_failed",
+                message=f"cannot create tasks directory: {root} ({exc.strerror or exc})",
+            ) from exc
+    _safe_chmod(root, _DIR_MODE)
     return root
 
 
@@ -99,8 +114,17 @@ def task_file_path(task_id: str) -> Path:
 
 def read_task_document_unlocked(path: Path) -> dict[str, Any]:
     _assert_safe_registry_path(path, must_exist=True)
-    text = path.read_text(encoding="utf-8")
-    doc = json.loads(text)
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise RegistryError(
+            "registry_unreadable",
+            message=f"cannot read task file: {path} ({exc.strerror or exc})",
+        ) from exc
+    try:
+        doc = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise RegistryError("invalid_schema", message="task json root must be valid json") from exc
     if not isinstance(doc, dict):
         raise RegistryError("invalid_schema", message="task json root must be object")
     validate_loaded_task(doc)
@@ -123,20 +147,26 @@ def _atomic_write_json(path: Path, doc: dict[str, Any]) -> None:
         raise RegistryError("registry_unsafe_path", message="temporary file path unsafe")
     payload = json.dumps(doc, indent=2, ensure_ascii=False) + "\n"
     encoded = payload.encode("utf-8")
-    fd = os.open(str(tmp), os.O_CREAT | os.O_EXCL | os.O_WRONLY, _FILE_MODE)
+    try:
+        fd = os.open(str(tmp), os.O_CREAT | os.O_EXCL | os.O_WRONLY, _FILE_MODE)
+    except OSError as exc:
+        raise RegistryError(
+            "registry_write_failed",
+            message=f"cannot create temporary registry file: {tmp} ({exc.strerror or exc})",
+        ) from exc
     try:
         _write_all(fd, encoded)
         os.fsync(fd)
-    except OSError:
+    except OSError as exc:
         os.close(fd)
         tmp.unlink(missing_ok=True)
-        raise RegistryError("registry_write_failed", message="atomic write failed")
+        raise RegistryError("registry_write_failed", message="atomic write failed") from exc
     else:
         os.close(fd)
     try:
         _assert_safe_registry_path(path, must_exist=False)
         os.replace(tmp, path)
-        os.chmod(path, _FILE_MODE)
+        _normalize_file_mode(path)
     except OSError as exc:
         tmp.unlink(missing_ok=True)
         raise RegistryError("registry_write_failed", message="atomic replace failed") from exc
@@ -149,7 +179,13 @@ def task_mutation_lock(task_id: str) -> Iterator[int]:
     ensure_registry_layout()
     lock_path = registry_lock_path(task_id)
     _assert_safe_registry_path(lock_path, must_exist=False)
-    fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, _FILE_MODE)
+    try:
+        fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, _FILE_MODE)
+    except OSError as exc:
+        raise RegistryError(
+            "registry_write_failed",
+            message=f"cannot open mutation lock: {lock_path} ({exc.strerror or exc})",
+        ) from exc
     _normalize_file_mode(lock_path)
     try:
         fcntl.flock(fd, fcntl.LOCK_EX)
@@ -207,7 +243,13 @@ def mutate_task(
 def write_cleanup_stamp(root: Path, content: str) -> None:
     stamp_path = root / "last_cleanup_at"
     _assert_safe_registry_path(stamp_path, must_exist=False)
-    fd = os.open(str(stamp_path), os.O_CREAT | os.O_TRUNC | os.O_WRONLY, _FILE_MODE)
+    try:
+        fd = os.open(str(stamp_path), os.O_CREAT | os.O_TRUNC | os.O_WRONLY, _FILE_MODE)
+    except OSError as exc:
+        raise RegistryError(
+            "registry_write_failed",
+            message=f"cannot open cleanup stamp: {stamp_path} ({exc.strerror or exc})",
+        ) from exc
     try:
         _write_all(fd, content.encode("utf-8"))
         os.fsync(fd)
@@ -222,7 +264,13 @@ def read_cleanup_stamp(root: Path) -> str | None:
     if not stamp_path.exists():
         return None
     _assert_safe_registry_path(stamp_path, must_exist=True)
-    return stamp_path.read_text(encoding="utf-8").strip()
+    try:
+        return stamp_path.read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        raise RegistryError(
+            "registry_unreadable",
+            message=f"cannot read cleanup stamp: {stamp_path} ({exc.strerror or exc})",
+        ) from exc
 
 
 _CLEANUP_RUN_LOCK_NAME = "cleanup.run.lock"
@@ -234,7 +282,13 @@ def cleanup_run_lock(*, nonblocking: bool = False) -> Iterator[bool]:
     root = ensure_registry_layout()
     lock_path = root / _CLEANUP_RUN_LOCK_NAME
     _assert_safe_registry_path(lock_path, must_exist=False)
-    fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, _FILE_MODE)
+    try:
+        fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, _FILE_MODE)
+    except OSError as exc:
+        raise RegistryError(
+            "registry_write_failed",
+            message=f"cannot open cleanup run lock: {lock_path} ({exc.strerror or exc})",
+        ) from exc
     _normalize_file_mode(lock_path)
     flags = fcntl.LOCK_EX | (fcntl.LOCK_NB if nonblocking else 0)
     acquired = False
@@ -258,7 +312,13 @@ def handoff_lock_exclusive(task_id: str, *, nonblocking: bool = False) -> Iterat
     ensure_registry_layout()
     lock_path = handoff_lock_path(task_id)
     _assert_safe_registry_path(lock_path, must_exist=False)
-    fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, _FILE_MODE)
+    try:
+        fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, _FILE_MODE)
+    except OSError as exc:
+        raise RegistryError(
+            "registry_write_failed",
+            message=f"cannot open handoff lock: {lock_path} ({exc.strerror or exc})",
+        ) from exc
     flags = fcntl.LOCK_EX | (fcntl.LOCK_NB if nonblocking else 0)
     acquired = False
     try:

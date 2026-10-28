@@ -54,7 +54,7 @@ Task Registry に残存する task を **読み取り専用で一覧取得する
 | dispatch 再送・result 登録・completion 実行                                  | 自動復旧はスコープ外。blind resend 禁止（[§6.12](herdr-orchestrator/03-task-registry.md#sec-6-12)）                                                    |
 | 破損データの修復・削除                                                       | 異常データは報告のみ（[§5](#5-異常データの扱い)）                                                                                                      |
 | lazy cleanup（[§6.8](herdr-orchestrator/03-task-registry.md#sec-6-8)）の起動 | 一覧取得が保持期間処理のトリガーになると、参照のたびに Registry が変化する                                                                             |
-| Registry ディレクトリの作成・`chmod`                                         | 既存の `ensure_registry_layout()` は不在時に作成し `0700` へ `chmod` する。`task-list` はこれを呼ばない（[§6.2](#62-registry-ディレクトリの読み取り)） |
+| Registry ディレクトリの作成・`chmod`                                         | 既存の `ensure_registry_layout()` は不在時に作成し `0755` へ `chmod` する。`task-list` はこれを呼ばない（[§6.2](#62-registry-ディレクトリの読み取り)） |
 | `<task.id>.json.lock` / `.handoff.lock` の取得                               | 既存 lock は `O_CREAT` で lock file を作成するため副作用になる。整合性は atomic replace に依拠する（[§6.4](#64-並行更新との整合性)）                   |
 
 ### 2.2 4軸状態をそのまま提供する
@@ -431,7 +431,7 @@ tasks ディレクトリの直下エントリを `os.scandir()` で列挙し、�
 | `code`               | 条件                                                                                                               |
 | -------------------- | ------------------------------------------------------------------------------------------------------------------ |
 | `invalid_filename`   | ファイル名 stem が `task_<uuidv4>` 形式でない                                                                      |
-| `unsafe_entry`       | symlink、通常ファイル以外、所有者が現在ユーザーでない（[§6.9](herdr-orchestrator/03-task-registry.md#sec-6-9)）    |
+| `unsafe_entry`       | symlink、通常ファイル以外（[§6.9](herdr-orchestrator/03-task-registry.md#sec-6-9)）                                |
 | `read_error`         | `open` / `read` が `ENOENT` 以外の OSError で失敗（権限不足など）、またはファイルサイズが最大許容上限（1MB）を超過 |
 | `invalid_encoding`   | UTF-8 として復号できない                                                                                           |
 | `invalid_json`       | JSON として解析できない、またはルートがオブジェクトでない                                                          |
@@ -444,7 +444,7 @@ tasks ディレクトリの直下エントリを `os.scandir()` で列挙し、�
 ```text
 1. os.open(name, O_RDONLY | O_NOFOLLOW | O_NONBLOCK, dir_fd=tasks_fd)  # 検証済み tasks_fd に対して相対オープン（TOCTOU競合窓防止）
    ENOENT → concurrent_changes へ記録して次へ
-2. os.fstat(fd) で通常ファイル・所有者 uid・ファイルサイズ（<= 1MB）を検証  # 開いた inode 自体を検証する
+2. os.fstat(fd) で通常ファイル・ファイルサイズ（<= 1MB）を検証  # 開いた inode 自体を検証する
 3. fd から最大 1MB までバイト列を読み取り、UTF-8 で復号、json.loads
 4. ルートがオブジェクトであること、schema_version、validate_loaded_task()
 5. task.id とファイル名 stem の一致
@@ -486,12 +486,12 @@ anomaly となったエントリは内容を信頼できず、所属 repository 
 
 ### 5.6 一覧取得自体のエラー
 
-| `error`                | 条件                                                                                                                                                                                | `retryable` |
-| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
-| `herdr_env_required`   | `HERDR_ENV=1` でない（既存 `HerdrEnvError` の code に従う）                                                                                                                         | `false`     |
-| `invalid_input`        | `--worktree` が相対 path                                                                                                                                                            | `false`     |
-| `registry_unsafe_path` | tasks ディレクトリまたはその親（`herdr-orchestrator/`）が symlink・ディレクトリでない・所有者不一致・group/world writable（[§6.9](herdr-orchestrator/03-task-registry.md#sec-6-9)） | `false`     |
-| `registry_unreadable`  | tasks ディレクトリまたはその親を開けない（symlink 以外の OSError。権限不足など）、または列挙（`scandir`）が OSError で失敗                                                          | `false`     |
+| `error`                | 条件                                                                                                                                            | `retryable` |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| `herdr_env_required`   | `HERDR_ENV=1` でない（既存 `HerdrEnvError` の code に従う）                                                                                     | `false`     |
+| `invalid_input`        | `--worktree` が相対 path                                                                                                                        | `false`     |
+| `registry_unsafe_path` | tasks ディレクトリまたはその親（`herdr-orchestrator/`）が symlink・ディレクトリでない（[§6.9](herdr-orchestrator/03-task-registry.md#sec-6-9)） | `false`     |
+| `registry_unreadable`  | tasks ディレクトリまたはその親を開けない（symlink 以外の OSError。権限不足など）、または列挙（`scandir`）が OSError で失敗                      | `false`     |
 
 これらの場合は一覧 JSON を出さず、既存の `{"error": ..., "retryable": ..., "message": ...}` 形式で exit 1 とする。Registry ディレクトリ自体を信頼できない状態で部分的な一覧を返すと、利用側が誤って「該当 task なし」と判断し得るためである。
 
@@ -521,13 +521,13 @@ anomaly となったエントリは内容を信頼できず、所属 repository 
 2. 親 herdr-orchestrator/ を O_RDONLY | O_DIRECTORY | O_NOFOLLOW でオープン
    ENOENT → registry.exists=false、tasks=[]、complete=true、exit 0
    O_NOFOLLOW により symlink を拒否（ELOOP/ENOTDIR → registry_unsafe_path）
-   開いた fd の fstat でディレクトリであること・所有者が現在ユーザー・group/world writable でないことを検証
+   開いた fd の fstat でディレクトリであることを検証
    違反時 → registry_unsafe_path（exit 1）
    EACCES 等の権限不足エラー時 → registry_unreadable（exit 1）
 3. 親 fd から tasks ディレクトリを dir_fd を指定してオープン
    ENOENT → registry.exists=false、tasks=[]、complete=true、exit 0
    O_NOFOLLOW により symlink を拒否（ELOOP/ENOTDIR → registry_unsafe_path）
-   開いた fd の fstat でディレクトリであること・所有者が現在ユーザー・group/world writable でないことを検証
+   開いた fd の fstat でディレクトリであることを検証
    違反時 → registry_unsafe_path（exit 1）
    EACCES 等の権限不足エラー時 → registry_unreadable（exit 1）
 4. 検証済み tasks_fd に対して直接 os.scandir(tasks_fd) を行いエントリを列挙
@@ -693,7 +693,7 @@ Registry 外の主体が非 atomic に直接書き込んだ途中のファイル
 - 各 anomaly code（[§5.2](#52-anomaly-の表現)）を発生させ、`complete=false`・exit 3・正常な task は一覧に残り、**標準出力の JSON に tasks と anomalies の双方が含まれること**。
 - フィルタで対象外になるはずの repository に属する破損ファイルでも `complete=false` になること。
 - `message` にファイル内容の断片が含まれないこと。
-- tasks ディレクトリが symlink / group writable / 所有者不一致 → `registry_unsafe_path`、exit 1、一覧 JSON なし。
+- tasks ディレクトリが symlink / ディレクトリでない → `registry_unsafe_path`、exit 1、一覧 JSON なし（group writable は許容）。
 - `scandir` 失敗（権限 `0000`）→ `registry_unreadable`、exit 1。
 - `HERDR_ENV` 未設定 → exit 1。
 - argparse による CLI 構文エラー（未定義オプション、型・choices 違反）→ exit 2、stderr に usage（非 JSON）。

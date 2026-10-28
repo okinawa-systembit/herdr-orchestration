@@ -4,23 +4,32 @@ import fcntl
 import os
 
 from orchestrator.paths import handoff_lock_path
+from orchestrator.registry.errors import RegistryError
 from orchestrator.registry.io import _FILE_MODE, _assert_safe_registry_path, ensure_registry_layout
 from orchestrator.registry.task_id import validate_task_id
 
 
 class HandoffLockSession:
-    """§6.6: wrapper process holds handoff flock fd until release()."""
+    """§6.6: wrapper process holds handoff flock fd until release(). 非再入（入れ子不可）。"""
 
     def __init__(self, task_id: str) -> None:
         self.task_id = task_id
         self._fd: int | None = None
 
     def acquire(self) -> None:
+        if self._fd is not None:
+            return
         validate_task_id(self.task_id)
         ensure_registry_layout()
         lock_path = handoff_lock_path(self.task_id)
         _assert_safe_registry_path(lock_path, must_exist=False)
-        fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, _FILE_MODE)
+        try:
+            fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, _FILE_MODE)
+        except OSError as exc:
+            raise RegistryError(
+                "registry_write_failed",
+                message=f"cannot open handoff lock: {lock_path} ({exc.strerror or exc})",
+            ) from exc
         fcntl.flock(fd, fcntl.LOCK_EX)
         self._fd = fd
 

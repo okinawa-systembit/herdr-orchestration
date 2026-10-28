@@ -253,46 +253,49 @@ def run_handoff(handoff: HandoffInput) -> dict[str, Any]:
     dispatch_outcome: str | None = None
     dispatch_reason: str | None = None
 
-    with HandoffLockSession(task_id):
-        try:
-            doc = registry_ops.record_prompt_start(task_id)
-        except RegistryError as exc:
-            raise _registry_to_handoff(exc) from exc
-
-        try:
-            registry_ops.assert_handoff_continuable(task_id)
-        except RegistryError as exc:
-            raise _registry_to_handoff(exc) from exc
-
-        try:
-            run_herdr(["agent", "prompt", worker.name, build_task_envelope(task_id)])
-            prompt_sent = True
-            dispatch_outcome, dispatch_reason = "sent", None
-        except HerdrCliError as exc:
-            prompt_sent = False
-            dispatch_outcome, dispatch_reason = _dispatch_outcome_from_prompt_error(exc)
-
-        try:
-            doc = registry_ops.mark_dispatch(
-                task_id,
-                outcome=dispatch_outcome,
-                reason=dispatch_reason,
-            )
-        except RegistryError as exc:
-            raise _registry_to_handoff(exc) from exc
-
-        result_wait: dict[str, Any] | None = None
-        if handoff.mode == "sync" and dispatch_outcome == "sent":
+    try:
+        with HandoffLockSession(task_id):
             try:
-                result_wait = _wait_for_result_terminal(
-                    task_id,
-                    timeout_sec=handoff.result_wait_timeout_sec,
-                )
-                doc = result_wait
-            except HandoffCommandError:
-                raise
+                doc = registry_ops.record_prompt_start(task_id)
             except RegistryError as exc:
                 raise _registry_to_handoff(exc) from exc
+
+            try:
+                registry_ops.assert_handoff_continuable(task_id)
+            except RegistryError as exc:
+                raise _registry_to_handoff(exc) from exc
+
+            try:
+                run_herdr(["agent", "prompt", worker.name, build_task_envelope(task_id)])
+                prompt_sent = True
+                dispatch_outcome, dispatch_reason = "sent", None
+            except HerdrCliError as exc:
+                prompt_sent = False
+                dispatch_outcome, dispatch_reason = _dispatch_outcome_from_prompt_error(exc)
+
+            try:
+                doc = registry_ops.mark_dispatch(
+                    task_id,
+                    outcome=dispatch_outcome,
+                    reason=dispatch_reason,
+                )
+            except RegistryError as exc:
+                raise _registry_to_handoff(exc) from exc
+
+            result_wait: dict[str, Any] | None = None
+            if handoff.mode == "sync" and dispatch_outcome == "sent":
+                try:
+                    result_wait = _wait_for_result_terminal(
+                        task_id,
+                        timeout_sec=handoff.result_wait_timeout_sec,
+                    )
+                    doc = result_wait
+                except HandoffCommandError:
+                    raise
+                except RegistryError as exc:
+                    raise _registry_to_handoff(exc) from exc
+    except RegistryError as exc:
+        raise _registry_to_handoff(exc) from exc
 
     out: dict[str, Any] = {
         "command": "handoff",

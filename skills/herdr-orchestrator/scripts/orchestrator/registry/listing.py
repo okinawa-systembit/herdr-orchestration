@@ -23,7 +23,7 @@ def read_task_candidates() -> tuple[bool, list[dict[str, Any]], list[dict[str, A
 
     Returns: (registry_exists, valid_docs, anomalies, concurrent_changes)
     Raises:
-      RegistryError("registry_unsafe_path") if directory or parent is unsafe (symlink, not a dir, owner mismatch, group/world writable).
+      RegistryError("registry_unsafe_path") if directory or parent is unsafe (symlink, not a dir).
       RegistryError("registry_unreadable") if directory scanning or access permissions fail.
     """
     root = tasks_dir()
@@ -50,13 +50,6 @@ def read_task_candidates() -> tuple[bool, list[dict[str, Any]], list[dict[str, A
         st_parent = os.fstat(parent_fd)
         if not stat.S_ISDIR(st_parent.st_mode):
             raise RegistryError("registry_unsafe_path", message=f"parent is not a directory: {orchestrator_root}")
-        if st_parent.st_uid != os.getuid():
-            raise RegistryError("registry_unsafe_path", message=f"parent owner mismatch: {orchestrator_root}")
-        if st_parent.st_mode & 0o022:
-            raise RegistryError(
-                "registry_unsafe_path",
-                message=f"parent directory is group/world writable: {orchestrator_root}",
-            )
 
         # 2. Open tasks directory relative to parent_fd using dir_fd
         try:
@@ -75,13 +68,6 @@ def read_task_candidates() -> tuple[bool, list[dict[str, Any]], list[dict[str, A
         st_tasks = os.fstat(tasks_fd)
         if not stat.S_ISDIR(st_tasks.st_mode):
             raise RegistryError("registry_unsafe_path", message=f"tasks root is not a directory: {root}")
-        if st_tasks.st_uid != os.getuid():
-            raise RegistryError("registry_unsafe_path", message=f"tasks root owner mismatch: {root}")
-        if st_tasks.st_mode & 0o022:
-            raise RegistryError(
-                "registry_unsafe_path",
-                message=f"tasks directory is group/world writable: {root}",
-            )
 
         # 4. Scan entries directly from verified tasks_fd
         try:
@@ -188,15 +174,6 @@ def read_task_candidates() -> tuple[bool, list[dict[str, Any]], list[dict[str, A
                         "task_id": task_id,
                         "code": "unsafe_entry",
                         "message": "Not a regular file",
-                    })
-                    continue
-
-                if st.st_uid != os.getuid():
-                    anomalies.append({
-                        "file": name,
-                        "task_id": task_id,
-                        "code": "unsafe_entry",
-                        "message": f"File owner mismatch: uid {st.st_uid} != {os.getuid()}",
                     })
                     continue
 

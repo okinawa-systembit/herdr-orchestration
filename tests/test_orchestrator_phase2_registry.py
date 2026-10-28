@@ -118,9 +118,9 @@ class RegistryStage2Tests(unittest.TestCase):
         with _env_patch(self.env):
             registry_ops.create_task(_sample_create_payload())
         tasks = self.tasks_dir()
-        self.assertEqual(stat.S_IMODE(tasks.stat().st_mode), 0o700)
+        self.assertEqual(stat.S_IMODE(tasks.stat().st_mode), 0o755)
         json_file = next(tasks.glob("task_*.json"))
-        self.assertEqual(stat.S_IMODE(json_file.stat().st_mode), 0o600)
+        self.assertEqual(stat.S_IMODE(json_file.stat().st_mode), 0o644)
 
     def test_symlink_task_json_rejected(self) -> None:
         with _env_patch(self.env):
@@ -382,7 +382,7 @@ class RegistryStage2Tests(unittest.TestCase):
             registry_ops.record_prompt_start(task_id)
         lock_path = self.tasks_dir() / f"{task_id}.json.lock"
         self.assertTrue(lock_path.exists())
-        self.assertEqual(stat.S_IMODE(lock_path.stat().st_mode), 0o600)
+        self.assertEqual(stat.S_IMODE(lock_path.stat().st_mode), 0o644)
 
     def test_reset_rejects_initial_dispatch_failure(self) -> None:
         with _env_patch(self.env):
@@ -439,15 +439,14 @@ class RegistryStage2Tests(unittest.TestCase):
             after = (self.tasks_dir() / f"{task_id}.json").read_text(encoding="utf-8")
         self.assertEqual(before, after)
 
-    def test_rejects_world_writable_parent(self) -> None:
+    def test_allows_group_world_writable_parent(self) -> None:
         orch = self.state_home / "herdr-orchestrator"
         orch.mkdir(parents=True)
         os.chmod(orch, 0o777)
         with _env_patch(self.env):
-            with self.assertRaises(RegistryError) as ctx:
-                registry_ops.create_task(_sample_create_payload())
-        self.assertIn("shared writable", str(ctx.exception.message).lower())
-        self.assertFalse((orch / "tasks").exists())
+            doc = registry_ops.create_task(_sample_create_payload())
+        self.assertTrue((orch / "tasks").exists())
+        self.assertEqual(doc["task"]["status"], "created")
 
     def test_tasks_dir_symlink_rejected(self) -> None:
         orch = self.state_home / "herdr-orchestrator"
@@ -482,14 +481,14 @@ class RegistryStage2Tests(unittest.TestCase):
                     registry_ops.record_prompt_start(task_id)
             self.assertEqual(path.read_text(encoding="utf-8"), before)
 
-    def test_normalizes_orchestrator_root_from_755(self) -> None:
+    def test_orchestrator_root_permissions_are_755(self) -> None:
         orch = self.state_home / "herdr-orchestrator"
         orch.mkdir(parents=True)
         os.chmod(orch, 0o755)
         with _env_patch(self.env):
             registry_ops.create_task(_sample_create_payload())
-        self.assertEqual(stat.S_IMODE(orch.stat().st_mode), 0o700)
-        self.assertEqual(stat.S_IMODE(self.tasks_dir().stat().st_mode), 0o700)
+        self.assertEqual(stat.S_IMODE(orch.stat().st_mode), 0o755)
+        self.assertEqual(stat.S_IMODE(self.tasks_dir().stat().st_mode), 0o755)
 
     def test_write_all_rejects_zero_byte_write(self) -> None:
         real_write = os.write
@@ -756,6 +755,34 @@ class RegistryStage2Tests(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         payload = json.loads(proc.stdout)
         self.assertEqual(payload["result"]["task"]["id"], task_id)
+
+    def test_non_owner_read_operations_succeed_when_chmod_fails(self) -> None:
+        """Non-owner reading task (dir 0755, file 0644) succeeds even if chmod raises PermissionError (§6.9)."""
+        with _env_patch(self.env):
+            doc = registry_ops.create_task(_sample_create_payload())
+            task_id = doc["task"]["id"]
+
+            with patch("os.chmod", side_effect=PermissionError("Operation not permitted")):
+                read_doc = registry_io.read_task_document(task_id)
+                self.assertEqual(read_doc["task"]["id"], task_id)
+
+    def test_write_operations_return_registry_write_failed_on_permission_error(self) -> None:
+        """When write permission is denied (EACCES), raise RegistryError with registry_write_failed (§6.9)."""
+        with _env_patch(self.env):
+            doc = registry_ops.create_task(_sample_create_payload())
+            task_id = doc["task"]["id"]
+
+            real_open = os.open
+
+            def mock_open(path, flags, *args, **kwargs):
+                if ".tmp." in str(path) or ".lock" in str(path):
+                    raise PermissionError(13, "Permission denied")
+                return real_open(path, flags, *args, **kwargs)
+
+            with patch("os.open", side_effect=mock_open):
+                with self.assertRaises(RegistryError) as ctx:
+                    registry_ops.record_prompt_start(task_id)
+                self.assertEqual(ctx.exception.code, "registry_write_failed")
 
 
 class _env_patch:

@@ -250,6 +250,7 @@ main() {
 
   chmod +x "${staging_dir}/scripts/herdr-orchestrator" \
            "${staging_dir}/scripts/task-registry.py" 2>/dev/null || true
+  chmod -R u=rwX,go=rX "$staging_dir" 2>/dev/null || true
 
   echo "Verifying CLI binary execution..."
   if ! HERDR_ENV="" "${staging_dir}/scripts/herdr-orchestrator" --help > /dev/null 2>&1; then

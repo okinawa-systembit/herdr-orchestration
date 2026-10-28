@@ -18,6 +18,7 @@ import time
 import unittest
 from pathlib import Path
 
+from orchestrator.handoff_lock import HandoffLockSession
 from orchestrator.registry.errors import RegistryError
 from orchestrator.registry import operations as registry_ops
 
@@ -477,6 +478,55 @@ class Phase4HandoffTests(unittest.TestCase):
             with self.assertRaises(RegistryError) as ctx:
                 registry_ops.assert_handoff_continuable(task_id)
         self.assertEqual(ctx.exception.code, "registry_conflict")
+
+    def test_handoff_lock_session_idempotent_acquire(self) -> None:
+        """HandoffLockSession の多重 acquire() 呼び出しがデッドロックせず冪等に動作することを確認"""
+        task_id = "task_01234567-89ab-4def-a123-456789abcdef"
+        session = HandoffLockSession(task_id)
+        with _env_patch(self.env):
+            session.acquire()
+            session.acquire()  # 2nd call should no-op without deadlocking
+            with session:
+                pass
+            session.release()
+            self.assertIsNone(session._fd)
+
+    def test_handoff_lock_write_failure_returns_json_error(self) -> None:
+        """handoff ロックファイル作成失敗時に未捕捉例外ではなく構造化エラー registry_write_failed が返る"""
+        from unittest.mock import patch
+        from orchestrator import public_cli
+        import io as py_io
+        from contextlib import redirect_stdout, redirect_stderr
+
+        real_os_open = os.open
+
+        def fake_open(path: Any, flags: int, *args: Any, **kwargs: Any) -> int:
+            if str(path).endswith(".handoff.lock"):
+                raise PermissionError("Permission denied on handoff lock")
+            return real_os_open(path, flags, *args, **kwargs)
+
+        with patch.dict(os.environ, self.env):
+            with patch("orchestrator.handoff_lock.os.open", side_effect=fake_open):
+                stdout_buf = py_io.StringIO()
+                stderr_buf = py_io.StringIO()
+                with redirect_stdout(stdout_buf), redirect_stderr(stderr_buf):
+                    with self.assertRaises(SystemExit) as ctx:
+                        public_cli.main([
+                            "handoff",
+                            "--mode",
+                            "async",
+                            "--worker-role",
+                            "reviewer",
+                            "--task-type",
+                            "review",
+                            "--instruction",
+                            "test lock failure",
+                        ])
+                self.assertEqual(ctx.exception.code, 1)
+                data = json.loads(stdout_buf.getvalue())
+                self.assertEqual(data.get("error"), "registry_write_failed")
+                self.assertIn("cannot open handoff lock", data.get("message", ""))
+                self.assertIn("Permission denied on handoff lock", data.get("message", ""))
 
 
 if __name__ == "__main__":

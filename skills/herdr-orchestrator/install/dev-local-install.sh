@@ -234,6 +234,7 @@ acquire_lock
 # Staging directory for atomic swap and anti-nesting protection
 STAGING_DIR=$(mktemp -d "${DEST_PARENT}/${STAGING_PREFIX}.XXXXXX")
 CLEANUP_STAGING_DIR="$STAGING_DIR"
+chmod 755 "$STAGING_DIR" 2>/dev/null || true
 
 # Unique backup parent and destination path (PR52-02)
 BACKUP_PARENT=$(mktemp -d "${DEST_PARENT}/${BACKUP_PREFIX}.XXXXXX")
@@ -247,6 +248,7 @@ for item in SKILL.md scripts references; do
 done
 
 chmod +x "${STAGING_DIR}/scripts/herdr-orchestrator" "${STAGING_DIR}/scripts/task-registry.py" 2>/dev/null || true
+chmod -R u=rwX,go=rX "$STAGING_DIR" 2>/dev/null || true
 
 # Atomic swap into place
 IS_UPDATE=0
