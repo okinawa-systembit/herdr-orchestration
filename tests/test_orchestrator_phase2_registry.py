@@ -756,6 +756,34 @@ class RegistryStage2Tests(unittest.TestCase):
         payload = json.loads(proc.stdout)
         self.assertEqual(payload["result"]["task"]["id"], task_id)
 
+    def test_non_owner_read_operations_succeed_when_chmod_fails(self) -> None:
+        """Non-owner reading task (dir 0755, file 0644) succeeds even if chmod raises PermissionError (§6.9)."""
+        with _env_patch(self.env):
+            doc = registry_ops.create_task(_sample_create_payload())
+            task_id = doc["task"]["id"]
+
+            with patch("os.chmod", side_effect=PermissionError("Operation not permitted")):
+                read_doc = registry_io.read_task_document(task_id)
+                self.assertEqual(read_doc["task"]["id"], task_id)
+
+    def test_write_operations_return_registry_write_failed_on_permission_error(self) -> None:
+        """When write permission is denied (EACCES), raise RegistryError with registry_write_failed (§6.9)."""
+        with _env_patch(self.env):
+            doc = registry_ops.create_task(_sample_create_payload())
+            task_id = doc["task"]["id"]
+
+            real_open = os.open
+
+            def mock_open(path, flags, *args, **kwargs):
+                if ".tmp." in str(path) or ".lock" in str(path):
+                    raise PermissionError(13, "Permission denied")
+                return real_open(path, flags, *args, **kwargs)
+
+            with patch("os.open", side_effect=mock_open):
+                with self.assertRaises(RegistryError) as ctx:
+                    registry_ops.record_prompt_start(task_id)
+                self.assertEqual(ctx.exception.code, "registry_write_failed")
+
 
 class _env_patch:
     def __init__(self, env: dict[str, str]) -> None:

@@ -23,7 +23,7 @@ def read_task_candidates() -> tuple[bool, list[dict[str, Any]], list[dict[str, A
 
     Returns: (registry_exists, valid_docs, anomalies, concurrent_changes)
     Raises:
-      RegistryError("registry_unsafe_path") if directory or parent is unsafe (symlink, not a dir, owner mismatch, group/world writable).
+      RegistryError("registry_unsafe_path") if directory or parent is unsafe (symlink, not a dir).
       RegistryError("registry_unreadable") if directory scanning or access permissions fail.
     """
     root = tasks_dir()

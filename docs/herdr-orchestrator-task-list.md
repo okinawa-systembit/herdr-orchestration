@@ -693,7 +693,7 @@ Registry 外の主体が非 atomic に直接書き込んだ途中のファイル
 - 各 anomaly code（[§5.2](#52-anomaly-の表現)）を発生させ、`complete=false`・exit 3・正常な task は一覧に残り、**標準出力の JSON に tasks と anomalies の双方が含まれること**。
 - フィルタで対象外になるはずの repository に属する破損ファイルでも `complete=false` になること。
 - `message` にファイル内容の断片が含まれないこと。
-- tasks ディレクトリが symlink / group writable / 所有者不一致 → `registry_unsafe_path`、exit 1、一覧 JSON なし。
+- tasks ディレクトリが symlink / ディレクトリでない → `registry_unsafe_path`、exit 1、一覧 JSON なし（group writable は許容）。
 - `scandir` 失敗（権限 `0000`）→ `registry_unreadable`、exit 1。
 - `HERDR_ENV` 未設定 → exit 1。
 - argparse による CLI 構文エラー（未定義オプション、型・choices 違反）→ exit 2、stderr に usage（非 JSON）。

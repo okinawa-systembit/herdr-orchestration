@@ -417,9 +417,9 @@ created から 30 日以上経過
 
 ### 6.9 Registry Security
 
-Task Registry は AI Agent 間のタスク委譲・結果配送のための通信バスであり、タスクペイロードに機微な情報は流さない前提とする。個人の開発環境（ローカル PC / WSL）や個別ユーザーアカウント運用を前提とし、サンドボックス環境（Codex 等の別 UID / ユーザー名前空間）や複数エージェント協調を阻害しないよう、過剰な排他パーミッションや所有者 UID の完全一致チェックは強制しない。
+Task Registry は AI Agent 間のタスク委譲・結果配送のための通信バスであり、タスクペイロードに機微な情報は流さない前提とする。個人の開発環境（ローカル PC / WSL）や個別ユーザーアカウント運用を前提とし、サンドボックス環境（同一 UID での Bubblewrap や制限環境）や複数エージェント協調を阻害しないよう、過剰な排他パーミッションや所有者 UID の完全一致チェックは強制しない。
 
-Registry root / tasks dir は `0755`、task JSON / lock file は `0644` を標準とする（OS の標準的なファイルアクセス権限モデルに従う）。ただし、パス traversal や意図しないファイル破壊を防ぐため、Registry root、task JSON、lock file の symlink は拒否し、temporary file は Registry root 配下に作成する。
+Registry root / tasks dir は `0755`、task JSON / lock file は `0644` を標準とする（OS の標準的なファイルアクセス権限モデルに従う）。ディレクトリが存在する場合、所有者であれば `0755` / `0644` への正規化を行うが、非所有者の場合は chmod による正規化をスキップし、OS 上の読み取り権限があれば `task-status` / `task-result` などの読み取り操作を許可する。書き込み操作（`handoff`, `result-submit` 等）は OS 上の書き込み権限を必要とし、権限不足時は未捕捉例外ではなく構造化 JSON エラー（`registry_write_failed`）として返却する。ただし、パス traversal や意図しないファイル破壊を防ぐため、Registry root、task JSON、lock file の symlink は拒否し、temporary file は Registry root 配下に作成する。
 
 <a id="sec-6-10"></a>
 

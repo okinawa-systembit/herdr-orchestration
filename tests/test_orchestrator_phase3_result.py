@@ -9,14 +9,18 @@ Phase-3 result CLI vs docs §18.3 (stage-3 gate):
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import stat
 import subprocess
 import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
 
+from orchestrator import public_cli
 from orchestrator.naming import expected_agent_name
 from orchestrator.registry import operations as registry_ops
 
@@ -172,6 +176,7 @@ class Phase3ResultCliTests(unittest.TestCase):
         self.env = os.environ.copy()
         self.env["HERDR_ENV"] = "1"
         self.env["HERDR_PANE_ID"] = "w11:p2"
+        self.env["FAKE_AGENT_CWD"] = str(self.worktree)
         self.env["XDG_STATE_HOME"] = str(self.state_home)
         self.env["PATH"] = f"{self.fake_bin}:{self.env.get('PATH', '')}"
         self.env["FAKE_AGENT_CWD"] = str(self.worktree / "sub")
@@ -193,6 +198,36 @@ class Phase3ResultCliTests(unittest.TestCase):
         doc = json.loads(proc.stdout)
         self.assertEqual(doc["command"], "task-status")
         self.assertEqual(doc["task"]["task"]["id"], task_id)
+
+    def test_task_status_succeeds_even_when_non_owner_chmod_fails(self) -> None:
+        task_id = self._ready_task()
+        with patch.dict(os.environ, self.env):
+            stdout = io.StringIO()
+            with patch("os.chmod", side_effect=PermissionError("Operation not permitted")):
+                with redirect_stdout(stdout):
+                    rc = public_cli.main(["task-status", task_id])
+            self.assertEqual(rc, 0)
+            doc = json.loads(stdout.getvalue())
+            self.assertEqual(doc["command"], "task-status")
+
+    def test_result_submit_emits_json_error_on_permission_denied(self) -> None:
+        task_id = self._ready_task()
+        real_open = os.open
+
+        def mock_open(path, flags, *args, **kwargs):
+            if ".tmp." in str(path) or ".lock" in str(path):
+                raise PermissionError(13, "Permission denied")
+            return real_open(path, flags, *args, **kwargs)
+
+        with patch.dict(os.environ, self.env):
+            stdout = io.StringIO()
+            with patch("os.open", side_effect=mock_open):
+                with redirect_stdout(stdout):
+                    with self.assertRaises(SystemExit) as ctx:
+                        public_cli.main(_submit_args(task_id, summary="done"))
+            self.assertEqual(ctx.exception.code, 1)
+            err = json.loads(stdout.getvalue())
+            self.assertEqual(err["error"], "registry_write_failed")
 
     def test_invalid_task_id_emits_json_error(self) -> None:
         proc = _run_cli("task-status", "not-a-task", env=self.env)
