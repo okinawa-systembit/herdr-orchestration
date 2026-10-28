@@ -417,7 +417,9 @@ created から 30 日以上経過
 
 ### 6.9 Registry Security
 
-Registry root / tasks dir は `0700`、task JSON / lock file は `0600` とする。Registry root、task JSON、lock file の symlink を拒否し、temporary file は Registry root 配下に作成する。owner が現在ユーザーでない file や shared writable directory を利用しない。
+Task Registry は AI Agent 間のタスク委譲・結果配送のための通信バスであり、タスクペイロードに機微な情報は流さない前提とする。個人の開発環境（ローカル PC / WSL）や個別ユーザーアカウント運用を前提とし、サンドボックス環境（Codex 等の別 UID / ユーザー名前空間）や複数エージェント協調を阻害しないよう、過剰な排他パーミッションや所有者 UID の完全一致チェックは強制しない。
+
+Registry root / tasks dir は `0755`、task JSON / lock file は `0644` を標準とする（OS の標準的なファイルアクセス権限モデルに従う）。ただし、パス traversal や意図しないファイル破壊を防ぐため、Registry root、task JSON、lock file の symlink は拒否し、temporary file は Registry root 配下に作成する。
 
 <a id="sec-6-10"></a>
 

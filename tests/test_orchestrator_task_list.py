@@ -613,14 +613,14 @@ class OrchestratorTaskListTests(unittest.TestCase):
                 fifo_path.unlink()
 
     def test_registry_directory_safety_verification(self) -> None:
-        """Verify registry_unsafe_path error on symlink or group/world writable directory (B-4 fix)."""
+        """Verify registry_unsafe_path error on symlink directory (symlink rejected) and allow writable directory (§6.9)."""
         # 1. tasks directory is symlink
         real_tasks = self.state_home / "real_tasks"
         real_tasks.mkdir(parents=True, exist_ok=True)
-        os.chmod(self.state_home, 0o700)
-        os.chmod(real_tasks, 0o700)
+        os.chmod(self.state_home, 0o755)
+        os.chmod(real_tasks, 0o755)
         self.tasks_dir.parent.mkdir(parents=True, exist_ok=True)
-        os.chmod(self.tasks_dir.parent, 0o700)
+        os.chmod(self.tasks_dir.parent, 0o755)
 
         try:
             self.tasks_dir.symlink_to(real_tasks)
@@ -635,16 +635,16 @@ class OrchestratorTaskListTests(unittest.TestCase):
         # Cleanup symlink
         self.tasks_dir.unlink()
 
-        # 2. tasks directory is group/world writable (mode 777)
+        # 2. tasks directory is group/world writable (mode 777) - should be allowed under relaxed permissions (§6.9)
         self.tasks_dir.mkdir(parents=True, exist_ok=True)
         os.chmod(self.tasks_dir, 0o777)
         try:
             proc = self.run_cli("task-list")
-            self.assertEqual(proc.returncode, 1)
+            self.assertEqual(proc.returncode, 0)
             data = json.loads(proc.stdout)
-            self.assertEqual(data["error"], "registry_unsafe_path")
+            self.assertTrue(data["complete"])
         finally:
-            os.chmod(self.tasks_dir, 0o700)
+            os.chmod(self.tasks_dir, 0o755)
 
     def test_registry_directory_unreadable_on_permission_denied(self) -> None:
         """When tasks directory has no read permissions (mode 000), return registry_unreadable (E-1 fix)."""

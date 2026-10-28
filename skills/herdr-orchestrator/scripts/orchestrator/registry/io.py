@@ -15,8 +15,8 @@ from orchestrator.registry.errors import RegistryError
 from orchestrator.registry.schema import validate_loaded_task
 from orchestrator.registry.task_id import validate_task_id
 
-_DIR_MODE = 0o700
-_FILE_MODE = 0o600
+_DIR_MODE = 0o755
+_FILE_MODE = 0o644
 
 
 def utc_now_iso() -> str:
@@ -28,23 +28,15 @@ def _assert_safe_registry_path(path: Path, *, must_exist: bool = False) -> None:
         raise RegistryError("registry_unsafe_path", message=f"symlink rejected: {path!s}")
     if must_exist and not path.exists():
         raise RegistryError("registry_unsafe_path", message=f"missing path: {path!s}")
-    if path.exists() and path.stat().st_uid != os.getuid():
-        raise RegistryError("registry_unsafe_path", message=f"unexpected owner: {path!s}")
 
 
 def _assert_private_directory(path: Path, *, must_exist: bool = False) -> None:
-    """Reject group/world-writable directories (§6.9 shared writable)."""
+    """Verify registry directory safety (§6.9)."""
     _assert_safe_registry_path(path, must_exist=must_exist)
     if not path.exists():
         return
     if not path.is_dir():
         raise RegistryError("registry_unsafe_path", message=f"not a directory: {path!s}")
-    mode = stat_module.S_IMODE(path.stat().st_mode)
-    if mode & (stat_module.S_IWGRP | stat_module.S_IWOTH):
-        raise RegistryError(
-            "registry_unsafe_path",
-            message=f"shared writable directory rejected: {path!s}",
-        )
 
 
 def _write_all(fd: int, data: bytes) -> None:

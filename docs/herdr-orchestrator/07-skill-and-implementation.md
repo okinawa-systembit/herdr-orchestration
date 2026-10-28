@@ -199,7 +199,7 @@ Task Registry 要件:
 - `reconcile-dispatch` 完了時、`result.status=pending` なら result 再登録を CLI 出力へ含める
 - `result.ref` が非 null の場合、resolve 後 path が `context.worktree.path` 配下か検証する
 - Registry / task / lock の symlink を拒否する
-- Registry permission を 0700 / 0600 基準で管理する
+- Registry permission を 0755 / 0644 基準で管理する
 
 `herdr-orchestrator` は Agent が日常的に呼び出す安定した command surface とする。
 内部では Herdr 公式 Skill / CLI の規約に従い、必要な Herdr 操作と Task Registry 操作をまとめる。
