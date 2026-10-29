@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 from typing import Callable
@@ -28,13 +29,21 @@ from orchestrator.identity import (
     get_or_create_repository_identity,
     get_repository_identity,
 )
+from orchestrator.live_agent import LiveAgentError, verify_live_agent_context
 from orchestrator.registry.errors import RegistryError
 from orchestrator.env import HerdrEnvError, require_herdr_env
 from orchestrator.errors import emit_error
-from orchestrator.registry.schema import TASK_STATUSES
+from orchestrator.registry.schema import STANDARD_ROLES, TASK_STATUSES
 from orchestrator.registry.task_id import validate_task_id
 from orchestrator.result_commands import ResultCommandError, result_submit, task_result, task_status
 from orchestrator.list_commands import run_task_list
+from orchestrator.role_bindings import (
+    RoleBindingError,
+    clear_role_binding,
+    get_role_bindings,
+    set_role_binding,
+)
+from orchestrator.worktree import WorktreeError, resolve_worktree_root
 
 PUBLIC_COMMANDS = (
     "doctor",
@@ -48,6 +57,7 @@ PUBLIC_COMMANDS = (
     "recover-completion",
     "reconcile-dispatch",
     "identity",
+    "role",
 )
 
 _COMMAND_HELP: dict[str, str] = {
@@ -62,6 +72,7 @@ _COMMAND_HELP: dict[str, str] = {
     "recover-completion": "再開可能な場合に completion をリセットして自動再開",
     "reconcile-dispatch": "応答のない未確定 dispatch を安全に復旧",
     "identity": "リポジトリ識別子（Repository Identity UUID）を管理（init または show）",
+    "role": "リポジトリごとの論理ロールと pane_id の紐づけを管理（set, show, clear）",
 }
 
 
@@ -268,6 +279,151 @@ def _cmd_identity(ns: argparse.Namespace) -> int:
     )
 
 
+def _cmd_role(ns: argparse.Namespace) -> int:
+    action = getattr(ns, "role_action", None)
+    cwd = Path.cwd()
+    if action == "set":
+        pane_id = (ns.pane or os.environ.get("HERDR_PANE_ID") or "").strip()
+        if not pane_id:
+            emit_command_error(
+                "invalid_input",
+                retryable=False,
+                message="--pane or HERDR_PANE_ID is required for 'role set'",
+                exit_code=1,
+            )
+        try:
+            repo_id = get_or_create_repository_identity(cwd)
+        except GitRepositoryNotInitializedError as exc:
+            emit_command_error(
+                "git_repository_not_initialized",
+                retryable=False,
+                message=str(exc),
+                exit_code=1,
+            )
+        except RepositoryIdentityError as exc:
+            emit_command_error(
+                "repository_identity_error",
+                retryable=False,
+                message=str(exc),
+                exit_code=1,
+            )
+        try:
+            roles = set_role_binding(repo_id, ns.role, pane_id)
+        except RoleBindingError as exc:
+            emit_command_error(
+                exc.code,
+                retryable=False,
+                message=exc.message,
+                exit_code=1,
+            )
+        out_payload: dict[str, object] = {
+            "command": "role",
+            "action": "set",
+            "repository_id": repo_id,
+            "role": ns.role,
+            "pane_id": roles[ns.role],
+            "roles": roles,
+        }
+        if os.environ.get("HERDR_ENV") == "1":
+            try:
+                wt_root = resolve_worktree_root(cwd)
+                verify_live_agent_context(
+                    roles[ns.role],
+                    expected_worktree_path=wt_root,
+                    expected_repository_identity=repo_id,
+                    require_promptable=False,
+                )
+            except (WorktreeError, LiveAgentError) as exc:
+                out_payload["warning"] = (
+                    f"bound pane {roles[ns.role]!r} could not be verified in current worktree: {exc}"
+                )
+        return emit_json(out_payload)
+    elif action == "show":
+        try:
+            repo_id = get_repository_identity(cwd)
+        except GitRepositoryNotInitializedError as exc:
+            emit_command_error(
+                "git_repository_not_initialized",
+                retryable=False,
+                message=str(exc),
+                exit_code=1,
+            )
+        except RepositoryIdentityError as exc:
+            code = (
+                "repository_identity_not_initialized"
+                if "not initialized" in str(exc)
+                else "repository_identity_error"
+            )
+            emit_command_error(
+                code,
+                retryable=False,
+                message=str(exc),
+                exit_code=1,
+            )
+        try:
+            roles = get_role_bindings(repo_id)
+        except RoleBindingError as exc:
+            emit_command_error(
+                exc.code,
+                retryable=False,
+                message=exc.message,
+                exit_code=1,
+            )
+        return emit_json({
+            "command": "role",
+            "action": "show",
+            "repository_id": repo_id,
+            "roles": roles,
+        })
+    elif action == "clear":
+        try:
+            repo_id = get_repository_identity(cwd)
+        except GitRepositoryNotInitializedError as exc:
+            emit_command_error(
+                "git_repository_not_initialized",
+                retryable=False,
+                message=str(exc),
+                exit_code=1,
+            )
+        except RepositoryIdentityError as exc:
+            code = (
+                "repository_identity_not_initialized"
+                if "not initialized" in str(exc)
+                else "repository_identity_error"
+            )
+            emit_command_error(
+                code,
+                retryable=False,
+                message=str(exc),
+                exit_code=1,
+            )
+        try:
+            roles = clear_role_binding(
+                repo_id,
+                role=getattr(ns, "role", None),
+                clear_all=bool(getattr(ns, "all", False)),
+            )
+        except RoleBindingError as exc:
+            emit_command_error(
+                exc.code,
+                retryable=False,
+                message=exc.message,
+                exit_code=1,
+            )
+        return emit_json({
+            "command": "role",
+            "action": "clear",
+            "repository_id": repo_id,
+            "roles": roles,
+        })
+    emit_command_error(
+        "invalid_input",
+        retryable=False,
+        message="role action must be 'set', 'show', or 'clear'",
+        exit_code=1,
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="herdr-orchestrator",
@@ -387,6 +543,45 @@ def build_parser() -> argparse.ArgumentParser:
                 help="登録済みのリポジトリ UUID を表示",
                 description="登録済みのリポジトリ UUID を表示",
             )
+        elif name == "role":
+            role_sub = p.add_subparsers(dest="role_action", required=True)
+            role_set = role_sub.add_parser(
+                "set",
+                help="論理ロールと pane_id を紐づけて保存",
+                description="論理ロールと pane_id を紐づけて保存",
+            )
+            role_set.add_argument(
+                "role",
+                choices=sorted(STANDARD_ROLES),
+                help="紐づける論理ロール（design, reviewer, implementer, orchestrator）",
+            )
+            role_set.add_argument(
+                "--pane",
+                default=None,
+                help="対象の pane_id（省略時は HERDR_PANE_ID 環境変数を使用）",
+            )
+            role_sub.add_parser(
+                "show",
+                help="現在のリポジトリのロールと pane_id の紐づけ一覧を表示",
+                description="現在のリポジトリのロールと pane_id の紐づけ一覧を表示",
+            )
+            role_clear = role_sub.add_parser(
+                "clear",
+                help="登録済みのロールと pane_id の紐づけを解除",
+                description="登録済みのロールと pane_id の紐づけを解除",
+            )
+            role_clear.add_argument(
+                "role",
+                nargs="?",
+                choices=sorted(STANDARD_ROLES),
+                default=None,
+                help="解除する論理ロール（--all 指定時は不要）",
+            )
+            role_clear.add_argument(
+                "--all",
+                action="store_true",
+                help="すべてのロール紐づけを一括解除",
+            )
         else:
             p.add_argument("task_id", nargs="?", metavar="task.id", help="対象タスクID")
 
@@ -408,6 +603,7 @@ def main(argv: list[str] | None = None) -> int:
         "reset-completion": _cmd_reset_completion,
         "recover-completion": _cmd_recover_completion,
         "identity": _cmd_identity,
+        "role": _cmd_role,
     }
     handler = handlers[ns.command]
     return handler(ns)

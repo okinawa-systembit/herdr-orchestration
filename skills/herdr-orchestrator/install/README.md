@@ -37,6 +37,8 @@ Codex Agent が `herdr-orchestrator` を自律的に実行する際の承認プ�
 | `task-result`                 | 読み取り   | **allow**        | 提出結果の取得。副作用なし                                              |
 | `identity show`               | 読み取り   | **allow**        | Repository Identity の参照。副作用なし                                  |
 | `identity init`               | 設定変更   | **allow しない** | `.git/config` の変更を伴うため無条件許可しない                          |
+| `role show`                   | 読み取り   | **allow**        | Role Binding の参照。副作用なし                                         |
+| `role set` / `role clear`     | 設定変更   | **allow しない** | ロールと `pane_id` の紐づけ変更を伴うため無条件許可しない               |
 | `result-submit`               | 書き込み   | **allow**        | Task Registry 更新・完了通知を伴うが、Worker の自動完了報告のために必須 |
 | `handoff`                     | タスク登録 | **allow しない** | 新規タスク発行・Worker 起動を伴うため通常承認に委ねる                   |
 | `resume-task`                 | 復旧・再開 | **allow しない** | Requester 再開を伴うため通常承認に委ねる                                |

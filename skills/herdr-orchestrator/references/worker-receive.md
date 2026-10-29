@@ -8,7 +8,7 @@ prompt だけを信頼しない。Registry を正本とする。
 
 1. 最小 Task Envelope から `task.id` を取り出す。
 2. `herdr-orchestrator task-status <task.id>` を実行し JSON を読む。
-3. Registry の `worker.agent_name` が自分の live `agent.name` と一致することを確認（不一致なら作業しない）。
+3. Registry の `worker.agent_name`（Role Binding 利用時は `pane_id` が格納済み）が自分の live `agent.name` または `HERDR_PANE_ID`（`pane_id`）と一致することを確認（不一致なら作業しない）。
 4. `dispatch.status` の扱い:
    - `pending` → 同一 `task.id` で `task-status` を **bounded 再 poll**（最大 10 回、初回 1 秒・上限 30 秒の指数バックオフ）。`sent` / `uncertain` になったら 5 へ。
    - `sent` / `uncertain` → 5 へ（task / result が当該 role の作業開始を許可するか確認）。

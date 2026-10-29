@@ -114,8 +114,8 @@ requester Agent を自動的に再開する。
 
 ```text
 1. completion.status を pending -> processing へ claim
-2. requester.agent_name を現在の live agent から再解決
-3. 見つからなければ completion.status = skipped / reason = requester_unavailable
+2. Task Registry に保存された requester.agent_name（Role Binding 利用時は pane_id）を現在の live agent から再解決（現在の Role Binding は参照しない）
+3. 見つからなければ completion.status = skipped / reason = requester_unavailable（別 pane や別名へ自動 fallback しない）
 4. repository identity / worktree path、および workflow が要求する branch / commit を Task Registry の期待値と照合
 5. context が不一致・確認不能・曖昧なら completion.status = skipped / reason = requester_context_mismatch
 6. **prompt 直前**に手順 2–5 を live 観測で再実行する（[§11.4](06-results-and-workflows.md#sec-11-4) TOCTOU。再確認のみでは安全を保証しない）

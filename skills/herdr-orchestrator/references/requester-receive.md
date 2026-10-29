@@ -9,7 +9,7 @@
 1. prompt から `task.id` を取得。
 2. `herdr-orchestrator task-status <task.id>` と `task-result <task.id>` で Registry を読む。
 3. `result.status` が terminal（`succeeded` / `failed` / `unavailable`）であることを確認。
-4. `requester.agent_name` / context が自分の live 環境と一致することを確認（不一致なら後続 workflow を開始しない）。
+4. `requester.agent_name`（Role Binding 利用時は `pane_id` が格納済み）および context が自分の live `agent.name` または `HERDR_PANE_ID`（`pane_id`）・作業環境と一致することを確認（不一致なら後続 workflow を開始しない）。
 5. 4 まで成功したら repository 固有 workflow（例: review response）を開始する。
 
 Orchestrator 側の再開は `resume-task` / `recover-completion` / `result-submit` 内連鎖が担う。requester Agent は completion prompt だけで判断しない。

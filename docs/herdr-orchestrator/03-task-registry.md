@@ -89,11 +89,11 @@ ${XDG_STATE_HOME:-$HOME/.local/state}/herdr-orchestrator/tasks/
 
 `context.repository.identity` は repository の論理 identity であり path として使用しない。`context.worktree.path` は task が実際に操作する checkout / worktree root の絶対 path とし、成果物の保存・参照・path safety の基準に使用する。Git の共通 repository directory や別 worktree の root を `context.worktree.path` として代用しない。
 
-`worker.role` は handoff 入力の logical role（例: `reviewer`）とする。`worker.agent_name` / `worker.pane_id` は **live worker 解決後**に Orchestrator が確定し、`create` 時点で Registry へ書き込む必須フィールドとする。Agent から任意の worker 名を受け付けない。JSON 例は dispatch 完了後の状態を示す。
+`worker.role` は handoff 入力の logical role（例: `reviewer`）とする。`worker.agent_name` / `worker.pane_id` は **`handoff` 開始時の live worker 解決後**（[§4.1](02-roles-and-task-contract.md#sec-4-1) の Role Binding 利用時は `worker.agent_name = worker.pane_id`、未登録フォールバック時は Pattern A の `agent.name`）に Orchestrator が確定し、`create` 時点で Registry へ書き込む必須フィールドとする。Agent から任意の worker 名を受け付けない。JSON 例は dispatch 完了後の状態を示す。
 
-`requester.role` は初期標準 role のいずれかとし、live requester の `agent.name` から [§4.1](02-roles-and-task-contract.md#sec-4-1) / [§8.5](04-handoff-and-requester.md#sec-8-5) の規則で **導出**する。handoff 入力の `requester.role` は導出値との一致検証にのみ用い、単独では信頼しない。
+`requester.role` は初期標準 role のいずれかとし、live requester の `pane_id`（Role Binding 登録時）または `agent.name`（未登録フォールバック時）から [§4.1](02-roles-and-task-contract.md#sec-4-1) / [§8.5](04-handoff-and-requester.md#sec-8-5) の規則で **導出**する。handoff 入力の `requester.role` は導出値との一致検証にのみ用い、単独では信頼しない。
 
-`requester.agent_name` / `requester.pane_id` も同様に、handoff 実行時に Orchestrator が live Agent から取得できた値を `create` へ渡す。取得不能な場合は handoff を `create` 前に失敗させる。
+`requester.agent_name` / `requester.pane_id` も同様に、handoff 実行時に Orchestrator が live Agent から取得・確定した locator（Role Binding 登録時は `requester.agent_name = requester.pane_id`）を `create` へ渡す。取得不能な場合は handoff を `create` 前に失敗させる。以降の段階（`assert-handoff-continuable`, `result-submit`, `reconcile-dispatch`, completion）では現在の Role Binding を再参照せず、Registry に保存された `requester.agent_name` / `worker.agent_name` のみを正本として使用する。
 
 `dispatch.herdr_prompt_started_at` は、Herdr へ `agent prompt` を呼び出す直前の atomic Registry 更新で ISO 8601 時刻を記録する。未送信の task では `null` とする。
 
@@ -307,6 +307,8 @@ Agent が使用する public surface は固定する。
 | `recover-completion` | `task.id`                                                                                                       | 診断 + 必要時 `reset-completion` + claim/finalize                                                             | recovery + completion 結果                                                                                                                             |
 | `doctor`             | none                                                                                                            | none                                                                                                          | environment diagnostics + stale dispatch 候補（§6.12 の A/B）の報告                                                                                    |
 | `reconcile-dispatch` | `task.id`、任意 `--dispatch-outcome {uncertain\|failed}`、`failed` 時は必須 `--dispatch-reason <code>`（§6.12） | dispatch / task update（明示復旧）                                                                            | reconcile 結果                                                                                                                                         |
+| `identity`           | `init` または `show`                                                                                            | `.git/config` の `herdr.repository-id` 初期化・参照                                                           | `repository_id` JSON                                                                                                                                   |
+| `role`               | `set <role> [--pane <pane_id>]`、`show`、`clear [<role>\|--all]`                                                | `${XDG_STATE_HOME:-$HOME/.local/state}/herdr-orchestrator/roles/<repository_id>.json` の更新・参照            | リポジトリごとの `role` ⇔ `pane_id` マッピング JSON（`HERDR_ENV=1` 下の `set` で対象ペイン・worktree 未確認時は `warning` 付き）                       |
 
 `reconcile-dispatch` の `--dispatch-outcome`（A 向け。省略時は Registry 不変の **人間判断待ち**）:
 

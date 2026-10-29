@@ -34,9 +34,22 @@
 
 <a id="sec-4-1"></a>
 
-### 4.1 logical role と agent.name
+### 4.1 logical role と routing target（Role Binding / agent.name）
 
-live agent の `agent.name` は Herdr 公式の Agent routing target として扱い、原則として次の論理形式を使用する。`agent.name` は永続的な Agent identity とはみなさない。
+Herdr 上の手動起動エージェントおよびサーバー再起動時に自動再開（`resume`）されたエージェントは既定で無名（`name` 未設定）であり、`pane_id`（例: `w15:p1`, `w15:p2`）を公式の Agent routing target として使用する。また、`herdr agent rename` で一時的な名前を付与した場合も、エージェントプロセスの終了・置換やサーバー再起動時には保持されない。
+
+Herdr 公式 Skill の仕様上、エージェント操作コマンド（`herdr agent get` / `herdr agent prompt` 等）は live `agent.name` または現在そのエージェントをホストしている `pane_id` を target として受け付け、閉じたタブ・ペインの ID は同一セッション内で再利用されない。
+
+そのため、`herdr-orchestrator` では **Role Binding（リポジトリごとの論理 role と `pane_id` の 1対1 マッピング）** を標準のルーティング解決手段とし、`herdr agent rename` によるエージェント名変更を不要とする。
+
+- 保存先: `${XDG_STATE_HOME:-$HOME/.local/state}/herdr-orchestrator/roles/<repository_id>.json`
+- 操作 CLI: `herdr-orchestrator role set <role> [--pane <pane_id>]`、`herdr-orchestrator role show`、`herdr-orchestrator role clear [<role>|--all]`
+- **解決タイミングと不変性**: Role Binding を参照するのは **`handoff` 開始時の初期解決のみ** とする。Role Binding が登録されている場合、Orchestrator は `handoff` 時点で対象 role の `pane_id` を routing locator として解決し、Task Registry の `requester.agent_name`（および `requester.pane_id`）と `worker.agent_name`（および `worker.pane_id`）にその `pane_id` を保存する。後続の段階（`assert-handoff-continuable`、`result-submit` の [§10.3](06-results-and-workflows.md#sec-10-3) 提出元検証、`reconcile-dispatch`、`resume_requester` 等の completion）はすべて **Task Registry に保存された locator（`requester.agent_name` / `worker.agent_name`）のみ** を参照し、実行途中の Role Binding 再設定（`role set`）によって in-flight task の宛先や照合先が別ペインへ切り替わることはない。
+- **受け入れるリスクと安全対策（Fail Closed）**:
+  - 同一ペイン内でのエージェント終了・別 occupant 起動、または `herdr pane move` による新しい `pane_id` の採番、あるいはサーバー再起動時にレイアウト復元で `pane_id` が維持されない場合があり得る。これらに対しては、handoff・`result-submit`・completion の各段階で必ず `foreground_cwd` からの worktree root および `repository_identity` 照合（[§11.0](06-results-and-workflows.md#sec-11-0)）と受信側 Registry 検証（[§11.4](06-results-and-workflows.md#sec-11-4)）を実施し、対象不在または別 worktree / 別リポジトリによる context 不一致時は別ペインへ自動 fallback せず安全停止（`worker_unavailable` / `requester_unavailable` / `requester_context_mismatch`）する。なお、同一 worktree 内で複数ペインの担当 role（例: `implementer` と `reviewer` のペイン）を入れ替えた場合は worktree 照合だけでは区別できないため、ペイン配置変更時や再起動後は運用上 `herdr-orchestrator role show` / `role set` でバインディングを確認・更新する。
+  - Role Binding は `repository_id`（UUID）単位で共有されるため（Pattern A 命名と同様、「同一リポジトリ内では 1 role につき 1 エージェント稼働」が基本前提）、同一リポジトリの複数 worktree を別ペインで切り替えて運用する場合は、作業対象 worktree のペインに対して `role set` を更新して使用する（別 worktree のペインがバインドされたままの場合は [§11.0](06-results-and-workflows.md#sec-11-0) の `worktree.path` 照合により誤配送が防止される）。
+
+Role Binding が未登録の環境（または名前付き起動運用・レガシー環境）におけるフォールバックとして、live agent の `agent.name` は次の論理形式（または [Repository Identity UUID 化設計書](../herdr-orchestrator-identity-uuid.md#621-agent-名生成規則の確定パターン-a-r-hash16-role) の Pattern A `r-<hash16>-<role>`）を使用する。ただし、Pattern A 名で導出した role が Role Binding 上で別ペインにバインドされている混在状態では、曖昧性を排除するため handoff を拒否（`requester_context_unverified`）する。`agent.name` は永続的な Agent identity とはみなさない。
 
 ```text
 <project-slug>-<role>                    # 32 文字以内
@@ -108,14 +121,13 @@ agent name が既存 live Agent と衝突した場合、名前一致だけを理
 
 ### 4.2 Routing Identity Policy
 
-Agent 間配送は Herdr 公式の Agent routing surface を使用する。
+Agent 間配送は Herdr 公式の Agent routing surface（`herdr agent get <target>` / `herdr agent prompt <target>`）を使用する。
 
-標準 routing target は Herdr が認識している live `agent.name` とする。
+標準の routing locator は、`handoff` 開始時に [§4.1](#sec-4-1) の Role Binding から解決した `pane_id`（Role Binding 未設定時は Pattern A の live `agent.name`）とし、`create` 時に Task Registry の `requester.agent_name` / `worker.agent_name` として確定・保存する。
 
-次を独自 routing ID として使用しない。
+次を Orchestrator の routing ID に転用しない。
 
 ```text
-pane_id
 terminal_id
 agent_session_id
 ```
@@ -126,12 +138,13 @@ agent_session_id
 task.id
   = durable task identity
 
-agent.name
-  = Herdr 公式の live routing locator
-  = 永続 identity ではない
+requester.agent_name / worker.agent_name
+  = handoff 時に確定・保存した Herdr 公式の live routing locator
+    （Role Binding 利用時は pane_id、フォールバック時は live agent.name）
+  = Agent 個体の永続 identity ではない
 
 pane_id
-  = terminal location / diagnostic metadata
+  = terminal location / Role Binding 利用時の live routing target
 
 terminal_id
   = terminal identity / diagnostic metadata
@@ -141,9 +154,9 @@ agent_session_id
   = Orchestrator routing には使用しない
 ```
 
-`agent.name` は Agent 終了・置換後に再利用され得るため、名前一致だけで「依頼時と同じ Agent 個体」と断定しない。
+`pane_id` 上の occupant は終了・置換され得るほか、名前付き運用時の `agent.name` も再利用され得るため、locator 一致だけで「依頼時と同じ Agent 個体」と断定しない。
 
-callback / handoff 前には、現在解決された live Agent が Task Envelope の期待 context と明らかに矛盾していないことを確認する。確認と `agent prompt` 送信の間に Agent が変わり得るため、直前再確認と受信側 Registry 検証は [§11.4](06-results-and-workflows.md#sec-11-4) に従う。
+callback / handoff 前には、Task Registry に保存された locator（`requester.agent_name` / `worker.agent_name`）で現在解決された live Agent が、Task Envelope / Registry の期待 context と矛盾していないことを確認する。確認と `agent prompt` 送信の間に Agent が変わり得るため、直前再確認と受信側 Registry 検証は [§11.4](06-results-and-workflows.md#sec-11-4) に従う。
 
 確認候補:
 
@@ -165,7 +178,7 @@ completion.reason = requester_unavailable
 completion.reason = requester_context_mismatch
 ```
 
-別の Agent name、古い pane ID、terminal ID、agent_session_id へ自動 fallback してはならない。
+Task Registry に保存された locator（`requester.agent_name` / `worker.agent_name`）以外の別 Agent name、別 pane ID、現在の Role Binding 上の新しい pane ID、terminal ID、agent_session_id へ自動 fallback してはならない。
 
 <a id="sec-5"></a>
 

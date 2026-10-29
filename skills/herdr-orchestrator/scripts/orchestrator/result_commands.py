@@ -98,7 +98,7 @@ def verify_worker_submit_context(
             message=str(exc),
             retryable=False,
         ) from exc
-    if caller.name != expected_worker_agent:
+    if caller.name != expected_worker_agent and caller.pane_id != expected_worker_agent:
         raise ResultCommandError(
             "worker_agent_mismatch",
             message="caller agent does not match Registry worker.agent_name",

@@ -12,7 +12,7 @@ sync handoff + `repo-review-helper` CLI + `herdr-orchestrator` CLI: [repo-review
 
 ## Herdr Orchestrator のレビュー
 
-Herdr Orchestrator の設計書・実装・テスト仕様をレビューするときは、レビュー開始前に[エージェントレビューガイドライン](docs/herdr-agent-review-guidelines.md)を読み、その基準に従う。特に Herdr の公式仕様と独自設計を区別し、必要に応じて現行の公式資料・実機仕様を確認する。
+Herdr Orchestrator の設計書・実装・テスト仕様をレビューするときは、レビュー開始前に[エージェントレビューガイドライン](docs/herdr-agent-review-guidelines.md)を読み、その基準に従う。特に Herdr の公式仕様と独自設計を区別し、必要に応じて現行の公式資料・実機仕様を確認する。Herdr 公式ドキュメントを読むときは [https://herdr.dev/llms.txt](https://herdr.dev/llms.txt) から開始する。
 
 ## 設計書について
 

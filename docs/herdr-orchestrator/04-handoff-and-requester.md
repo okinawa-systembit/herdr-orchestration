@@ -99,7 +99,7 @@ complete
 requester
 ```
 
-async handoff では、依頼時に requester の live agent name と実際の pane ID を requester context として worker へ渡し、`task.id` と関連付ける。completion 時は Herdr 公式の routing target である requester の live `agent.name` を再解決し、pane ID 等へ fallback しない。
+async handoff では、依頼時に確定した requester の routing locator（`requester.agent_name`。Role Binding 利用時は `pane_id`、フォールバック時は live `agent.name`）と `pane_id` を requester context として Task Registry に保存し、`task.id` と関連付ける。completion 時は Task Registry に保存された `requester.agent_name` のみを用いて live Agent を再解決し、保存値以外の別 pane ID・別 agent name・変更後の Role Binding 先へは自動 fallback しない。
 
 <a id="sec-7-3"></a>
 
@@ -142,50 +142,60 @@ sync handoff は task 完了の正本を Task Registry とするため、`agent 
 
 ### 8.1 main rename を標準としない
 
-既存の検証実装では、callback 先を安定させるため依頼元 Agent を `main` へ rename していたが、中央設計では標準から外す。
+既存の検証実装では、callback 先を安定させるため依頼元 Agent を `main` へ rename していたが、中央設計では標準から外す。さらに、Herdr のネイティブセッション復元（`resume`）に干渉しないよう、`herdr agent rename` 自体を不要とし、[§4.1](02-roles-and-task-contract.md#sec-4-1) の Role Binding（`role` ⇔ `pane_id`）を標準とする。
 
-requester は、取得できる場合は live agent name と pane ID の両方を保持する。
+requester は、Task Registry 上で routing locator（`agent_name`）と `pane_id` の両方を保持する（Role Binding 利用時は `agent_name` にも解決時の `pane_id` を保存する）。
 
 ```yaml
+# Role Binding 利用時（標準）
 requester:
-  agent_name: git-example-repo-design
+  role: design
+  agent_name: w1:p1
+  pane_id: w1:p1
+
+# Pattern A 命名フォールバック時
+requester:
+  role: design
+  agent_name: r-0123456789abcdef-design
   pane_id: w1:p1
 ```
 
 理由:
 
-- 元の Agent 名を強制変更しない。
+- 元の Agent 名を強制変更しない（無名エージェントのまま運用可能）。
 - `main` の名前競合を避ける。
-- callback 時に live agent name を再解決できる。
-- pane 移動等で public pane ID が変化しても固定 ID のみに依存しない。
+- callback 時に Task Registry に保存された `requester.agent_name` で live Agent を決定論的に再解決できる。
 
 <a id="sec-8-2"></a>
 
-### 8.2 Pane ID
+### 8.2 Pane ID と保存済み Locator
 
-pane ID は推測・固定値化しない。現在の Herdr セッションから取得した実測値を **diagnostic metadata** として保持する。
+`pane_id` は推測しない。現在の Herdr セッション（`HERDR_PANE_ID` および `herdr agent get`）から取得した実測値を使用する。
 
-pane ID は requester の routing fallback として使用しない。
+[§4.1](02-roles-and-task-contract.md#sec-4-1) の Role Binding が設定されている場合、`handoff` 開始時に解決された `pane_id` がそのまま Task Registry の `requester.agent_name` / `worker.agent_name`（保存済み routing locator）として記録される。一方、Role Binding 未設定の Pattern A フォールバック環境では、live `agent.name` が `requester.agent_name` に記録され、`pane_id` は diagnostic metadata として記録される。
 
 ```text
-agent_name
-  = Herdr公式のlive routing locator
+requester.agent_name / worker.agent_name
+  = handoff 時に確定・保存した Herdr 公式の live routing locator
+    （Role Binding 利用時は pane_id、フォールバック時は live agent.name）
 
-pane_id
-  = diagnostic metadata
+requester.pane_id / worker.pane_id
+  = handoff 時点の実測 pane_id
 ```
 
-requester の live `agent.name` が解決できない場合は、古い pane ID へ送信せず `skipped / requester_unavailable` とする。
+いずれの方式でも、handoff 後の後続段階（completion 等）で保存済み `requester.agent_name` が解決できない場合は、別 pane ID や変更後の Role Binding 先へ自動 fallback せず `skipped / requester_unavailable` とする。
 
 ---
 
 <a id="sec-8-3"></a>
 
-### 8.3 pane_id の扱い
+### 8.3 `resume_requester` における宛先決定（Role Binding 再参照の禁止）
 
-`pane_id` は診断、トラブルシュート、履歴確認のために保持してよいが、`resume_requester` の宛先決定には使用しない。
+`resume_requester` の宛先決定には、**Task Registry に保存された `requester.agent_name` の再解決だけ**を使用する（Role Binding 経由で作成された task では、保存された `pane_id` が `requester.agent_name` に入っている）。
 
-`resume_requester` は live `agent.name` の再解決だけを使用する。解決できない場合:
+in-flight task の途中で `herdr-orchestrator role set` により Role Binding が別 pane に変更された場合でも、`resume_requester` は現在の Role Binding を参照せず、必ず Registry 保存時の `requester.agent_name` に対して解決・検証を行う。また、Pattern A フォールバックで作成された task において `requester.agent_name`（名前）が解決できない場合に、`requester.pane_id` へ暗黙 fallback することも行わない。
+
+解決できない場合:
 
 ```text
 completion.status = skipped
@@ -202,10 +212,10 @@ Herdr は callback 用の immutable Agent instance ID を公開 routing identity
 
 そのため Orchestrator は「依頼時と同じ Agent 個体を完全に証明した」とは扱わない。
 
-代わりに、保存済み `agent.name` で live Agent を解決し、Task Envelope / Registry に保存された context と照合する。
+代わりに、Task Registry に保存された `requester.agent_name` で live Agent を解決し、Task Envelope / Registry に保存された context と照合する。
 
 ```text
-agent.name 解決
+保存済み requester.agent_name 解決
   ↓
 live Agent 不在
   -> skipped / requester_unavailable
@@ -224,15 +234,15 @@ state確認
 
 context の取得不能や曖昧さにより安全確認できない場合も配送しない。
 
-このとき別 target へ fallback しない。
+このとき別 target（別 pane や再バインド後の新 pane）へ fallback しない。
 
-`resume_requester` が保証するのは、依頼時と同一の Agent プロセスへの返却ではなく、**Registry に記録した `requester.role` と作業 context を継承できる live Agent への結果返却**である（`requester.role` の決定・照合は [§8.5](#sec-8-5)）。
+`resume_requester` が保証するのは、依頼時と同一の Agent プロセスへの返却ではなく、**Registry に記録した保存済み locator（`requester.agent_name`）と作業 context を継承できる live Agent への結果返却**である（`requester.role` の決定・照合は [§8.5](#sec-8-5)）。
 
 標準の作業 context 判定では、少なくとも次を照合する。
 
 ```text
 必須:
-  agent.name
+  保存済み requester.agent_name（live agent.name または pane_id の一致）
   repository identity
   worktree path
 
@@ -245,7 +255,7 @@ workflow が固定を要求する場合:
   cwd / foreground cwd
 ```
 
-依頼時の Agent が終了した後でも、同じ `agent.name` で解決された live Agent が必須 context を満たす場合、その Agent を requester role の継承先として扱ってよい。これは Agent 個体の同一性を保証するものではない。
+依頼時の Agent が終了・再起動した後でも、同じ保存済み `requester.agent_name` で解決された live Agent が必須 context を満たす場合、その Agent を requester role の継承先として扱ってよい。これは Agent 個体の同一性を保証するものではない。
 
 branch / commit は常時必須にしない。未 commit 差分を扱う review 等では commit 固定が workflow と矛盾するため、workflow が明示的に要求する場合のみ照合条件とする。
 
@@ -267,7 +277,7 @@ context.worktree.commit != null → live 環境の commit と一致必須
 
 ### 8.5 `requester.role` の決定と検証
 
-Herdr は logical role を提供しない。Orchestrator は **live `agent.name` から導出**し、Registry の `requester.role` として保存する。
+Herdr は logical role を提供しない。Orchestrator は **`handoff` 実行時に caller の Role Binding（`pane_id`）または Pattern A の live `agent.name` から導出**し、Registry の `requester.role` として保存する。
 
 初期標準 role（[§4](02-roles-and-task-contract.md#sec-4)）のみ MVP で許可する。
 
@@ -277,18 +287,18 @@ design | reviewer | implementer | orchestrator
 
 #### `create` 時（決定）
 
-1. handoff 実行時に live requester Agent を解決し、`agent.name` を取得する（取得不能なら `create` 前に失敗）。
-2. 初期標準4 role それぞれについて、[§4.1](02-roles-and-task-contract.md#sec-4-1) 手順 1–8 で `context.repository.identity` から期待 `agent.name` を算出する。
-3. live `agent.name` が 2 の期待名と **完全一致**する role を1つ特定する。0 件または2件以上は `create` 前に失敗する。
+1. handoff 実行時に caller（`HERDR_PANE_ID`）の live requester Agent を解決し、`pane_id` および live `agent.name`（無名時は `pane_id`）を取得する（取得不能なら `create` 前に失敗）。
+2. **Role Binding による解決（優先）**: `context.repository.identity` の Role Binding に caller の `pane_id` が登録されている場合、そのバインドされた role を `requester.role` とし、`requester.agent_name = requester.pane_id = caller.pane_id` として確定する（手順 4 へ）。
+3. **Pattern A 命名によるフォールバック解決**: caller の `pane_id` が Role Binding に未登録の場合、初期標準4 role それぞれについて [§4.1](02-roles-and-task-contract.md#sec-4-1)（Pattern A `r-<hash16>-<role>`）で `context.repository.identity` から期待 `agent.name` を算出し、live `agent.name` と **完全一致**する role を1つ特定する（0 件または2件以上は `create` 前に失敗）。ただし、特定した role が Role Binding 上で**別の `pane_id` にバインドされている場合**は、混在による曖昧性を防ぐため `requester_context_unverified` として `create` 前に失敗させる。問題なければ `requester.agent_name = live agent.name`、`requester.pane_id = caller.pane_id` として確定する。
 4. 特定した role を `requester.role` として Registry に書き込む。
 5. handoff 入力に `requester.role` を含める場合は、4 の値と **一致必須**。不一致は `create` 前に失敗する。
-6. `requester.agent_name` は live 解決値（= 4 に対応する期待名）を保存する。別名へ **変更しない**。衝突時は handoff を中止する。
+6. `requester.agent_name` は 2 または 3 で確定した locator を保存する。別名へ **変更しない**。
 
-`worker.role` は handoff 入力で指定し、[§4.1](02-roles-and-task-contract.md#sec-4-1) / [§11.1](06-results-and-workflows.md#sec-11-1) で期待 `agent.name` を固定したうえで live worker を解決し、Registry へ書き込む（[§6.2](03-task-registry.md#sec-6-2)）。requester 側も同じ4 role 語彙に限定する。
+`worker.role` は handoff 入力で指定し、[§4.1](02-roles-and-task-contract.md#sec-4-1) / [§11.1](06-results-and-workflows.md#sec-11-1) に従い Role Binding の `pane_id`（未登録時は期待 `agent.name`）から live worker を解決し、Registry へ書き込む（[§6.2](03-task-registry.md#sec-6-2)）。requester 側も同じ4 role 語彙に限定する。
 
 #### `resume_requester` 時（照合）
 
-1. 宛先は保存済み `requester.agent_name` から live Agent を再解決する（pane ID へ fallback しない）。
-2. [§8.4](#sec-8-4) の context sanity check を行う。
-3. [§4.1](02-roles-and-task-contract.md#sec-4-1) 手順 1–8 で `(Registry の repository identity, requester.role)` から再算出した期待 `agent.name` と live `agent.name` が一致することを確認する。不一致は `completion.reason = requester_context_mismatch` とする。
+1. 宛先は Registry に保存された `requester.agent_name` から live Agent を再解決する（現在の Role Binding は参照せず、別の pane ID や agent name へも fallback しない）。
+2. [§8.4](#sec-8-4) の context sanity check（`repository.identity` / `worktree.path`、および指定時の `branch` / `commit`）を行う。
+3. 解決した live Agent の `name` または `pane_id` が、Registry の保存済み `requester.agent_name` と一致することを確認する。不一致は `completion.reason = requester_context_mismatch`（初回解決失敗時は `requester_unavailable`）とする。
 4. `requester.role` は workflow メタデータとして保持する。live 解決と context 確認を通過した Agent へ結果を返す。

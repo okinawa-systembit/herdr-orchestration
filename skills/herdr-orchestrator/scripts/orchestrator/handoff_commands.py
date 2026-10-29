@@ -4,7 +4,7 @@ import copy
 import os
 import subprocess
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +23,7 @@ from orchestrator.live_agent import (
     verify_live_agent_context,
 )
 from orchestrator.naming import derive_requester_role, expected_agent_name
+from orchestrator.role_bindings import RoleBindingError, resolve_pane_by_role, resolve_role_by_pane
 from orchestrator.registry.errors import RegistryError
 from orchestrator.registry import operations as registry_ops
 from orchestrator.registry.schema import MODES, STANDARD_ROLES
@@ -124,14 +125,47 @@ def _resolve_parties(*, worker_role: str) -> tuple[Any, Any, Path, str, str]:
         raise HandoffCommandError("git_repository_not_initialized", message=str(exc)) from exc
     except RepositoryIdentityError as exc:
         raise HandoffCommandError("requester_context_unverified", message=str(exc)) from exc
+    req_pane_opt = (
+        requester.pane_id.strip()
+        if isinstance(requester.pane_id, str) and requester.pane_id.strip()
+        else None
+    )
     try:
-        requester_role = derive_requester_role(identity, requester.name)
-    except ValueError as exc:
-        raise HandoffCommandError("requester_context_unverified", message=str(exc)) from exc
-    worker_name = expected_agent_name(identity, worker_role)
+        bound_req_role = resolve_role_by_pane(identity, req_pane_opt) if req_pane_opt else None
+    except RoleBindingError as exc:
+        raise HandoffCommandError(exc.code, message=exc.message) from exc
+    if bound_req_role is not None and req_pane_opt is not None:
+        requester_role = bound_req_role
+        requester = replace(requester, name=req_pane_opt)
+    else:
+        try:
+            requester_role = derive_requester_role(identity, requester.name)
+        except ValueError as exc:
+            raise HandoffCommandError("requester_context_unverified", message=str(exc)) from exc
+        try:
+            existing_req_pane = resolve_pane_by_role(identity, requester_role)
+        except RoleBindingError as exc:
+            raise HandoffCommandError(exc.code, message=exc.message) from exc
+        if existing_req_pane is not None and existing_req_pane != req_pane_opt:
+            raise HandoffCommandError(
+                "requester_context_unverified",
+                message=(
+                    f"requester role {requester_role!r} is bound to pane {existing_req_pane!r}, "
+                    f"not caller pane {req_pane_opt!r}"
+                ),
+            )
+    try:
+        bound_worker_pane = resolve_pane_by_role(identity, worker_role)
+    except RoleBindingError as exc:
+        raise HandoffCommandError(exc.code, message=exc.message) from exc
+    worker_target = (
+        bound_worker_pane
+        if bound_worker_pane is not None
+        else expected_agent_name(identity, worker_role)
+    )
     try:
         worker = verify_live_agent_context(
-            worker_name,
+            worker_target,
             expected_worktree_path=worktree,
             expected_repository_identity=identity,
             require_promptable=True,
@@ -139,7 +173,9 @@ def _resolve_parties(*, worker_role: str) -> tuple[Any, Any, Path, str, str]:
     except LiveAgentError as exc:
         raise HandoffCommandError("worker_unavailable", message=str(exc)) from exc
     _require_live_pane_id(requester, party="requester")
-    _require_live_pane_id(worker, party="worker")
+    wrk_pane = _require_live_pane_id(worker, party="worker")
+    if bound_worker_pane is not None:
+        worker = replace(worker, name=wrk_pane)
     return requester, worker, worktree, identity, requester_role
 
 
