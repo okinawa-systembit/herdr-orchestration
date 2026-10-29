@@ -106,7 +106,7 @@
 | 自動テスト（段階 0–8 ゲート） | リポジトリ root で `npm run test:orchestrator`                                           |
 | 導入前一括確認                | `npm run verify:orchestrator`                                                            |
 | グローバル Skill 導入         | `skills/herdr-orchestrator/install/setup.sh` または `npm run install:orchestrator-skill` |
-| §18 実機・§19 移行の記録      | [herdr-orchestrator-verification-log.md](../herdr-orchestrator-verification-log.md)      |
+| §18 実機・§19 移行の記録      | [herdr-orchestrator-verification-log.md](herdr-orchestrator-verification-log.md)         |
 | repository workflow 例        | `.agents/skills/repo-workflow/SKILL.md`                                                  |
 
 **残作業（実装 INDEX 外の運用）:** [§18.1–18.2](herdr-orchestrator/08-adoption-and-verification.md#sec-18-1) の Herdr 実機シナリオを検証ログに記録する。[§19](herdr-orchestrator/08-adoption-and-verification.md#sec-19) Phase 1–5 は repository ごとに並行検証後に移行する。
