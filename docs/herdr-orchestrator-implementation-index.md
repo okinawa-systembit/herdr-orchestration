@@ -34,11 +34,11 @@
 
 ## 1. Role と作業 context（ライブラリ）
 
-1. [§4.1](herdr-orchestrator/02-roles-and-task-contract.md#sec-4-1) の role / `agent.name` 規則と [§8.5](herdr-orchestrator/04-handoff-and-requester.md#sec-8-5) の requester 導出を共通関数にする。
-2. [§11.0](herdr-orchestrator/06-results-and-workflows.md#sec-11-0) の repository identity 正規化、worktree root 解決、全 remote の照合を実装する。handoff と submit は同じ関数を使う。
-3. live Agent の名前・状態・context 取得と worktree / repository 照合を **`orchestrator/live_agent.py`** に集約する（`agent get` のみ。pane ID fallback なし）。handoff / `result-submit` からの **呼び出し配線**は段階 4 で行う。
+1. [§4.1](herdr-orchestrator/02-roles-and-task-contract.md#sec-4-1) の Role Binding（`orchestrator/role_bindings.py` および `herdr-orchestrator role` CLI）ならびに Pattern A の role / `agent.name` 規則、および [§8.5](herdr-orchestrator/04-handoff-and-requester.md#sec-8-5) の requester 導出を共通関数にする。
+2. [§11.0](herdr-orchestrator/06-results-and-workflows.md#sec-11-0)（および [Repository Identity UUID 化設計書](herdr-orchestrator-identity-uuid.md)）の repository identity 解決、worktree root 解決を実装する。handoff と submit は同じ関数を使う。
+3. live Agent の名前・`pane_id`・状態・context 取得と worktree / repository 照合を **`orchestrator/live_agent.py`** に集約する（`agent get <target>` のみ。保存済み locator 以外の別 target への自動 fallback は行わない）。handoff / `result-submit` からの **呼び出し配線**は段階 4 で行う。
 
-**完了ゲート（段階 1）:** 命名・identity・worktree 単体テスト、および `live_agent` のモックテスト（[§18.1](herdr-orchestrator/08-adoption-and-verification.md#sec-18-1)、[§18.3](herdr-orchestrator/08-adoption-and-verification.md#sec-18-3) の項目 114–125）。実 Herdr 上の worker 選定 E2E は段階 4 のゲートに含める。
+**完了ゲート（段階 1）:** Role Binding・命名・identity・worktree 単体テスト、および `live_agent` のモックテスト（[§18.1](herdr-orchestrator/08-adoption-and-verification.md#sec-18-1)、[§18.3](herdr-orchestrator/08-adoption-and-verification.md#sec-18-3) の項目 114–125）。実 Herdr 上の worker 選定 E2E は段階 4 のゲートに含める。
 
 ## 2. Task Registry
 

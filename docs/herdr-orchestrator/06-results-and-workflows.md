@@ -116,12 +116,12 @@ requester 側 sync `handoff` は [§6.14](03-task-registry.md#sec-6-14) によ�
 
 ### 10.3 Worker Submit Context（result 受理の提出元検証）
 
-`agent.name` は live alias であり Agent 個体の永続 ID ではない（[§4.1](02-roles-and-task-contract.md#sec-4-1) / Herdr 公式）。`result-submit` は名前一致だけでは受理しない。
+`pane_id` 上の occupant は交代し得るほか、`agent.name` も live alias であり Agent 個体の永続 ID ではない（[§4.1](02-roles-and-task-contract.md#sec-4-1) / Herdr 公式）。`result-submit` は locator 一致だけでは受理しない。
 
-submit 時に Orchestrator は `HERDR_ENV=1` 下で submit 元 live Agent を解決し、Registry の当該 task と次を照合する。
+submit 時に Orchestrator は `HERDR_ENV=1` 下で caller（`HERDR_PANE_ID`）の submit 元 live Agent を解決し、Registry の当該 task と次を照合する（現在の Role Binding は参照せず、Task Registry に保存された `worker.agent_name` のみを照合基準とする）。
 
 ```text
-1. live agent.name == Registry worker.agent_name
+1. caller の live agent.name または pane_id == Registry worker.agent_name
 2. submit 元の repository identity == context.repository.identity
 3. [§11.0](#sec-11-0) で解決した worktree root / repository identity が Registry と一致
 ```
@@ -130,7 +130,7 @@ submit 元 context は [§11.0](#sec-11-0) に従って導出する（`handoff` 
 
 Herdr が `foreground_cwd` を返さない場合、または §11.0 の Git 解決が失敗する場合も安全側で **拒否**する。
 
-同名 live Agent が別 repository / worktree にいる場合、2 または 3 の不一致で拒否する。別 Agent 個体への worker 交代は、**同一 logical role 名かつ Registry context と一致する live Agent** からの submit を許可する。
+同じ locator で解決された live Agent が別 repository / worktree にいる場合、2 または 3 の不一致で拒否する。また、in-flight task の途中で `role set` により別 pane が `reviewer` 等に再バインドされた場合でも、Registry の保存済み `worker.agent_name` と一致しない新 pane からの submit は `worker_agent_mismatch` で拒否する。同一ペイン（または同一 Pattern A 名）上での別 Agent 個体への worker 交代は、**Registry の保存済み `worker.agent_name` かつ Registry context と一致する live Agent** からの submit を許可する。
 
 Herdr Agent lifecycle と workflow completion / Result Contract を同一視しない。
 
@@ -207,18 +207,18 @@ repository 固有 Skill が identity を明示指定する場合は、**canonica
 
 ### 11.1 Candidate Resolution
 
-Orchestrator は次を使って candidate worker を選定する。
+Orchestrator は `handoff` 開始時に次を使って candidate worker を選定する。
 
 ```text
 1. current repository identity を取得
 2. requested logical role を確定
-3. Herdr 公式の live Agent 情報から routing candidate を取得
-4. [§4.1](02-roles-and-task-contract.md#sec-4-1) 手順 1–8 で `(identity, requested logical role)` から決定した `agent.name` を **唯一の** 期待名として照合（衝突時に別名へ変更しない）
+3. [§4.1](02-roles-and-task-contract.md#sec-4-1) に従い、Role Binding に当該 role が登録されていればその `pane_id` を、未登録であれば Pattern A で `(identity, requested logical role)` から決定した `agent.name` を **唯一の** 期待 routing locator として確定する（衝突・不在時に別 pane / 別名へ自動フォールバックしない）
+4. Herdr 公式の live Agent 情報（`herdr agent get <target>`）から candidate を取得し、live `agent.name` または `pane_id` が期待 locator と一致することを確認
 5. Agent state を確認
 6. 公式に取得可能な pane / process context から [§11.0](#sec-11-0) で worktree root を解決
 7. 解決した worktree / repository identity が handoff 入力の期待値と矛盾しないことを確認
-8. 安全に一意の candidate を選定できた場合のみ配送対象とする
-9. 解決不能・曖昧・context 不一致の場合は配送不可とし、別 name / pane ID / role 単独名へ fallback しない
+8. 安全に一意の candidate を選定できた場合のみ配送対象とし、解決した locator を `worker.agent_name`（および `worker.pane_id`）として Registry に保存する
+9. 解決不能・曖昧・context 不一致の場合は配送不可とし、別 name / 未登録 pane ID / role 単独名へ fallback しない
 ```
 
 worktree / repository の一致証明には §11.0 を用い、`foreground_cwd` の生値だけでは判定しない。本来別用途の `agent_session_id` や `terminal_id` を routing identity に転用しない。
@@ -234,7 +234,7 @@ candidate worker は task 実行前に Task Envelope の期待値と自分の実
 最低限確認する（dispatch readiness の bounded poll は [§11.4](#sec-11-4) 手順 4）。
 
 ```text
-task.id で task-status を取得し Registry worker.agent_name が自分と一致
+task.id で task-status を取得し Registry worker.agent_name（Role Binding 利用時は pane_id）が自分の live agent.name または HERDR_PANE_ID（pane_id）と一致
 dispatch.status ∈ {sent, uncertain}（pending は即拒否せず §11.4 4a）
 repository identity
 worktree path
@@ -291,12 +291,12 @@ unknown
 
 `working` の worker へ新しい sync handoff を送らない。進行中 task との混線を避け、[§6.14](03-task-registry.md#sec-6-14) が前提とする Registry `result.status` 確定待機と整合させるためである。Herdr Agent lifecycle の `idle` / `done` は **task result の確定を意味しない**。
 
-Herdr の live `agent.name` は同時に一意であるため、同一 `<project-slug>-<role>` を満たす「別 live worker」を追加探索することはできない。別 `agent.name` で second worker を起動しても routing 規約外となる。初回 §11.1 で解決した Agent が `working` / `blocked` / `unknown` の場合、MVP では **待機またはユーザーへ報告**を基本とし、暗黙の別名 worker 起動・別 role への自動切替は行わない。
+Role Binding の `pane_id`（または Pattern A の `agent.name`）はリポジトリ内の当該 role に対して 1 対 1 で決まるため、同一 role を満たす「別 live worker」を勝手に探索することはしない。初回 §11.1 で解決した Agent が `working` / `blocked` / `unknown` の場合、MVP では **待機またはユーザーへ報告**を基本とし、暗黙の別ペイン探索・別名 worker 起動・別 role への自動切替は行わない。
 
 ```text
 1. 同一 worker の idle 化または人間判断を待つ
 2. 待機不能・期限切れの場合は handoff 失敗または retryable 終了として報告（§6.14 / §9.10）
-3. 自動 fallback（別 role 名・pane ID・role 単独名・別 agent.name）は行わない
+3. 自動 fallback（別 role 名・未バインドの別 pane ID・role 単独名・別 agent.name）は行わない
 ```
 
 別 logical role への切り替えは新しい handoff 入力として扱い、暗黙の代替 worker 探索とはみなさない。
@@ -307,19 +307,19 @@ Herdr の live `agent.name` は同時に一意であるため、同一 `<project
 
 ### 11.4 配送時 routing 安全（TOCTOU）
 
-Herdr の `agent prompt` は **確認と送信を一体の条件付き操作にできない**。`handoff.lock` は Registry 更新を直列化するが、**live Agent の終了・置換・状態変化は固定しない**。確認時 `idle` でも送信直前に `working` になり得る。`agent.name` は alias であり、確認後に **別 occupant** が同じ名前を担う可能性も [§4.2](02-roles-and-task-contract.md#sec-4-2) のとおり残る。
+Herdr の `agent prompt` は **確認と送信を一体の条件付き操作にできない**。`handoff.lock` は Registry 更新を直列化するが、**live Agent の終了・置換・状態変化は固定しない**。確認時 `idle` でも送信直前に `working` になり得る。`pane_id` や `agent.name` は Agent 個体の永続 ID ではなく、確認後に **別 occupant** が同じペインまたは同じ名前を担う可能性も [§4.2](02-roles-and-task-contract.md#sec-4-2) のとおり残る。
 
 **再確認だけでは競合を消せない。** fail closed（**誤った Agent に task を実行させない**）は **送信側の直前再確認** と **受信側の Registry 正本検証** の二段で満たす。prompt の **表示** や Herdr 仕様上の **作業中 Agent への入力** 自体は、この二段では防げない（下表「残存リスク」）。
 
 #### Orchestrator（handoff）
 
-`assert-handoff-continuable`（[§6.6](03-task-registry.md#sec-6-6)）は flock 保持下、`agent prompt` の **直前**に Registry **と** live Herdr 観測を再検証する。
+`assert-handoff-continuable`（[§6.6](03-task-registry.md#sec-6-6)）は flock 保持下、`agent prompt` の **直前**に Registry **と** live Herdr 観測を再検証する（現在の Role Binding は参照せず、Registry 保存済みの `worker.agent_name` を使用する）。
 
 ```text
 1. Registry lock 下: task.status=created, dispatch.status=pending, herdr_prompt_started_at 整合
 2. Registry の worker.agent_name を live 再解決
 3. live Agent 不在 → prompt しない（handoff 失敗 / reconcile 委譲）
-4. live agent.name == Registry worker.agent_name（不一致 → prompt しない）
+4. live agent.name または pane_id == Registry worker.agent_name（不一致 → prompt しない）
 5. Agent state ∈ {idle, done}（working / blocked / unknown → prompt しない。§11.3）
 6. [§11.0](#sec-11-0) で live worktree / repository identity が Registry context と一致
 7. 不一致・曖昧 → prompt しない
@@ -346,7 +346,7 @@ Herdr への prompt 配送（[§6.11](03-task-registry.md#sec-6-11) 手順 7）�
 ```text
 1. prompt から task.id を取得
 2. herdr-orchestrator task-status <task.id>（正本は Registry）
-3. Registry worker.agent_name == 自分の live agent.name（不一致 → 作業しない・誤配送）
+3. Registry worker.agent_name（Role Binding 利用時は pane_id） == 自分の live agent.name または HERDR_PANE_ID（pane_id）（不一致 → 作業しない・誤配送）
 4. dispatch.status の扱い:
    a. pending → 同一 task.id で task-status を **bounded 再 poll**（[§10.2](#sec-10-2) と同型: 推奨 最大 10 回、指数バックオフ初回 1 秒・上限 30 秒）。sent / uncertain になったら 5 へ
    b. sent / uncertain → 5 へ（task / result 状態が当該 role の作業開始を許可することを確認）

@@ -161,16 +161,25 @@ which herdr-orchestrator
 herdr-orchestrator --help
 ```
 
-### 3. Repository Identity の初期化
+### 3. Repository Identity と Role Binding の設定
 
-Orchestrator を利用する各開発 Git リポジトリのルートで実行します（Herdr ペイン外でも実行可能）。
+Orchestrator を利用する各開発 Git リポジトリのルートで、リポジトリ識別子の初期化と、各論理ロールが稼働する Herdr の `pane_id` の紐づけを行います（Herdr のエージェント名変更 `herdr agent rename` は不要です）。
 
 ```bash
 cd /path/to/your-project-repo
+
+# 1. リポジトリ固有の UUID を初期化（または role set 実行時に自動初期化されます）
 herdr-orchestrator identity init
+
+# 2. 各ロールと pane_id を紐づける（自身のペインで実行する場合は --pane 省略可）
+herdr-orchestrator role set implementer --pane w15:p1
+herdr-orchestrator role set reviewer --pane w15:p2
+
+# 3. 登録内容の確認
+herdr-orchestrator role show
 ```
 
-`.git/config` にリポジトリ固有の UUID が登録され、決定論的な識別ハッシュが発行されます。
+`.git/config` にリポジトリ固有の UUID が登録され、`~/.local/state/herdr-orchestrator/roles/` にロールと `pane_id` の対応が永続保存されます。Herdr サーバー再起動後に同じ `pane_id` で各エージェントが自動再開（resume）された場合は再設定なしで継続できます。別リポジトリ・別 worktree のペインへの誤配送は worktree / identity 照合により拒否されますが、ペイン移動や再起動によって同一 worktree 内でペイン配置（ロールと `pane_id` の対応）を変更・入れ替えた場合は、`herdr-orchestrator role show` で確認し `herdr-orchestrator role set` で更新してください。
 
 ### 4. 環境診断の実行
 

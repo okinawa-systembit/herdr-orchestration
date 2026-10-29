@@ -188,7 +188,7 @@ Orchestrator 側で Herdr CLI の変更を追従実装しない。
 - timeout / stalled を即「prompt失敗」と判断して同じ依頼を再送する。
 - reviewer が存在しない場合に、無関係な Agent を勝手に reviewer
   として利用する。
-- routing target を安全に解決できない場合に、別 agent name、role 単独名、保存済み pane ID、terminal ID 等へ自動 fallback する。
+- routing target を安全に解決できない場合に、別 agent name、role 単独名、未登録または変更後の別 pane ID、terminal ID 等へ自動 fallback する。
 - `agent_session_id` や `terminal_id` を本来の用途から転用して独自の Agent routing identity として扱う。
 - timeout / stalled 等の配送結果不明を無通知のまま放置し、人間を待機させ続ける。
 - repo 固有レビュー規約を中央 Orchestrator に取り込む。

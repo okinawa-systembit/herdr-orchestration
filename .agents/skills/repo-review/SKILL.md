@@ -121,7 +121,7 @@ handoff 失敗時: stderr を人間へ。blind 再送しない（設計 §9）�
 
 ### 1. 前提・資料確認
 
-- `task.id` → `herdr-orchestrator task-status <task.id>` で自分の `agent.name` / context 一致を確認。
+- `task.id` → `herdr-orchestrator task-status <task.id>` で Registry の `worker.agent_name`（Role Binding 利用時は `pane_id`）が自分の live `agent.name` または `HERDR_PANE_ID`（`pane_id`）と一致し、context も一致することを確認。
 - `docs/herdr-agent-review-guidelines.md` と `references.md` が読み込み可能であることを確認。
 
 ### 2. レビュー対象の確定

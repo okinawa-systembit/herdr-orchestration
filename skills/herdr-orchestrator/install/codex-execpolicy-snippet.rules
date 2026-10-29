@@ -23,6 +23,7 @@
 # --- 1. 診断・読み取り系 (PATH 経由: ~/.local/bin -> ~/.agents/skills/...) ---
 prefix_rule(pattern=["herdr-orchestrator", ["doctor", "task-status", "task-result", "task-list"]], decision="allow", justification="Orchestrator CLI on PATH: Read-only diagnostics and status checks")
 prefix_rule(pattern=["herdr-orchestrator", "identity", "show"], decision="allow", justification="Orchestrator CLI on PATH: Read-only repository identity inspection (identity init is intentionally excluded)")
+prefix_rule(pattern=["herdr-orchestrator", "role", "show"], decision="allow", justification="Orchestrator CLI on PATH: Read-only role binding inspection (role set/clear are intentionally excluded)")
 
 # --- 2. 自動化のための書き込み例外 (PATH 経由) ---
 # NOTE: result-submit は Task Registry の更新および completion 連鎖実行を伴う書き込み操作ですが、
@@ -34,6 +35,7 @@ prefix_rule(pattern=["herdr-orchestrator", "result-submit"], decision="allow", j
 #   例: /home/<user>/.agents/skills/herdr-orchestration
 prefix_rule(pattern=["GLOBAL_INSTALL_ABS/scripts/herdr-orchestrator", ["doctor", "task-status", "task-result", "task-list"]], decision="allow", justification="Orchestrator CLI absolute path fallback: Read-only diagnostics and status checks")
 prefix_rule(pattern=["GLOBAL_INSTALL_ABS/scripts/herdr-orchestrator", "identity", "show"], decision="allow", justification="Orchestrator CLI absolute path fallback: Read-only repository identity inspection")
+prefix_rule(pattern=["GLOBAL_INSTALL_ABS/scripts/herdr-orchestrator", "role", "show"], decision="allow", justification="Orchestrator CLI absolute path fallback: Read-only role binding inspection")
 prefix_rule(pattern=["GLOBAL_INSTALL_ABS/scripts/herdr-orchestrator", "result-submit"], decision="allow", justification="Orchestrator CLI absolute path fallback: Automated worker result submission and completion triggering")
 
 # --- 4. 開発・検証用コマンド (リポジトリルートでのテスト・検証用 / 任意設定) ---

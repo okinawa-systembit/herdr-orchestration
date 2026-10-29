@@ -52,16 +52,20 @@ def _agent_from_herdr_payload(payload: dict[str, Any]) -> LiveAgentSnapshot:
         raise LiveAgentError(f"herdr agent get failed: {code}")
     result = _require_dict(root.get("result"), label="result")
     agent = _require_dict(result.get("agent"), label="agent")
-    name = agent.get("name")
-    if not isinstance(name, str) or not name:
+    pane_id = agent.get("pane_id")
+    if pane_id is not None and not isinstance(pane_id, str):
+        raise LiveAgentError("live agent pane_id has invalid type")
+    raw_name = agent.get("name")
+    if isinstance(raw_name, str) and raw_name.strip():
+        name = raw_name
+    elif isinstance(pane_id, str) and pane_id.strip():
+        name = pane_id.strip()
+    else:
         raise LiveAgentError("live agent has no name")
     fg_path = _parse_foreground_cwd(agent)
     status = agent.get("agent_status")
     if not isinstance(status, str) or not status:
         status = "unknown"
-    pane_id = agent.get("pane_id")
-    if pane_id is not None and not isinstance(pane_id, str):
-        raise LiveAgentError("live agent pane_id has invalid type")
     return LiveAgentSnapshot(
         name=name,
         agent_status=status,
@@ -140,7 +144,7 @@ def verify_live_agent_context(
     require_promptable: bool = True,
 ) -> LiveAgentSnapshot:
     snap = get_live_agent(agent_name)
-    if snap.name != agent_name:
+    if snap.name != agent_name and snap.pane_id != agent_name:
         raise LiveAgentError("agent.name mismatch after get")
     if require_promptable:
         assert_promptable_state(snap)

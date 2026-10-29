@@ -31,7 +31,7 @@ Herdr Orchestrator は、Herdr 公式が提供する機能・操作面・責務�
 
 1. 現在利用している Herdr バージョンの実際の CLI / API / schema
 2. 対応する Herdr 公式 Skill
-3. Herdr 公式ドキュメント
+3. Herdr 公式ドキュメント（読むときは [https://herdr.dev/llms.txt](https://herdr.dev/llms.txt) から開始する）
 4. Herdr 公式リポジトリの Issue / Discussion / 実装
 5. コミュニティで利用されている実装・運用例
 6. 独自設計
@@ -135,11 +135,11 @@ routing target、repository、worktree、task context 等を安全に確認で�
 
 > 誤配送するくらいなら配送しない。
 
-特に、保存済み locator が利用できない場合に別 locator へ自動 fallback しない。
+特に、Task Registry に保存された locator（`requester.agent_name` / `worker.agent_name`）が利用できない場合に別 locator へ自動 fallback しない。
 
 例:
 
-- Agent name が見つからないため pane ID へ fallback
+- 保存済み locator（`agent_name` または Role Binding 解決時の `pane_id`）が見つからないため、別の pane ID や変更後の Role Binding 先へ自動 fallback
 - pane が変わったため terminal ID から別 Agent を推測
 - session ID から requester を推測
 

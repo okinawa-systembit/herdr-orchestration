@@ -190,7 +190,7 @@ Task Registry 要件:
 - `claim-completion` は §9.13 eligibility を `result-submit` / `resume-task` / `recover-completion` で共通適用する
 - `reset-completion` は §9.14、`recover-completion` は reset 後に §9.13 を適用する
 - public `reset-completion` / `recover-completion` を実装する
-- live Agent 解決・context 照合は `orchestrator/live_agent.py`（`agent get` のみ。段階 4 で handoff / submit から呼ぶ）
+- live Agent 解決・context 照合は `orchestrator/live_agent.py`（`agent get` のみ。段階 4 で handoff / submit から呼ぶ）。Role Binding の永続管理は `orchestrator/role_bindings.py`（`herdr-orchestrator role` CLI、および `handoff` 開始時の初期解決で参照）
 - `result-submit` / worker 選定は §11.0（`git -C <foreground_cwd> rev-parse --show-toplevel`）で worktree root を解決してから Registry と照合する
 - repository identity は §11.0 の正規化関数を handoff `create` と submit で共有する（出力は `host/path` または `host:port/path` の canonical 文字列のみ、origin fetch URL 全件、全 remote 名の identity 一致、HTTPS userinfo/query/fragment 除去、scp/HTTPS port 443 / `ssh://` port 22 相当の同一視、**非標準 HTTPS / SSH port は `host:port/path` に含める**）
 - `result-submit` は §10.3 worker submit context と terminal result の idempotent replay を実装する

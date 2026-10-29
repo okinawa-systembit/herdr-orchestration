@@ -151,7 +151,7 @@ def _execute_requester_completion(task_id: str) -> dict[str, Any]:
         return _completion_payload(task_id, doc, prompt_sent=False)
     prompt_sent = False
     try:
-        run_herdr(["agent", "prompt", requester.name, build_task_envelope(task_id)])
+        run_herdr(["agent", "prompt", requester_name, build_task_envelope(task_id)])
         prompt_sent = True
         _finish_requester_completion(task_id, outcome="sent", reason=None)
     except HerdrCliError as exc:

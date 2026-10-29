@@ -8,20 +8,21 @@
 skills/herdr-orchestrator/scripts/herdr-orchestrator
 ```
 
-| コマンド                                                  | 用途                                                                                                                                                                |
-| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `handoff`                                                 | sync / async 配送（`--mode`, `--worker-role`, `--task-type`, `--instruction`）                                                                                      |
-| `task-status` / `task-result`                             | Registry 読取                                                                                                                                                       |
-| `task-list`                                               | Registry 一覧参照（読み取り専用。`--repository`, `--worktree`, `--type`, `--status`, `--limit`、[task-list 設計書](../../../docs/herdr-orchestrator-task-list.md)） |
-| `result-submit`                                           | worker 結果登録（async では completion 連鎖の best-effort）                                                                                                         |
-| `resume-task` / `reset-completion` / `recover-completion` | completion 再試行・復旧                                                                                                                                             |
-| `doctor`                                                  | 環境 + stale dispatch 候補                                                                                                                                          |
-| `reconcile-dispatch`                                      | dispatch 復旧（§6.12）                                                                                                                                              |
-| `identity`                                                | リポジトリ識別子 UUID の管理（`init`, `show`、[herdr-orchestrator-identity-uuid.md](../../../docs/herdr-orchestrator-identity-uuid.md#5-cli-仕様)）                 |
-| `update`                                                  | 配布環境の最新化（Release Tarball 取得・展開、`--force`, `--version`、[distribution-install.md](distribution-install.md)）                                          |
+| コマンド                                                  | 用途                                                                                                                                                                                                                   |
+| --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `handoff`                                                 | sync / async 配送（`--mode`, `--worker-role`, `--task-type`, `--instruction`）                                                                                                                                         |
+| `task-status` / `task-result`                             | Registry 読取                                                                                                                                                                                                          |
+| `task-list`                                               | Registry 一覧参照（読み取り専用。`--repository`, `--worktree`, `--type`, `--status`, `--limit`、[task-list 設計書](../../../docs/herdr-orchestrator-task-list.md)）                                                    |
+| `result-submit`                                           | worker 結果登録（async では completion 連鎖の best-effort）                                                                                                                                                            |
+| `resume-task` / `reset-completion` / `recover-completion` | completion 再試行・復旧                                                                                                                                                                                                |
+| `doctor`                                                  | 環境 + stale dispatch 候補                                                                                                                                                                                             |
+| `reconcile-dispatch`                                      | dispatch 復旧（§6.12）                                                                                                                                                                                                 |
+| `identity`                                                | リポジトリ識別子 UUID の管理（`init`, `show`、[herdr-orchestrator-identity-uuid.md](../../../docs/herdr-orchestrator-identity-uuid.md#5-cli-仕様)）                                                                    |
+| `role`                                                    | リポジトリごとの論理 role と `pane_id` の紐づけ管理（`set <role> [--pane <pane_id>]`, `show`, `clear [<role>\|--all]`。`HERDR_ENV=1` 下での `set` 時に対象ペイン・worktree が未確認なら出力 JSON に `warning` を付与） |
+| `update`                                                  | 配布環境の最新化（Release Tarball 取得・展開、`--force`, `--version`、[distribution-install.md](distribution-install.md)）                                                                                             |
 
 Registry JSON の直接編集は禁止。内部 writer は `scripts/task-registry.py`（Agent 非公開）。
-※ `update` および `identity` コマンドはセッション外メンテナンス・人間による手動実行を考慮し、`HERDR_ENV=1` の環境制約を免除する（その他のコマンドはすべて `HERDR_ENV=1` 必須）。
+※ `update`、`identity`、および `role` コマンドはセッション外メンテナンス・人間による手動実行を考慮し、`HERDR_ENV=1` の環境制約を免除する（その他のコマンドはすべて `HERDR_ENV=1` 必須）。
 
 ## クラッシュ再起動後の状態確認手順
 

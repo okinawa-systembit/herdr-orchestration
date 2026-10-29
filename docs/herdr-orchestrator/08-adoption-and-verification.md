@@ -168,7 +168,7 @@ sync 動作確認後、async を検証する。sync handoff についても同�
 22. `task.id` だけから Task Registry を検索し、安全に成果物へ到達できる。
 23. `completion.action = resume_requester` が動作する。
 24. requester が `idle` / `done` の場合だけ再開される。
-25. requester の live `agent.name` が解決できない場合、pane ID fallback を行わず `skipped/requester_unavailable` になる。
+25. requester の保存済み locator（`requester.agent_name`）が解決できない場合、別 pane ID や変更後の Role Binding 先への fallback を行わず `skipped/requester_unavailable` になる。
 26. requester が `working` / `blocked` / `unknown` の場合は自動再開されず `skipped` になる。
 27. `completion.action = none` では Agent への自動入力を行わない。
 28. completion の `pending -> processing -> sent|failed|uncertain|skipped` が記録される。
