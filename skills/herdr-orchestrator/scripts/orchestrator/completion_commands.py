@@ -6,7 +6,7 @@ from typing import Any
 
 from orchestrator.handoff_commands import build_task_envelope
 from orchestrator.herdr_cli import HerdrCliError, classify_prompt_error, run_herdr
-from orchestrator.live_agent import LiveAgentError, verify_live_agent_context
+from orchestrator.live_agent import LiveAgentError, verify_live_party_cwd
 from orchestrator.registry.errors import RegistryError
 from orchestrator.registry import operations as registry_ops
 
@@ -88,10 +88,11 @@ def _execute_requester_completion(task_id: str) -> dict[str, Any]:
     identity = doc["context"]["repository"]["identity"]
 
     def resolve_requester():
-        return verify_live_agent_context(
+        return verify_live_party_cwd(
             requester_name,
-            expected_worktree_path=worktree,
-            expected_repository_identity=identity,
+            expected_cwd=worktree,
+            worktree_path=worktree,
+            repository_identity=identity,
             require_promptable=False,
         )
 

@@ -56,7 +56,8 @@ ${XDG_STATE_HOME:-$HOME/.local/state}/herdr-orchestrator/tasks/
   "worker": {
     "role": "reviewer",
     "agent_name": "git-example-repo-reviewer",
-    "pane_id": "w1:p2"
+    "pane_id": "w1:p2",
+    "cwd": "/home/user/Gitrepo/repo"
   },
   "dispatch": {
     "status": "sent",
@@ -89,9 +90,9 @@ ${XDG_STATE_HOME:-$HOME/.local/state}/herdr-orchestrator/tasks/
 
 `context.repository.identity` は repository の論理 identity であり path として使用しない。`context.worktree.path` は task が実際に操作する checkout / worktree root の絶対 path とし、成果物の保存・参照・path safety の基準に使用する。Git の共通 repository directory や別 worktree の root を `context.worktree.path` として代用しない。
 
-`worker.role` は handoff 入力の logical role（例: `reviewer`）とする。`worker.agent_name` / `worker.pane_id` は **`handoff` 開始時の live worker 解決後**（[§4.1](02-roles-and-task-contract.md#sec-4-1) の Role Binding 利用時は `worker.agent_name = worker.pane_id`、未登録フォールバック時は Pattern A の `agent.name`）に Orchestrator が確定し、`create` 時点で Registry へ書き込む必須フィールドとする。Agent から任意の worker 名を受け付けない。JSON 例は dispatch 完了後の状態を示す。
+`worker.role` は handoff 入力の logical role（標準 4 ロールまたは Role Binding で登録された日本語・カスタムロール名。詳細は [クロスワークスペース設計書 §3.1](../herdr-orchestrator-cross-workspace.md#sec-3-1)）とする。`worker.agent_name` / `worker.pane_id` / `worker.cwd` は **`handoff` 開始時の live worker 解決後**（[§4.1](02-roles-and-task-contract.md#sec-4-1) の Role Binding 利用時は `worker.agent_name = worker.pane_id`、未登録フォールバック時は Pattern A の `agent.name`）に Orchestrator が確定し、`create` 時点で Registry へ書き込む必須フィールドとする（既存タスク読み取り時は `worker.cwd` 欠落時に `context.worktree.path` へフォールバック）。Agent から任意の worker 名を受け付けない。JSON 例は dispatch 完了後の状態を示す。
 
-`requester.role` は初期標準 role のいずれかとし、live requester の `pane_id`（Role Binding 登録時）または `agent.name`（未登録フォールバック時）から [§4.1](02-roles-and-task-contract.md#sec-4-1) / [§8.5](04-handoff-and-requester.md#sec-8-5) の規則で **導出**する。handoff 入力の `requester.role` は導出値との一致検証にのみ用い、単独では信頼しない。
+`requester.role` は初期標準 role またはカスタム role（未バインドの Requester ペインから送信した場合はシステム予約値 `"unbound"`）とし、live requester の `pane_id`（Role Binding 登録時）または `agent.name`（未登録フォールバック時）から [§4.1](02-roles-and-task-contract.md#sec-4-1) / [§8.5](04-handoff-and-requester.md#sec-8-5) / [クロスワークスペース設計書 §5.1](../herdr-orchestrator-cross-workspace.md#sec-5-1) の規則で **導出**する。handoff 入力の `requester.role` は導出値との一致検証にのみ用い、単独では信頼しない。
 
 `requester.agent_name` / `requester.pane_id` も同様に、handoff 実行時に Orchestrator が live Agent から取得・確定した locator（Role Binding 登録時は `requester.agent_name = requester.pane_id`）を `create` へ渡す。取得不能な場合は handoff を `create` 前に失敗させる。以降の段階（`assert-handoff-continuable`, `result-submit`, `reconcile-dispatch`, completion）では現在の Role Binding を再参照せず、Registry に保存された `requester.agent_name` / `worker.agent_name` のみを正本として使用する。
 
@@ -399,7 +400,7 @@ task.id
   -> repository 固有成果物
 ```
 
-Task Registry は task context / state / result locator の正本、worktree 内の repository 固有成果物は詳細結果の正本とする。`result.status ∈ {succeeded, failed}` 時の `result.ref` 必須と artifact 存在は [§10](06-results-and-workflows.md#sec-10) に従う。
+Task Registry は task context / state / result locator の正本、worktree 内の repository 固有成果物は詳細結果の正本とする。`result.status ∈ {succeeded, failed}` 時の `result.ref`（指定時は artifact 実在必須）または `result.summary`（単独提出許容）の要件は [§10](06-results-and-workflows.md#sec-10) に従う。
 
 <a id="sec-6-8"></a>
 

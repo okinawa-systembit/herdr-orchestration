@@ -12,7 +12,8 @@
 #    - Task Registry の更新および completion 処理を伴う書き込み操作ですが、
 #      Worker Agent によるタスク完了報告の自動化を維持するため例外的に許可 (allow) します。
 # 3. 意図的に自動許可しないコマンド:
-#    - handoff (Worker起動・新規タスク登録)
+#    - handoff (Worker起動・新規タスク登録・自動追従時のRole Binding指紋更新・pane rename)
+#    - role set, role clear (Role Binding設定変更・pane rename)
 #    - identity init (リポジトリ初期化・Git設定変更)
 #    - resume-task, reset-completion, recover-completion, reconcile-dispatch (状態変更・復旧系)
 #    これらは副作用が大きいため無条件許可せず、Codex 側の通常承認・サンドボックス制御に委ねます。

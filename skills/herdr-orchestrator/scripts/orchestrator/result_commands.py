@@ -5,11 +5,18 @@ from pathlib import Path
 from typing import Any
 
 from orchestrator.completion_commands import best_effort_completion_after_result
-from orchestrator.live_agent import LiveAgentError, get_caller_live_agent, verify_worktree_affinity
+from orchestrator.identity import GLOBAL_SCOPE_ID, is_valid_uuid_v4
+from orchestrator.live_agent import (
+    LiveAgentError,
+    get_caller_live_agent,
+    is_path_within_worktree,
+    verify_worktree_affinity,
+)
 from orchestrator.registry.errors import RegistryError
 from orchestrator.registry import operations as registry_ops
 from orchestrator.registry.paths_safe import require_result_artifact, resolve_result_ref
 from orchestrator.registry.task_id import validate_task_id
+from orchestrator.role_bindings import RoleBindingError, resolve_role_by_pane
 
 
 class ResultCommandError(Exception):
@@ -43,13 +50,180 @@ def _registry_to_public(exc: RegistryError) -> ResultCommandError:
     )
 
 
+def _lookup_bound_role(repo_id: str, pane_id: str | None) -> str | None:
+    if not pane_id:
+        return None
+    try:
+        local_r = resolve_role_by_pane(repo_id, pane_id)
+        if local_r is not None:
+            return local_r
+    except RoleBindingError:
+        pass
+    try:
+        return resolve_role_by_pane(GLOBAL_SCOPE_ID, pane_id)
+    except RoleBindingError:
+        return None
+
+
+def _check_party_cwd_matches(
+    live_cwd: Path,
+    *,
+    expected_cwd: Path,
+    worktree_path: Path,
+    repository_identity: str,
+) -> bool:
+    if is_valid_uuid_v4(repository_identity) and is_path_within_worktree(expected_cwd, worktree_path):
+        try:
+            verify_worktree_affinity(
+                live_cwd,
+                expected_worktree_path=worktree_path,
+                expected_repository_identity=repository_identity,
+            )
+            return True
+        except LiveAgentError:
+            return False
+    return live_cwd.resolve() == expected_cwd.resolve()
+
+
+def build_recipient_verification(doc: dict[str, Any]) -> dict[str, Any]:
+    worktree_path = Path(doc["context"]["worktree"]["path"]).resolve()
+    repo_id = doc["context"]["repository"]["identity"]
+    worker_info = doc["worker"]
+    requester_info = doc["requester"]
+
+    worker_pane = worker_info.get("pane_id") or worker_info.get("agent_name")
+    worker_agent_name = worker_info.get("agent_name")
+    worker_role = worker_info.get("role")
+    worker_cwd = Path(worker_info.get("cwd") or worktree_path).resolve()
+
+    requester_pane = requester_info.get("pane_id") or requester_info.get("agent_name")
+    requester_agent_name = requester_info.get("agent_name")
+    requester_role = requester_info.get("role")
+
+    expected_worker_summary = {
+        "role": worker_role,
+        "pane_id": worker_pane,
+        "cwd": str(worker_cwd),
+    }
+
+    try:
+        caller = get_caller_live_agent()
+    except LiveAgentError as exc:
+        return {
+            "verified": False,
+            "caller_role_in_task": "other",
+            "reason": "caller_live_agent_unavailable",
+            "action_required": "STOP_AND_REPORT_TO_HUMAN",
+            "expected_worker": expected_worker_summary,
+            "message": f"呼び出し元ペインの状態を確認できませんでした（{exc}）。作業を行わず人間へチャットで報告して停止してください。",
+        }
+
+    caller_pane = (caller.pane_id or caller.name or "").strip()
+    caller_cwd = caller.foreground_cwd.resolve()
+    bound_role = _lookup_bound_role(repo_id, caller_pane)
+
+    is_worker_caller = caller_pane == worker_pane or caller.name == worker_agent_name
+    is_requester_caller = caller_pane == requester_pane or caller.name == requester_agent_name
+
+    if is_worker_caller:
+        cwd_ok = _check_party_cwd_matches(
+            caller_cwd,
+            expected_cwd=worker_cwd,
+            worktree_path=worktree_path,
+            repository_identity=repo_id,
+        )
+        role_ok = bound_role is None or bound_role == worker_role
+        if cwd_ok and role_ok:
+            return {
+                "verified": True,
+                "caller_role_in_task": "worker",
+                "expected_worker": expected_worker_summary,
+                "actual_caller": {
+                    "bound_role": bound_role or worker_role,
+                    "pane_id": caller_pane,
+                    "cwd": str(caller_cwd),
+                },
+            }
+        return {
+            "verified": False,
+            "caller_role_in_task": "worker",
+            "reason": "recipient_role_or_cwd_mismatch",
+            "action_required": "STOP_AND_REPORT_TO_HUMAN",
+            "expected_worker": expected_worker_summary,
+            "actual_caller": {
+                "bound_role": bound_role,
+                "pane_id": caller_pane,
+                "cwd": str(caller_cwd),
+            },
+            "message": "このタスクの宛先情報と現在のペインの状態が一致しません。作業を一切行わず、人間へチャットで報告して停止してください。",
+        }
+
+    if is_requester_caller:
+        cwd_ok = _check_party_cwd_matches(
+            caller_cwd,
+            expected_cwd=worktree_path,
+            worktree_path=worktree_path,
+            repository_identity=repo_id,
+        )
+        if cwd_ok:
+            return {
+                "verified": True,
+                "caller_role_in_task": "requester",
+                "expected_requester": {
+                    "role": requester_role,
+                    "pane_id": requester_pane,
+                    "cwd": str(worktree_path),
+                },
+                "actual_caller": {
+                    "bound_role": bound_role or requester_role,
+                    "pane_id": caller_pane,
+                    "cwd": str(caller_cwd),
+                },
+            }
+        return {
+            "verified": False,
+            "caller_role_in_task": "requester",
+            "reason": "requester_cwd_mismatch",
+            "action_required": "STOP_AND_REPORT_TO_HUMAN",
+            "expected_requester": {
+                "role": requester_role,
+                "pane_id": requester_pane,
+                "cwd": str(worktree_path),
+            },
+            "actual_caller": {
+                "bound_role": bound_role,
+                "pane_id": caller_pane,
+                "cwd": str(caller_cwd),
+            },
+            "message": "このタスクの依頼元情報と現在のペインの状態が一致しません。作業を行わず人間へチャットで報告して停止してください。",
+        }
+
+    return {
+        "verified": False,
+        "caller_role_in_task": "other",
+        "reason": "caller_not_task_participant",
+        "action_required": "STOP_AND_REPORT_TO_HUMAN",
+        "expected_worker": expected_worker_summary,
+        "actual_caller": {
+            "bound_role": bound_role,
+            "pane_id": caller_pane,
+            "cwd": str(caller_cwd),
+        },
+        "message": "このペインは当タスクの宛先（Worker）でも依頼元（Requester）でもありません。誤配送の可能性があるため、作業を一切行わず人間へチャットで報告して停止してください。",
+    }
+
+
 def task_status(task_id: str) -> dict[str, Any]:
     validate_task_id(task_id)
     try:
         doc = registry_ops.get_task(task_id)
     except RegistryError as exc:
         raise _registry_to_public(exc) from exc
-    return {"command": "task-status", "task": copy.deepcopy(doc)}
+    return {
+        "command": "task-status",
+        "recipient_verification": build_recipient_verification(doc),
+        "task": copy.deepcopy(doc),
+    }
 
 
 def task_result(task_id: str) -> dict[str, Any]:
@@ -65,6 +239,7 @@ def task_result(task_id: str) -> dict[str, Any]:
     locator: dict[str, Any] = {
         "task_id": task_id,
         "task_status": doc["task"]["status"],
+        "recipient_verification": build_recipient_verification(doc),
         "result": result,
         "ref_resolved_path": None,
     }
@@ -87,6 +262,9 @@ def task_result(task_id: str) -> dict[str, Any]:
 def verify_worker_submit_context(
     *,
     expected_worker_agent: str,
+    expected_worker_pane: str | None = None,
+    expected_worker_role: str | None = None,
+    expected_worker_cwd: Path | None = None,
     expected_worktree_path: Path,
     expected_repository_identity: str,
 ) -> None:
@@ -105,18 +283,41 @@ def verify_worker_submit_context(
             retryable=False,
             task_id=None,
         )
-    try:
-        verify_worktree_affinity(
-            caller.foreground_cwd,
-            expected_worktree_path=expected_worktree_path,
-            expected_repository_identity=expected_repository_identity,
-        )
-    except LiveAgentError as exc:
-        raise ResultCommandError(
-            "worker_context_unverified",
-            message=str(exc),
-            retryable=False,
-        ) from exc
+    if expected_worker_role is not None and caller.pane_id:
+        bound_role = _lookup_bound_role(expected_repository_identity, caller.pane_id)
+        if bound_role is not None and bound_role != expected_worker_role:
+            raise ResultCommandError(
+                "worker_context_unverified",
+                message=(
+                    f"caller pane {caller.pane_id!r} was rebound to role {bound_role!r} "
+                    f"(expected {expected_worker_role!r})"
+                ),
+                retryable=False,
+            )
+    target_cwd = (expected_worker_cwd or expected_worktree_path).resolve()
+    if is_valid_uuid_v4(expected_repository_identity) and is_path_within_worktree(target_cwd, expected_worktree_path):
+        try:
+            verify_worktree_affinity(
+                caller.foreground_cwd,
+                expected_worktree_path=expected_worktree_path,
+                expected_repository_identity=expected_repository_identity,
+            )
+        except LiveAgentError as exc:
+            raise ResultCommandError(
+                "worker_context_unverified",
+                message=str(exc),
+                retryable=False,
+            ) from exc
+    else:
+        if caller.foreground_cwd.resolve() != target_cwd:
+            raise ResultCommandError(
+                "worker_context_unverified",
+                message=(
+                    f"worker cwd mismatch: resolved={caller.foreground_cwd.resolve()!s} "
+                    f"expected={target_cwd!s}"
+                ),
+                retryable=False,
+            )
 
 
 def result_submit(
@@ -135,9 +336,14 @@ def result_submit(
     except RegistryError as exc:
         raise _registry_to_public(exc) from exc
 
+    worktree_path = Path(doc["context"]["worktree"]["path"])
+    worker_cwd = Path(doc["worker"].get("cwd") or worktree_path)
     verify_worker_submit_context(
         expected_worker_agent=doc["worker"]["agent_name"],
-        expected_worktree_path=Path(doc["context"]["worktree"]["path"]),
+        expected_worker_pane=doc["worker"].get("pane_id"),
+        expected_worker_role=doc["worker"].get("role"),
+        expected_worker_cwd=worker_cwd,
+        expected_worktree_path=worktree_path,
         expected_repository_identity=doc["context"]["repository"]["identity"],
     )
 

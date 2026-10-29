@@ -6,7 +6,7 @@
 
 ## 実装範囲と進め方
 
-- 対象は [§4 の初期4 role](herdr-orchestrator/02-roles-and-task-contract.md#sec-4) を使う MVP。専任 `tester` / `researcher`、task cancellation CLI は初期実装に含めない（`task-list` は Issue #62 にて段階 3 の追加機能として実装）。
+- 対象は [§4 の初期4 role](herdr-orchestrator/02-roles-and-task-contract.md#sec-4) を使う MVP（`task-list` は Issue #62、ローカル/グローバル Role Binding・日本語/カスタムロール名・クロスワークスペース配送は Issue #74 にて追加実装。複数 worker 並列 fan-out や task cancellation CLI は初期実装に含めない）。
 - 中央 Skill と wrapper のソースを、このリポジトリの `skills/herdr-orchestrator/` に置く。[§14 の構成](herdr-orchestrator/07-skill-and-implementation.md#sec-14) に従い、`SKILL.md`、`scripts/herdr-orchestrator`、`scripts/task-registry.py`、`references/` を用意する。既存のリポジトリ固有 Skill への導入は最終段階で行う。
 - Python 3.10 と標準ライブラリを基準にし、Herdr の操作仕様は利用中の公式 CLI / Skill で確認する（[§14.3](herdr-orchestrator/07-skill-and-implementation.md#sec-14-3)、[§20.2](herdr-orchestrator/09-maintenance-and-roadmap.md#sec-20-2)）。
 - 下表の順に実装し、各段階の完了ゲートを満たしてから次へ進む。各段階では、その機能に関係する [§18 の検証項目](herdr-orchestrator/08-adoption-and-verification.md#sec-18) を自動テストまたは実機確認に対応付け、結果を記録する。

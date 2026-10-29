@@ -19,6 +19,32 @@ def stale_dispatch_threshold_sec() -> float:
     return float(raw)
 
 
+def _find_outdated_role_bindings() -> list[dict[str, Any]]:
+    from orchestrator.paths import roles_dir
+    from orchestrator.role_bindings import RoleBindingError, get_role_binding_document
+
+    rdir = roles_dir()
+    if not rdir.exists() or not rdir.is_dir():
+        return []
+    outdated_list: list[dict[str, Any]] = []
+    for path in sorted(rdir.glob("*.json")):
+        if path.name.endswith(".json.lock"):
+            continue
+        scope_id = path.stem
+        try:
+            doc = get_role_binding_document(scope_id)
+        except RoleBindingError:
+            continue
+        if doc.get("outdated_roles"):
+            outdated_list.append(
+                {
+                    "scope_id": scope_id,
+                    "outdated_roles": doc["outdated_roles"],
+                }
+            )
+    return outdated_list
+
+
 def run_doctor() -> tuple[dict[str, Any], int]:
     threshold = stale_dispatch_threshold_sec()
     out: dict[str, Any] = {
@@ -29,6 +55,7 @@ def run_doctor() -> tuple[dict[str, Any], int]:
             "threshold_sec": threshold,
             "candidates": registry_ops.find_stale_dispatch_candidates(min_age_sec=threshold),
         },
+        "outdated_role_bindings": _find_outdated_role_bindings(),
     }
     exit_code = 0
     if herdr_env_enabled():

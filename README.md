@@ -163,23 +163,29 @@ herdr-orchestrator --help
 
 ### 3. Repository Identity と Role Binding の設定
 
-Orchestrator を利用する各開発 Git リポジトリのルートで、リポジトリ識別子の初期化と、各論理ロールが稼働する Herdr の `pane_id` の紐づけを行います（Herdr のエージェント名変更 `herdr agent rename` は不要です）。
+Orchestrator を利用する各ペイン（`HERDR_ENV=1`）で、各ロール（標準ロール・日本語名・任意のカスタムロール名）と Herdr の `pane_id` の紐づけを行います（Herdr のエージェント名変更 `herdr agent rename` は不要で、`herdr pane rename` により UI 上のペイン表示名も自動連動します）。また、`--global` を付けることでワークスペースや Git 管理の有無を問わずどこからでも呼び出せるグローバル共通ロールとして登録できます。
 
 ```bash
 cd /path/to/your-project-repo
 
-# 1. リポジトリ固有の UUID を初期化（または role set 実行時に自動初期化されます）
+# 1. リポジトリ固有の UUID を初期化（または Git リポジトリ内で role set 実行時に自動初期化されます）
 herdr-orchestrator identity init
 
-# 2. 各ロールと pane_id を紐づける（自身のペインで実行する場合は --pane 省略可）
-herdr-orchestrator role set implementer --pane w15:p1
-herdr-orchestrator role set reviewer --pane w15:p2
+# 2. 各ロールと pane_id を紐づける（自身のペインで実行する場合は pane_id 省略可）
+# ※本リポジトリの repo-review / repo-workflow 等のリポジトリ内連携ツールは標準ロール名 `implementer` / `reviewer` で handoff します。
+#   UI 上で日本語表示したい場合は `--label` を指定してください。
+herdr-orchestrator role set implementer
+herdr-orchestrator role set reviewer w15:p2 --label "レビュワー"
+
+# 別ワークスペースの調査用ペイン等をグローバル共通ロールとして登録する場合（任意の日本語名も指定可能）
+herdr-orchestrator role set 調査 --label "調査 (ログ解析)" --global
 
 # 3. 登録内容の確認
 herdr-orchestrator role show
+herdr-orchestrator role show --global
 ```
 
-`.git/config` にリポジトリ固有の UUID が登録され、`~/.local/state/herdr-orchestrator/roles/` にロールと `pane_id` の対応が永続保存されます。Herdr サーバー再起動後に同じ `pane_id` で各エージェントが自動再開（resume）された場合は再設定なしで継続できます。別リポジトリ・別 worktree のペインへの誤配送は worktree / identity 照合により拒否されますが、ペイン移動や再起動によって同一 worktree 内でペイン配置（ロールと `pane_id` の対応）を変更・入れ替えた場合は、`herdr-orchestrator role show` で確認し `herdr-orchestrator role set` で更新してください。
+`.git/config` にリポジトリ固有の UUID が登録され、`~/.local/state/herdr-orchestrator/roles/` にロールと `pane_id` および環境の指紋メタデータ（`targets`）が永続保存されます。同一ペインでエージェントプロセスを再起動した場合や、ペインを閉じて再度開いた（または Herdr 全体を再起動した）場合でも、単一候補の安全条件を満たせば自動的に新しいペインへ追従します（旧バージョン v0.3.1 以前の `targets` 指紋を持たない Role Binding は配送前に `role_binding_outdated` で検出・停止するため、再インストール後は一度 `herdr-orchestrator role set <role>` を再実行してください）。
 
 ### 4. 環境診断の実行
 
@@ -334,18 +340,23 @@ herdr-orchestrator task-list --worktree "$(git rev-parse --show-toplevel)"
 #### 4. Worker が実行結果を提出する (result-submit)
 
 Worker Agent は作業完了後、タスク結果を提出します（Requester ではなく Worker が実行します）。  
-`--result-ref` には作業成果物ファイルの worktree 相対パス（本リポジトリの内部レビュー運用の場合は `repo-review-helper record-save` が出力した記録パス）を指定します。
+`--result-ref` には作業成果物ファイルの worktree 相対パス（本リポジトリの内部レビュー運用の場合は `repo-review-helper record-save` が出力した記録パス）を指定します。また、別ワークスペースの調査等で成果物ファイルを作成しない場合は `--result-ref` を省略し、`--summary`（2000 文字以内）単独で提出することも可能です（`--result-ref` と `--summary` の少なくとも一方が必須）。
 
 ```bash
-# 例: 内部レビュー（Phase 1）のレビュー記録を提出する場合
+# 例1: 内部レビュー（Phase 1）のレビュー記録ファイルを提出する場合
 # （※ <instance-id> や RV001.md は例示であり、実際には record-save が返したパスを指定します）
 herdr-orchestrator result-submit task_example \
   --result-status succeeded \
   --result-ref "docs/reviews/internal/<instance-id>/RV001.md" \
   --summary "レビュー完了。指摘なし（GO）。"
+
+# 例2: 成果物ファイルを作らず要約メッセージのみで提出する場合（クロスワークスペース調査等）
+herdr-orchestrator result-submit task_example \
+  --result-status succeeded \
+  --summary "調査完了。原因は設定ファイルのタイムアウト値不足でした。"
 ```
 
-※ 一般的なタスクでも、`--result-ref` には worktree 内に実在するファイルの相対パスを指定します（URL・絶対パス・worktree 外のパスは拒否されます）。
+※ `--result-ref` を指定する場合は、依頼元 worktree 内に実在するファイルの相対パスを指定します（URL・絶対パス・worktree 外のパスは拒否されます）。
 
 #### 5. Requester がタスク結果を取得する
 
@@ -379,6 +390,7 @@ curl -fsSL 'https://raw.githubusercontent.com/okinawa-systembit/herdr-orchestrat
   - Task Registry に蓄積された過去のタスク履歴データ（`~/.local/state/herdr-orchestrator/`）は更新時も保持されます。
 - **更新時の注意点**:
   - タスク実行中の予期せぬ競合を防ぐため、**未完了（実行中）のタスクが存在しない状態で更新を実行してください**。
+  - **旧バージョン（v0.3.1 以前）からの更新時**: 旧形式で作成された Role Binding（`targets` 指紋情報を持たない設定）が残っている場合、更新後の `handoff` 実行時に `role_binding_outdated` で停止します（`herdr-orchestrator doctor` または `role show` でも `outdated` として確認できます）。更新後は各ペイン（`HERDR_ENV=1`）で一度 `herdr-orchestrator role set <role> [<pane_id>]` を再実行してください。
 
 ### 開発者環境の更新
 
@@ -440,8 +452,9 @@ rm -f ~/.local/bin/herdr-orchestrator
 | ---------------------------------------------------------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `herdr-orchestrator: command not found`                                | PATH が通っていない / インストール未完了      | `~/.local/bin` が `PATH` 環境変数に含まれているか確認してください（`export PATH="$HOME/.local/bin:$PATH"`）。                                                                                                                                                                   |
 | Agent が Skill を認識しない                                            | Skill 配置パスの不一致 / 再読み込み未実施     | `~/.agents/skills/herdr-orchestration/SKILL.md` が存在するか確認し、Agent（Cursor / Codex 等）を再起動または再読み込みしてください。                                                                                                                                            |
-| `{"error": "herdr_env_required"}`                                      | Herdr ペイン外での実行                        | タスク操作コマンド（`handoff` や `task-status` 等）は、`HERDR_ENV=1` が設定された Herdr のセッションペイン内で実行してください。                                                                                                                                                |
-| `{"error": "git_repository_not_initialized"}`                          | 非 Git ディレクトリでの実行                   | `identity` コマンドは Git 管理下のリポジトリ内で実行してください（`git init` を実行）。                                                                                                                                                                                         |
+| `{"error": "herdr_env_required"}`                                      | Herdr ペイン外での実行                        | タスク操作コマンド（`handoff`, `task-status`, `role set` 等）は、`HERDR_ENV=1` が設定された Herdr のセッションペイン内で実行してください（`--help`, `identity`, `role show`, `role clear` はペイン外でも実行可能）。                                                            |
+| `{"error": "git_repository_not_initialized"}`                          | 非 Git ディレクトリでの実行                   | `identity` コマンド、または Role Binding 未登録の標準 4 ロール（Pattern A）への `handoff` は Git 管理下のリポジトリ内で実行してください（Non-Git ディレクトリで `handoff` する場合は先に `herdr-orchestrator role set <role> [--global]` でロールを登録してください）。         |
+| `{"error": "role_binding_outdated"}`                                   | 旧バージョンの Role Binding 設定の残存        | v0.3.1 以前の指紋情報（`targets`）を持たない設定ファイルです。対象ペイン（`HERDR_ENV=1`）で `herdr-orchestrator role set <role> [<pane_id>] [--global]` を再実行してください。                                                                                                  |
 | `{"error": "live_agent_not_found"}` 等                                 | 宛先エージェントの未起動 / 命名不一致         | Herdr 上で対象ロールのエージェントが起動しているか確認してください。                                                                                                                                                                                                            |
 | インストーラーが `Another installation... is currently running` で失敗 | 別のインストール処理の同時実行 / ロック保持中 | 別のインストール・更新処理が実行中でないか確認してください。`flock` による排他ロックは通常、保持プロセスの終了時に自動解放されます。ロックファイル（`~/.agents/skills/.herdr-orchestrator.install.lock`）が存在していること自体は正常な状態であり、安易に削除しないでください。 |
 
@@ -504,3 +517,4 @@ rm -f ~/.local/bin/herdr-orchestrator
 
 - [distribution-install.md](skills/herdr-orchestrator/references/distribution-install.md) — 配布・更新仕様書
 - [docs/herdr-orchestrator-identity-uuid.md](docs/herdr-orchestrator-identity-uuid.md) — Repository Identity UUID 仕様書
+- [docs/herdr-orchestrator-cross-workspace.md](docs/herdr-orchestrator-cross-workspace.md) — ワークスペース跨ぎ配送・グローバルロール・日本語ロール名・ペイン自動追従 設計書

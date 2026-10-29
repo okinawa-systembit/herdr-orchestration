@@ -139,11 +139,11 @@ routing target、repository、worktree、task context 等を安全に確認で�
 
 例:
 
-- 保存済み locator（`agent_name` または Role Binding 解決時の `pane_id`）が見つからないため、別の pane ID や変更後の Role Binding 先へ自動 fallback
-- pane が変わったため terminal ID から別 Agent を推測
-- session ID から requester を推測
+- 保存済み locator（`agent_name` または Role Binding 解決時の `pane_id`）が見つからないため、in-flight task の途中で別の pane ID や変更後の Role Binding 先へ自動 fallback
+- 複数候補がある状態で pane が変わったため terminal ID や cwd だけから別 Agent を推測
+- session ID だけから無条件に requester を推測
 
-このような fallback は、明示的に安全性が証明されない限り採用しない。
+このような fallback は、明示的に安全性が証明されない限り採用しない（※ `handoff` 開始時の Role Binding 解決において、単一候補の厳格な指紋条件を満たす場合の自動追従およびその他ケースでの人間確認停止については [クロスワークスペース設計書 §5.2](herdr-orchestrator-cross-workspace.md#sec-5-2) を正本とする）。
 
 context mismatch、target 不在、検証不能は明確な状態として記録する。
 

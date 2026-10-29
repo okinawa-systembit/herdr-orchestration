@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+import unicodedata
 from pathlib import Path
 from typing import Any
 
@@ -22,7 +24,29 @@ COMPLETION_STATUSES = frozenset(
 )
 MODES = frozenset({"sync", "async"})
 COMPLETION_ACTIONS = frozenset({"none", "resume_requester"})
-STANDARD_ROLES = frozenset({"design", "reviewer", "implementer", "orchestrator"})
+PATTERN_A_ROLES = frozenset({"design", "reviewer", "implementer", "orchestrator"})
+STANDARD_ROLES = PATTERN_A_ROLES
+UNBOUND_ROLE = "unbound"
+
+_CUSTOM_ROLE_RE = re.compile(
+    r"^[a-z0-9\u3005\u3040-\u309f\u30a0-\u30ff\u4e00-\u9fff]"
+    r"[a-z0-9_\-\u3005\u3040-\u309f\u30a0-\u30ff\u4e00-\u9fff]{0,31}$"
+)
+
+
+def normalize_role_name(raw_role: Any, *, allow_unbound: bool = False) -> str:
+    if not isinstance(raw_role, str):
+        raise ValueError("role must be a string")
+    s = unicodedata.normalize("NFKC", raw_role).strip().lower()
+    if not s or len(s) > 32:
+        raise ValueError(f"invalid role: {raw_role!r}")
+    if s == UNBOUND_ROLE:
+        if allow_unbound:
+            return UNBOUND_ROLE
+        raise ValueError("role 'unbound' is reserved for unbound requesters")
+    if not _CUSTOM_ROLE_RE.match(s):
+        raise ValueError(f"invalid role: {raw_role!r}")
+    return s
 
 
 def _require_dict(value: Any, *, label: str) -> dict[str, Any]:
@@ -53,10 +77,18 @@ def reject_flat_legacy_keys(doc: dict[str, Any]) -> None:
 def _validate_party(party: Any, *, label: str) -> None:
     obj = _require_dict(party, label=label)
     role = obj.get("role")
-    if role not in STANDARD_ROLES:
-        raise RegistryError("invalid_schema", message=f"{label}.role invalid")
+    try:
+        norm_role = normalize_role_name(role, allow_unbound=(label == "requester"))
+    except ValueError as exc:
+        raise RegistryError("invalid_schema", message=f"{label}.role invalid: {exc}") from exc
+    if role != norm_role:
+        raise RegistryError("invalid_schema", message=f"{label}.role must be normalized")
     _require_str(obj.get("agent_name"), label=f"{label}.agent_name")
     _require_str(obj.get("pane_id"), label=f"{label}.pane_id")
+    if label == "worker" and "cwd" in obj and obj["cwd"] is not None:
+        cwd_str = _require_str(obj.get("cwd"), label="worker.cwd")
+        if not Path(cwd_str).is_absolute():
+            raise RegistryError("invalid_schema", message="worker.cwd must be absolute")
 
 
 def _validate_context(context: Any) -> None:

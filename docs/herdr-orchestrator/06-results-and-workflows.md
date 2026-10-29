@@ -21,24 +21,24 @@ result:
 
 `result.ref` は [§6.7](03-task-registry.md#sec-6-7) の path safety に従う **worktree-relative path** のみ。
 
-| `result.status` | `result.ref`                 | 成果物                                                                      |
-| --------------- | ---------------------------- | --------------------------------------------------------------------------- |
-| `succeeded`     | **非 null 必須**             | `context.worktree.path` 基準で resolve でき、**当該ファイルが存在**すること |
-| `failed`        | **非 null 必須**             | 同上（失敗報告・部分成果の durable artifact を正本とする）                  |
-| `unavailable`   | **null 必須**                | 正本 artifact を持たない。`ref` が非 null なら拒否                          |
-| `pending`       | Registry 既定（通常 `null`） | submit 前                                                                   |
+| `result.status` | `result.ref`                              | 成果物                                                                                                               |
+| --------------- | ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `succeeded`     | **任意（`ref` または `summary` が必須）** | `ref` 指定時は `context.worktree.path` 基準で resolve でき、**当該ファイルが存在**すること（`summary` 単独提出も可） |
+| `failed`        | **任意（`ref` または `summary` が必須）** | 同上（失敗報告・部分成果の durable artifact または `summary` を正本とする）                                          |
+| `unavailable`   | **null 必須**                             | 正本 artifact を持たない。`ref` が非 null なら拒否                                                                   |
+| `pending`       | Registry 既定（通常 `null`）              | submit 前                                                                                                            |
 
-`succeeded` / `failed` で `ref=null`、または `unavailable` で `ref≠null` の submit は **拒否**する。URL、絶対 path、任意 identifier、worktree 外 path は拒否する。
+`succeeded` / `failed` では、`result.ref`（`context.worktree.path` 基準で解決でき実在する worktree-relative path）または `result.summary`（非空文字列・2000文字以内）の少なくとも一方を必須とする（クロスワークスペース調査等で成果物ファイルを作らない場合は `--summary` 単独提出が可能。詳細は [クロスワークスペース設計書 §7.5](../herdr-orchestrator-cross-workspace.md#sec-7-5)）。`unavailable` で `ref≠null` の submit は **拒否**する。URL、絶対 path、任意 identifier、worktree 外 path は拒否する。
 
-`result.summary` は Agent 交代時や completion prompt 受信後の文脈復元に使用する短い概要であり、詳細成果物の正本ではない。requester は Registry から取得する。詳細は `result.ref` の repository 固有成果物を正とする。
+`result.summary` は Agent 交代時や completion prompt 受信後の文脈復元、およびファイルを作成しないタスクの回答要約に使用する。requester は Registry から取得する。ファイル成果物がある場合は `result.ref` の repository 固有成果物を正とする。
 
 Orchestrator は少なくとも次を検証する。
 
 - `task.id` が Registry の task と一致する。
 - result submit が canonical schema に適合する。
 - `task.status ∈ {in_progress, unknown}` かつ `dispatch.status ≠ pending` である（[§6.3](03-task-registry.md#sec-6-3) Mutation Rules）。
-- [§10.3](#sec-10-3) **worker submit context** を満たす（`agent.name` 一致に加え repository identity / worktree path を Registry と照合）。
-- `result.status ∈ {succeeded, failed}` のとき `result.ref` が非 null で、`context.worktree.path` 配下へ安全に解決でき、**resolve 先ファイルが存在**する。
+- [§10.3](#sec-10-3) **worker submit context** を満たす（`agent.name` 一致に加え repository identity / worktree path または `worker.cwd` を Registry と照合）。
+- `result.status ∈ {succeeded, failed}` のとき `result.ref` または非空 `result.summary`（2000文字以内）の少なくとも一方が存在し、`result.ref` が非 null の場合は `context.worktree.path` 配下へ安全に解決でき、**resolve 先ファイルが存在**する。
 - `result.status = unavailable` のとき `result.ref` が null である。
 - **独立検証方針**: 汎用 Orchestrator では上記のような schema 適合や path の安全・存在確認といった「汎用検証」のみを行い、workflow やタスク内容に関する業務固有の判定（例: レビューが適切に行われたか、テストが通ったか等）はすべて Repository 側の固有 Skill に委ねる。
 
@@ -70,7 +70,7 @@ handoff の再試行は新しい `task.id` を発行する。同一 `task.id` �
 repository 固有 Skill / worker workflow は次を必須とする。
 
 ```text
-1. result.status=succeeded|failed の場合は durable artifact を worktree に保存し、その worktree-relative path を result.ref に設定してから result-submit する（ref 非 null 必須）
+1. result.status=succeeded|failed の場合は、durable artifact を worktree に保存してその worktree-relative path を result.ref に設定するか、または非空の --summary（2000文字以内）を指定してから result-submit する（ref または summary の少なくとも一方が必須、ref 指定時は実在ファイル必須）
    result.status=unavailable の場合は result.ref=null のみ（artifact 不要）
 2. dispatch_not_ready / retryable 拒否を受けたら、同一 payload で bounded retry する
 3. 推奨: 最大 10 回、指数バックオフ（初回 1 秒、上限 30 秒）
@@ -121,9 +121,8 @@ requester 側 sync `handoff` は [§6.14](03-task-registry.md#sec-6-14) によ�
 submit 時に Orchestrator は `HERDR_ENV=1` 下で caller（`HERDR_PANE_ID`）の submit 元 live Agent を解決し、Registry の当該 task と次を照合する（現在の Role Binding は参照せず、Task Registry に保存された `worker.agent_name` のみを照合基準とする）。
 
 ```text
-1. caller の live agent.name または pane_id == Registry worker.agent_name
-2. submit 元の repository identity == context.repository.identity
-3. [§11.0](#sec-11-0) で解決した worktree root / repository identity が Registry と一致
+1. caller の live agent.name または pane_id == Registry worker.agent_name（かつ当該ロールが別ペインに再バインドされていないこと）
+2. 同一 Git worktree タスクでは [§11.0](#sec-11-0) で解決した worktree root / repository identity が Registry と一致すること。クロスワークスペースまたは Non-Git タスクでは caller の foreground_cwd（または Git root）が Registry の worker.cwd と一致すること（[クロスワークスペース設計書 §7.3](../herdr-orchestrator-cross-workspace.md#sec-7-3)）
 ```
 
 submit 元 context は [§11.0](#sec-11-0) に従って導出する（`handoff` worker 選定と同一規則）。取得不能・曖昧・矛盾がある場合は **拒否**する（`error: worker_context_unverified`、原則 **retryable: false**）。
@@ -207,23 +206,19 @@ repository 固有 Skill が identity を明示指定する場合は、**canonica
 
 ### 11.1 Candidate Resolution
 
-Orchestrator は `handoff` 開始時に次を使って candidate worker を選定する。
+Orchestrator は `handoff` 開始時に次を使って candidate worker を選定する（Role Binding のローカル/グローバル解決、指紋メタデータ照合、およびペイン閉鎖・全再起動時の単一候補自動追従の詳細規則は [クロスワークスペース設計書 §4–§5](../herdr-orchestrator-cross-workspace.md#sec-4) を正本とする）。
 
 ```text
-1. current repository identity を取得
+1. current repository identity（Non-Git ディレクトリでは dir_<hash16>）を取得
 2. requested logical role を確定
-3. [§4.1](02-roles-and-task-contract.md#sec-4-1) に従い、Role Binding に当該 role が登録されていればその `pane_id` を、未登録であれば Pattern A で `(identity, requested logical role)` から決定した `agent.name` を **唯一の** 期待 routing locator として確定する（衝突・不在時に別 pane / 別名へ自動フォールバックしない）
-4. Herdr 公式の live Agent 情報（`herdr agent get <target>`）から candidate を取得し、live `agent.name` または `pane_id` が期待 locator と一致することを確認
-5. Agent state を確認
-6. 公式に取得可能な pane / process context から [§11.0](#sec-11-0) で worktree root を解決
-7. 解決した worktree / repository identity が handoff 入力の期待値と矛盾しないことを確認
-8. 安全に一意の candidate を選定できた場合のみ配送対象とし、解決した locator を `worker.agent_name`（および `worker.pane_id`）として Registry に保存する
-9. 解決不能・曖昧・context 不一致の場合は配送不可とし、別 name / 未登録 pane ID / role 単独名へ fallback しない
+3. [§4.1](02-roles-and-task-contract.md#sec-4-1) および [クロスワークスペース設計書 §4.1](../herdr-orchestrator-cross-workspace.md#sec-4-1) に従い、ローカルまたはグローバル Role Binding に当該 role が登録されていればその `pane_id`（両方にある場合は `worker_role_scope_ambiguous` で停止、旧形式の場合は `role_binding_outdated` で停止）を、両方とも未登録であれば標準 4 role のみ Pattern A で `(identity, requested logical role)` から決定した `agent.name` を期待 routing locator として確定する
+4. Role Binding 利用時は [クロスワークスペース設計書 §5.2](../herdr-orchestrator-cross-workspace.md#sec-5-2) に従い、生存ペインの指紋（`cwd`, `agent`, `terminal_id` / `agent_session_id` / `is_unique_cwd_role`）を照合する。登録 `pane_id` が消滅している場合は、他ロールの生存ペインを除外した上で単一候補条件（条件 A: `agent_session_id` 一致の単一ペイン、または条件 B: 1 フォルダ 1 ロール構成で `cwd` + `agent` 一致の単一ペイン）を満たすときのみ新 `pane_id` へ自動追従し、複数候補・不一致時は停止して人間に確認する
+5. Pattern A フォールバック時は Herdr 公式の live Agent 情報（`herdr agent get <target>`）から candidate を取得し、live `agent.name` または `pane_id` が期待 locator と一致すること、Agent state が `idle` / `done` であること、および [§11.0](#sec-11-0) で解決した worktree / repository identity が handoff 入力の期待値と一致することを確認
+6. 安全に一意の candidate を選定できた場合のみ配送対象とし、解決した locator を `worker.agent_name`（および `worker.pane_id`）、解決した作業ディレクトリを `worker.cwd` として Registry に保存する
+7. 解決不能・曖昧・context 不一致の場合は配送不可とし、無関係な別 name / 未登録 pane ID / role 単独名へ fallback しない（また create 後の in-flight task では自動追従を含め一切の locator 変更を行わない）
 ```
 
-worktree / repository の一致証明には §11.0 を用い、`foreground_cwd` の生値だけでは判定しない。本来別用途の `agent_session_id` や `terminal_id` を routing identity に転用しない。
-
-§11.0 を完了できない、または期待 context と矛盾する candidate は配送不可とする。
+Pattern A フォールバック時および同一 Git worktree タスクの一致証明には §11.0 を用い、`foreground_cwd` の生値だけでは判定しない。Role Binding 利用時の同一ペイン再起動判定および閉鎖ペイン単一候補自動追従においてのみ、`cwd` および `agent` 種別とあわせて `terminal_id` / `agent_session_id` を補助指紋として使用する（`terminal_id` や `agent_session_id` 単体を routing key にはしない。[クロスワークスペース設計書 §4.2 / §5.2](../herdr-orchestrator-cross-workspace.md#sec-4-2)）。
 
 <a id="sec-11-2"></a>
 
@@ -234,10 +229,9 @@ candidate worker は task 実行前に Task Envelope の期待値と自分の実
 最低限確認する（dispatch readiness の bounded poll は [§11.4](#sec-11-4) 手順 4）。
 
 ```text
-task.id で task-status を取得し Registry worker.agent_name（Role Binding 利用時は pane_id）が自分の live agent.name または HERDR_PANE_ID（pane_id）と一致
+task.id で task-status を取得し、recipient_verification.verified == true かつ caller_role_in_task == "worker" であることを確認（Registry worker.agent_name が自分の live agent.name または HERDR_PANE_ID と一致し、かつ別ロールへ再バインドされていないこと）
 dispatch.status ∈ {sent, uncertain}（pending は即拒否せず §11.4 4a）
-repository identity
-worktree path
+同一 Git worktree タスクでは repository identity / worktree path、クロスワークスペースまたは Non-Git タスクでは worker.cwd が自分の環境と一致
 ```
 
 workflow で指定されている場合に確認する。
@@ -291,7 +285,7 @@ unknown
 
 `working` の worker へ新しい sync handoff を送らない。進行中 task との混線を避け、[§6.14](03-task-registry.md#sec-6-14) が前提とする Registry `result.status` 確定待機と整合させるためである。Herdr Agent lifecycle の `idle` / `done` は **task result の確定を意味しない**。
 
-Role Binding の `pane_id`（または Pattern A の `agent.name`）はリポジトリ内の当該 role に対して 1 対 1 で決まるため、同一 role を満たす「別 live worker」を勝手に探索することはしない。初回 §11.1 で解決した Agent が `working` / `blocked` / `unknown` の場合、MVP では **待機またはユーザーへ報告**を基本とし、暗黙の別ペイン探索・別名 worker 起動・別 role への自動切替は行わない。
+Role Binding の `pane_id`（または Pattern A の `agent.name`）はスコープ内の当該 role に対して 1 対 1 で決まるため（旧 `pane_id` 消滅時の単一候補自動追従は [§11.1](#sec-11-1) / [クロスワークスペース設計書 §5.2](../herdr-orchestrator-cross-workspace.md#sec-5-2) の厳格な条件を満たす場合に限る）、生存している対象 worker が `working` / `blocked` / `unknown` の場合に同一 role を満たす「別の稼働中ペイン」へ勝手に迂回することはしない。初回 §11.1 で解決した Agent が `working` / `blocked` / `unknown` の場合、**待機またはユーザーへ報告**を基本とし、暗黙の別ペイン探索・別名 worker 起動・別 role への自動切替は行わない。
 
 ```text
 1. 同一 worker の idle 化または人間判断を待つ
@@ -321,7 +315,7 @@ Herdr の `agent prompt` は **確認と送信を一体の条件付き操作に�
 3. live Agent 不在 → prompt しない（handoff 失敗 / reconcile 委譲）
 4. live agent.name または pane_id == Registry worker.agent_name（不一致 → prompt しない）
 5. Agent state ∈ {idle, done}（working / blocked / unknown → prompt しない。§11.3）
-6. [§11.0](#sec-11-0) で live worktree / repository identity が Registry context と一致
+6. 同一 Git worktree タスクでは [§11.0](#sec-11-0) で live worktree / repository identity が Registry context と一致すること、クロスワークスペースまたは Non-Git タスクでは live foreground_cwd が Registry の worker.cwd と一致することを確認
 7. 不一致・曖昧 → prompt しない
 8. 成功後 **遅延なく** agent prompt（同一 flock 区間）
 ```
@@ -346,13 +340,13 @@ Herdr への prompt 配送（[§6.11](03-task-registry.md#sec-6-11) 手順 7）�
 ```text
 1. prompt から task.id を取得
 2. herdr-orchestrator task-status <task.id>（正本は Registry）
-3. Registry worker.agent_name（Role Binding 利用時は pane_id） == 自分の live agent.name または HERDR_PANE_ID（pane_id）（不一致 → 作業しない・誤配送）
+3. recipient_verification.verified == true かつ caller_role_in_task == "worker"（Registry worker.agent_name == 自分の live agent.name または HERDR_PANE_ID、かつ cwd・バインドロールが一致）であることを確認（不一致 → 作業や result-submit を一切行わず、自身のチャット画面で人間に報告して即停止。[クロスワークスペース設計書 §7.4](../herdr-orchestrator-cross-workspace.md#sec-7-4)）
 4. dispatch.status の扱い:
    a. pending → 同一 task.id で task-status を **bounded 再 poll**（[§10.2](#sec-10-2) と同型: 推奨 最大 10 回、指数バックオフ初回 1 秒・上限 30 秒）。sent / uncertain になったら 5 へ
    b. sent / uncertain → 5 へ（task / result 状態が当該 role の作業開始を許可することを確認）
    c. failed / skipped → 作業しない（task.id と dispatch terminal を summary / 人間報告）
    d. 4a の retry 上限到達で pending のまま → **task 作業は開始しない**。task.id と `dispatch_pending_timeout` を summary / 人間報告し、復旧待ち（`task-status` 監視・§6.12 reconcile・人間）とする。自動で別 task を開始しない
-5. repository identity / worktree path（および workflow 要求時 branch / commit）が自分の環境と一致（不一致 → 作業しない・誤配送）
+5. worker.cwd（同一 Git worktree タスクでは repository identity / worktree path、および workflow 要求時 branch / commit）が自分の環境と一致（不一致 → 作業しない・誤配送）
 6. 5 まで成功したら task 作業を開始する
 ```
 

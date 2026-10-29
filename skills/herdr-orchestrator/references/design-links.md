@@ -9,6 +9,9 @@
 | Task Registry  | `docs/herdr-orchestrator/03-task-registry.md`               |
 | Handoff        | `docs/herdr-orchestrator/04-handoff-and-requester.md`       |
 | Role（§4）     | `docs/herdr-orchestrator/02-roles-and-task-contract.md`     |
+| UUID Identity  | `docs/herdr-orchestrator-identity-uuid.md`                  |
+| Task List      | `docs/herdr-orchestrator-task-list.md`                      |
+| クロスWS・追従 | `docs/herdr-orchestrator-cross-workspace.md`                |
 | Worker 受信    | `skills/herdr-orchestrator/references/worker-receive.md`    |
 | Requester 受信 | `skills/herdr-orchestrator/references/requester-receive.md` |
 | Public CLI     | `skills/herdr-orchestrator/references/public-cli.md`        |

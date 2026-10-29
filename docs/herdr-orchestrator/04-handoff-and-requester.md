@@ -20,7 +20,7 @@ handoff
 
 通常のタスク委譲では sync を標準とする。
 
-対象例（worker の logical role。`tester` / `researcher` は [§4](02-roles-and-task-contract.md#sec-4) のとおり初期標準外）:
+対象例（標準 4 role、または Role Binding で登録された日本語・カスタムロール名。[§4](02-roles-and-task-contract.md#sec-4) 参照）:
 
 - コードレビュー・設計レビュー → `reviewer`
 - 実装に伴うテスト・検証作業 → `implementer`
@@ -78,7 +78,7 @@ requester
 - 複数 Agent への並列委譲
 - requester を待機させたくない処理
 
-専任 `tester` / `researcher` role 追加までは、上記のとおり既存4 role に委譲先を割り当てる。
+Role Binding で専任の日本語・カスタムロール（`調査`, `todo管理` 等）を登録していない場合は、上記のとおり標準 4 role に委譲先を割り当てる。
 
 概念フロー:
 
@@ -142,7 +142,7 @@ sync handoff は task 完了の正本を Task Registry とするため、`agent 
 
 ### 8.1 main rename を標準としない
 
-既存の検証実装では、callback 先を安定させるため依頼元 Agent を `main` へ rename していたが、中央設計では標準から外す。さらに、Herdr のネイティブセッション復元（`resume`）に干渉しないよう、`herdr agent rename` 自体を不要とし、[§4.1](02-roles-and-task-contract.md#sec-4-1) の Role Binding（`role` ⇔ `pane_id`）を標準とする。
+既存の検証実装では、callback 先を安定させるため依頼元 Agent を `main` へ rename していたが、中央設計では標準から外す。さらに、Herdr のネイティブセッション復元（`resume`）に干渉しないよう、`herdr agent rename` 自体を不要とし、[§4.1](02-roles-and-task-contract.md#sec-4-1) の Role Binding（`role` ⇔ `pane_id`）を標準とする（ワークスペース跨ぎ配送・グローバルロール・未バインド Requester `"unbound"` の扱いは [クロスワークスペース設計書](../herdr-orchestrator-cross-workspace.md) を参照）。
 
 requester は、Task Registry 上で routing locator（`agent_name`）と `pane_id` の両方を保持する（Role Binding 利用時は `agent_name` にも解決時の `pane_id` を保存する）。
 
@@ -277,24 +277,19 @@ context.worktree.commit != null → live 環境の commit と一致必須
 
 ### 8.5 `requester.role` の決定と検証
 
-Herdr は logical role を提供しない。Orchestrator は **`handoff` 実行時に caller の Role Binding（`pane_id`）または Pattern A の live `agent.name` から導出**し、Registry の `requester.role` として保存する。
+Herdr は logical role を提供しない。Orchestrator は **`handoff` 実行時に caller の Role Binding（`pane_id`）または Pattern A の live `agent.name` から導出**し、Registry の `requester.role` として保存する（詳細は [クロスワークスペース設計書 §4.1](../herdr-orchestrator-cross-workspace.md#sec-4-1)）。
 
-初期標準 role（[§4](02-roles-and-task-contract.md#sec-4)）のみ MVP で許可する。
-
-```text
-design | reviewer | implementer | orchestrator
-```
+Pattern A 命名フォールバックの対象は初期標準 4 role（`design | reviewer | implementer | orchestrator`）とし、Role Binding 利用時は任意の日本語・カスタムロール名および未バインド時のシステム予約値 `"unbound"` を許容する。
 
 #### `create` 時（決定）
 
 1. handoff 実行時に caller（`HERDR_PANE_ID`）の live requester Agent を解決し、`pane_id` および live `agent.name`（無名時は `pane_id`）を取得する（取得不能なら `create` 前に失敗）。
-2. **Role Binding による解決（優先）**: `context.repository.identity` の Role Binding に caller の `pane_id` が登録されている場合、そのバインドされた role を `requester.role` とし、`requester.agent_name = requester.pane_id = caller.pane_id` として確定する（手順 4 へ）。
-3. **Pattern A 命名によるフォールバック解決**: caller の `pane_id` が Role Binding に未登録の場合、初期標準4 role それぞれについて [§4.1](02-roles-and-task-contract.md#sec-4-1)（Pattern A `r-<hash16>-<role>`）で `context.repository.identity` から期待 `agent.name` を算出し、live `agent.name` と **完全一致**する role を1つ特定する（0 件または2件以上は `create` 前に失敗）。ただし、特定した role が Role Binding 上で**別の `pane_id` にバインドされている場合**は、混在による曖昧性を防ぐため `requester_context_unverified` として `create` 前に失敗させる。問題なければ `requester.agent_name = live agent.name`、`requester.pane_id = caller.pane_id` として確定する。
-4. 特定した role を `requester.role` として Registry に書き込む。
-5. handoff 入力に `requester.role` を含める場合は、4 の値と **一致必須**。不一致は `create` 前に失敗する。
-6. `requester.agent_name` は 2 または 3 で確定した locator を保存する。別名へ **変更しない**。
+2. **ローカル Role Binding による解決（最優先）**: ローカルスコープ（Git `<uuid>.json` または Non-Git `dir_<hash16>.json`）の Role Binding に caller の `pane_id` が登録されている場合、そのバインドされた role を `requester.role` とし、`requester.agent_name = requester.pane_id = caller.pane_id` として確定する（ただし `targets` 指紋を持たない旧形式バインディングの場合は `role_binding_outdated` で停止する）。
+3. **グローバル Role Binding による解決**: ローカルに未登録で、グローバルスコープ（`global.json`）に caller の `pane_id` が登録されている場合、そのバインドされた role を `requester.role` とし、`requester.agent_name = requester.pane_id = caller.pane_id` として確定する（旧形式の場合は `role_binding_outdated` で停止）。
+4. **Pattern A 命名によるフォールバック解決または `"unbound"`**: caller の `pane_id` がローカル・グローバルのいずれにも未登録の場合、Git リポジトリ内であれば初期標準 4 role それぞれについて [§4.1](02-roles-and-task-contract.md#sec-4-1)（Pattern A `r-<hash16>-<role>`）で `context.repository.identity` から期待 `agent.name` を算出し、live `agent.name` と **完全一致**する role があればそれを特定する（特定した role がローカル Role Binding 上で別の `pane_id` にバインドされている場合は `requester_context_unverified` として拒否）。Pattern A 名とも一致しない無名ペインの場合（または Non-Git ディレクトリの場合）、委譲先 worker が Role Binding で解決されるタスクであればシステム予約値 **`requester.role = "unbound"`**（`requester.agent_name = caller.pane_id`）を設定する（worker も Role Binding 未登録の場合は `requester_context_unverified` として `create` 前に失敗させる）。
+5. 確定した role を `requester.role`、`requester.agent_name` を Registry に書き込む。
 
-`worker.role` は handoff 入力で指定し、[§4.1](02-roles-and-task-contract.md#sec-4-1) / [§11.1](06-results-and-workflows.md#sec-11-1) に従い Role Binding の `pane_id`（未登録時は期待 `agent.name`）から live worker を解決し、Registry へ書き込む（[§6.2](03-task-registry.md#sec-6-2)）。requester 側も同じ4 role 語彙に限定する。
+`worker.role` は handoff 入力で指定し、[§4.1](02-roles-and-task-contract.md#sec-4-1) / [§11.1](06-results-and-workflows.md#sec-11-1) / [クロスワークスペース設計書 §4.1](../herdr-orchestrator-cross-workspace.md#sec-4-1) に従いローカルまたはグローバル Role Binding の `pane_id`（両方にある場合は `worker_role_scope_ambiguous` で確認停止、両方とも未登録時は標準 4 role のみ期待 `agent.name`）から live worker を解決し、Registry へ書き込む（[§6.2](03-task-registry.md#sec-6-2)）。
 
 #### `resume_requester` 時（照合）
 

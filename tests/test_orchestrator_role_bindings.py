@@ -114,7 +114,13 @@ class RoleBindingsUnitTests(unittest.TestCase):
 
     def test_validation_errors(self) -> None:
         with self.assertRaises(RoleBindingError):
-            set_role_binding(_SAMPLE_UUID, "invalid_role", "w15:p1")
+            set_role_binding(_SAMPLE_UUID, "unbound", "w15:p1")
+        with self.assertRaises(RoleBindingError):
+            set_role_binding(_SAMPLE_UUID, "bad role with spaces", "w15:p1")
+        with self.assertRaises(RoleBindingError):
+            set_role_binding(_SAMPLE_UUID, "-flag", "w15:p1")
+        with self.assertRaises(RoleBindingError):
+            set_role_binding(_SAMPLE_UUID, "a/b", "w15:p1")
         with self.assertRaises(RoleBindingError):
             set_role_binding(_SAMPLE_UUID, "reviewer", "")
         with self.assertRaises(RoleBindingError):
@@ -233,6 +239,7 @@ if len(sys.argv) >= 4 and sys.argv[1] == "agent" and sys.argv[2] == "get":
             "agent_status": os.environ.get("FAKE_P1_STATUS", "idle"),
             "foreground_cwd": cwd,
             "pane_id": "w15:p1",
+            "terminal_id": "term_w15:p1",
         }
         if p1_name:
             agent_obj["name"] = p1_name
@@ -246,6 +253,7 @@ if len(sys.argv) >= 4 and sys.argv[1] == "agent" and sys.argv[2] == "get":
                     "agent_status": os.environ.get("FAKE_P2_STATUS", "idle"),
                     "foreground_cwd": cwd,
                     "pane_id": target,
+                    "terminal_id": f"term_{target}",
                 }
             }
         }))
@@ -332,14 +340,13 @@ raise SystemExit(99)
         self.assertEqual(res_clear_all.returncode, 0, res_clear_all.stderr)
         self.assertEqual(json.loads(res_clear_all.stdout)["roles"], {})
 
-        # 6. 'role set' on nonexistent pane in HERDR_ENV=1 succeeds with diagnostic warning
-        res_warn = _run_cli(
+        # 6. 'role set' on nonexistent/unstarted pane in HERDR_ENV=1 fails with role_target_agent_not_running (CW-15)
+        res_err = _run_cli(
             "role", "set", "design", "--pane", "w99:p9", env=self.env, cwd=self.worktree
         )
-        self.assertEqual(res_warn.returncode, 0, res_warn.stderr)
-        warn_out = json.loads(res_warn.stdout)
-        self.assertEqual(warn_out["pane_id"], "w99:p9")
-        self.assertIn("warning", warn_out)
+        self.assertEqual(res_err.returncode, 1)
+        err_out = json.loads(res_err.stdout)
+        self.assertEqual(err_out["error"], "role_target_agent_not_running")
 
     def test_unnamed_agents_handoff_result_submit_and_completion_via_pane_id(self) -> None:
         # Bind implementer -> w15:p1, reviewer -> w15:p2
@@ -508,6 +515,617 @@ raise SystemExit(99)
         err = json.loads(res_handoff.stdout)
         self.assertEqual(err["error"], "requester_context_unverified")
         self.assertIn("bound to pane", err["message"])
+
+
+class CrossWorkspaceRoleBindingTests(unittest.TestCase):
+    """Comprehensive tests for Issue #74 (CW-01 through CW-16)."""
+
+    def setUp(self) -> None:
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmpdir.cleanup)
+        self.root = Path(self._tmpdir.name)
+        self.repo_a = _init_repo(self.root, "repo-a")
+        self.repo_b = _init_repo(self.root, "repo-b")
+        self.nogit_dir = self.root / "nogit-logs"
+        self.nogit_dir.mkdir()
+        self.todo_dir = self.root / "todo-mcp-workspace"
+        self.todo_dir.mkdir()
+
+        self.state_home = self.root / "state"
+        self.fake_bin = self.root / "bin"
+        self.fake_bin.mkdir()
+        self.prompt_log = self.root / "prompts.log"
+        self.rename_log = self.root / "renames.log"
+        self.herdr_state_file = self.root / "herdr_state.json"
+
+        self._write_herdr_state(
+            workspaces=[
+                {"workspace_id": "w15", "label": "project-a-ws", "number": 1},
+                {"workspace_id": "w16", "label": "todo-ws", "number": 2},
+                {"workspace_id": "w17", "label": "logs-ws", "number": 3},
+            ],
+            tabs=[
+                {"tab_id": "w15:t1", "workspace_id": "w15", "number": 1, "label": "Tab 1"},
+                {"tab_id": "w16:t1", "workspace_id": "w16", "number": 1, "label": "Tab 1"},
+                {"tab_id": "w17:t1", "workspace_id": "w17", "number": 1, "label": "Tab 1"},
+            ],
+            panes=[
+                {
+                    "pane_id": "w15:p1",
+                    "workspace_id": "w15",
+                    "tab_id": "w15:t1",
+                    "terminal_id": "term_15_1",
+                    "agent": "agy",
+                    "agent_status": "idle",
+                    "agent_session": {"value": "sess_a_impl"},
+                    "foreground_cwd": str(self.repo_a.resolve()),
+                },
+                {
+                    "pane_id": "w15:p2",
+                    "workspace_id": "w15",
+                    "tab_id": "w15:t1",
+                    "terminal_id": "term_15_2",
+                    "agent": "claude",
+                    "agent_status": "idle",
+                    "agent_session": {"value": "sess_a_rev"},
+                    "foreground_cwd": str(self.repo_a.resolve()),
+                },
+                {
+                    "pane_id": "w16:p1",
+                    "workspace_id": "w16",
+                    "tab_id": "w16:t1",
+                    "terminal_id": "term_16_1",
+                    "agent": "claude",
+                    "agent_status": "idle",
+                    "agent_session": {"value": "sess_todo_1"},
+                    "foreground_cwd": str(self.todo_dir.resolve()),
+                },
+                {
+                    "pane_id": "w17:p1",
+                    "workspace_id": "w17",
+                    "tab_id": "w17:t1",
+                    "terminal_id": "term_17_1",
+                    "agent": "agy",
+                    "agent_status": "idle",
+                    "agent_session": {"value": "sess_logs_1"},
+                    "foreground_cwd": str(self.nogit_dir.resolve()),
+                },
+            ],
+        )
+
+        fake_herdr = self.fake_bin / "herdr"
+        fake_herdr.write_text(
+            """#!/usr/bin/env python3
+import json, os, sys
+
+state_path = os.environ["FAKE_HERDR_STATE"]
+state = json.loads(open(state_path, encoding="utf-8").read())
+
+if "--version" in sys.argv:
+    print("herdr 0.7.0")
+    raise SystemExit(0)
+
+if len(sys.argv) >= 3 and sys.argv[1] == "workspace" and sys.argv[2] == "list":
+    print(json.dumps({"result": {"workspaces": state.get("workspaces", [])}}))
+    raise SystemExit(0)
+
+if len(sys.argv) >= 3 and sys.argv[1] == "tab" and sys.argv[2] == "list":
+    print(json.dumps({"result": {"tabs": state.get("tabs", [])}}))
+    raise SystemExit(0)
+
+if len(sys.argv) >= 3 and sys.argv[1] == "pane" and sys.argv[2] == "list":
+    print(json.dumps({"result": {"panes": state.get("panes", [])}}))
+    raise SystemExit(0)
+
+if len(sys.argv) >= 3 and sys.argv[1] == "pane" and sys.argv[2] == "rename":
+    rlog = os.environ.get("FAKE_RENAME_LOG")
+    if rlog:
+        with open(rlog, "a", encoding="utf-8") as fh:
+            fh.write(" ".join(sys.argv[3:]) + "\\n")
+    print(json.dumps({"result": {"renamed": True}}))
+    raise SystemExit(0)
+
+if len(sys.argv) >= 4 and sys.argv[1] == "agent" and sys.argv[2] == "get":
+    target = sys.argv[3]
+    for p in state.get("panes", []):
+        if p.get("pane_id") == target or p.get("name") == target:
+            if not p.get("agent") or p.get("agent_status") == "none":
+                break
+            print(json.dumps({"result": {"agent": p}}))
+            raise SystemExit(0)
+    sys.stderr.write(json.dumps({"error": {"code": "agent_not_found", "message": f"not found: {target}"}}))
+    raise SystemExit(1)
+
+if len(sys.argv) >= 4 and sys.argv[1] == "agent" and sys.argv[2] == "prompt":
+    target = sys.argv[3]
+    text = sys.argv[4] if len(sys.argv) >= 5 else ""
+    plog = os.environ.get("FAKE_PROMPT_LOG")
+    if plog:
+        with open(plog, "a", encoding="utf-8") as fh:
+            fh.write(f"{target}|{text.splitlines()[0] if text else ''}\\n")
+    print(json.dumps({"result": {"prompt": "sent"}}))
+    raise SystemExit(0)
+
+raise SystemExit(99)
+""",
+            encoding="utf-8",
+        )
+        fake_herdr.chmod(fake_herdr.stat().st_mode | stat.S_IXUSR)
+
+        self.env = os.environ.copy()
+        self.env["HERDR_ENV"] = "1"
+        self.env["HERDR_PANE_ID"] = "w15:p1"
+        self.env["XDG_STATE_HOME"] = str(self.state_home)
+        self.env["PATH"] = f"{self.fake_bin}:{self.env.get('PATH', '')}"
+        self.env["FAKE_HERDR_STATE"] = str(self.herdr_state_file)
+        self.env["FAKE_PROMPT_LOG"] = str(self.prompt_log)
+        self.env["FAKE_RENAME_LOG"] = str(self.rename_log)
+
+    def _write_herdr_state(
+        self,
+        *,
+        workspaces: list[dict],
+        tabs: list[dict],
+        panes: list[dict],
+    ) -> None:
+        self.herdr_state_file.write_text(
+            json.dumps({"workspaces": workspaces, "tabs": tabs, "panes": panes}),
+            encoding="utf-8",
+        )
+
+    def _update_panes(self, panes: list[dict]) -> None:
+        state = json.loads(self.herdr_state_file.read_text(encoding="utf-8"))
+        state["panes"] = panes
+        self.herdr_state_file.write_text(json.dumps(state), encoding="utf-8")
+
+    def test_cw01_cw02_japanese_synonyms_custom_roles_and_pane_rename(self) -> None:
+        # CW-01 & CW-02: Implicit $HERDR_PANE_ID, Japanese role stored as-is ('レビュワー' -> 'レビュワー'),
+        # NFKC + lowercase normalization ('ＴＯＤＯ管理' -> 'todo管理'), and Herdr UI pane rename (-- and --clear)
+        rev_env = {**self.env, "HERDR_PANE_ID": "w15:p2"}
+        r1 = _run_cli("role", "set", "レビュワー", env=rev_env, cwd=self.repo_a)
+        self.assertEqual(r1.returncode, 0, r1.stdout + r1.stderr)
+        d1 = json.loads(r1.stdout)
+        self.assertEqual(d1["role"], "レビュワー")
+        self.assertEqual(d1["display_name"], "レビュワー")
+        self.assertEqual(d1["pane_id"], "w15:p2")
+        self.assertIn("ワークスペース #1「project-a-ws」の『レビュワー』", d1["target"]["display_summary"])
+
+        # Global custom role registration using positional pane_id and full-width NFKC normalization
+        r2 = _run_cli("role", "set", "ＴＯＤＯ管理", "w16:p1", "--global", env=self.env, cwd=self.repo_a)
+        self.assertEqual(r2.returncode, 0, r2.stdout + r2.stderr)
+        d2 = json.loads(r2.stdout)
+        self.assertEqual(d2["scope"], "global")
+        self.assertEqual(d2["role"], "todo管理")
+        self.assertEqual(d2["display_name"], "ＴＯＤＯ管理")
+        self.assertIn("ワークスペース #2「todo-ws」の『ＴＯＤＯ管理』", d2["target"]["display_summary"])
+
+        # Clear global role -> triggers `herdr pane rename --clear -- w16:p1`
+        r_clear = _run_cli("role", "clear", "todo管理", "--global", env=self.env, cwd=self.repo_a)
+        self.assertEqual(r_clear.returncode, 0)
+        renames = self.rename_log.read_text(encoding="utf-8").strip().splitlines()
+        self.assertEqual(
+            renames,
+            [
+                "-- w15:p2 レビュワー",
+                "-- w16:p1 ＴＯＤＯ管理",
+                "--clear -- w16:p1",
+            ],
+        )
+
+    def test_cw03_scope_ambiguity_and_explicit_scope_resolution(self) -> None:
+        # CW-03: Same role name ('調査') bound in both local and global
+        _run_cli("role", "set", "調査", "w15:p2", env=self.env, cwd=self.repo_a)
+        _run_cli("role", "set", "調査", "w17:p1", "--global", env=self.env, cwd=self.nogit_dir)
+
+        # Without --scope -> stops with worker_role_scope_ambiguous and workspace names
+        res_amb = _run_cli(
+            "handoff",
+            "--mode",
+            "async",
+            "--to",
+            "調査",
+            "--instruction",
+            "investigate",
+            env=self.env,
+            cwd=self.repo_a,
+        )
+        self.assertEqual(res_amb.returncode, 1)
+        err = json.loads(res_amb.stdout)
+        self.assertEqual(err["error"], "worker_role_scope_ambiguous")
+        self.assertIn("ワークスペース #1「project-a-ws」", err["message"])
+        self.assertIn("ワークスペース #3「logs-ws」", err["message"])
+        self.assertEqual(len(err["candidates"]), 2)
+
+        # With --scope global -> succeeds and emits warning worker_role_shadowed_by_explicit_scope
+        res_ok = _run_cli(
+            "handoff",
+            "--mode",
+            "async",
+            "--to",
+            "調査",
+            "--scope",
+            "global",
+            "--instruction",
+            "investigate global",
+            env=self.env,
+            cwd=self.repo_a,
+        )
+        self.assertEqual(res_ok.returncode, 0, res_ok.stdout)
+        out = json.loads(res_ok.stdout)
+        self.assertEqual(out["warnings"][0]["code"], "worker_role_shadowed_by_explicit_scope")
+        prompts = self.prompt_log.read_text(encoding="utf-8").strip().splitlines()
+        self.assertEqual(prompts[-1].split("|")[0], "w17:p1")
+
+    def test_cw04_cw05_cross_workspace_and_nongit_handoff_and_summary_only_submit(self) -> None:
+        # CW-04 & CW-05: Unbound requester in Non-Git directory (w17:p1) sends handoff to global TODO role (w16:p1)
+        _run_cli("role", "set", "TODO管理", "w16:p1", "--global", env=self.env, cwd=self.todo_dir)
+
+        nogit_env = {**self.env, "HERDR_PANE_ID": "w17:p1"}
+        res_h = _run_cli(
+            "handoff",
+            "--mode",
+            "async",
+            "--to",
+            "TODO管理",
+            "--instruction",
+            "add todo item",
+            env=nogit_env,
+            cwd=self.nogit_dir,
+        )
+        self.assertEqual(res_h.returncode, 0, res_h.stdout + res_h.stderr)
+        task_id = json.loads(res_h.stdout)["task_id"]
+
+        # Verify task record: requester.role == 'unbound', context.repository.identity == 'dir_...', worker.cwd == todo_dir
+        st_res = _run_cli("task-status", task_id, env=nogit_env, cwd=self.nogit_dir)
+        self.assertEqual(st_res.returncode, 0)
+        st_json = json.loads(st_res.stdout)
+        # CW-13b: Requester calling task-status gets verified=True, caller_role_in_task='requester'
+        self.assertTrue(st_json["recipient_verification"]["verified"])
+        self.assertEqual(st_json["recipient_verification"]["caller_role_in_task"], "requester")
+        task_doc = st_json["task"]
+        self.assertEqual(task_doc["requester"]["role"], "unbound")
+        self.assertTrue(task_doc["context"]["repository"]["identity"].startswith("dir_"))
+        self.assertEqual(task_doc["worker"]["cwd"], str(self.todo_dir.resolve()))
+
+        # Worker (w16:p1 in todo_dir) submits result with --summary only (no --result-ref)
+        todo_env = {**self.env, "HERDR_PANE_ID": "w16:p1"}
+        sub_res = _run_cli(
+            "result-submit",
+            task_id,
+            "--result-status",
+            "succeeded",
+            "--summary",
+            "未完了TODOは2件です: 1. 設計レビュー, 2. テスト追加",
+            env=todo_env,
+            cwd=self.todo_dir,
+        )
+        self.assertEqual(sub_res.returncode, 0, sub_res.stdout + sub_res.stderr)
+        sub_json = json.loads(sub_res.stdout)
+        self.assertIsNone(sub_json["result"]["ref"])
+        self.assertIn("未完了TODOは2件です", sub_json["result"]["summary"])
+        self.assertEqual(sub_json["completion_chain"]["completion"]["status"], "sent")
+
+    def test_cw06_same_pane_same_terminal_agent_restart_continues_transparently(self) -> None:
+        # CW-06: Repo A has 2 roles in the same cwd (implementer=w15:p1, reviewer=w15:p2).
+        # Reviewer exits and restarts inside the SAME terminal_id (term_15_2), getting a new session_id.
+        _run_cli("role", "set", "実装者", "w15:p1", env=self.env, cwd=self.repo_a)
+        _run_cli("role", "set", "レビュワー", "w15:p2", env=self.env, cwd=self.repo_a)
+
+        state = json.loads(self.herdr_state_file.read_text(encoding="utf-8"))
+        for p in state["panes"]:
+            if p["pane_id"] == "w15:p2":
+                p["agent_session"] = {"value": "sess_a_rev_restarted_after_update"}
+        self._update_panes(state["panes"])
+
+        res = _run_cli(
+            "handoff",
+            "--mode",
+            "async",
+            "--to",
+            "レビュワー",
+            "--instruction",
+            "after agent update in same terminal",
+            env=self.env,
+            cwd=self.repo_a,
+        )
+        self.assertEqual(res.returncode, 0, res.stdout)
+
+    def test_cw07_auto_tracking_on_pane_close_or_restart(self) -> None:
+        # CW-07 Condition A (session match) & Condition B (1-folder 1-role single cwd+agent match)
+        _run_cli("role", "set", "TODO管理", "w16:p1", "--global", env=self.env, cwd=self.todo_dir)
+
+        # Simulate Herdr restart: w16:p1 is gone, replaced by w22:p1 with a new session in todo_dir (Condition B)
+        state = json.loads(self.herdr_state_file.read_text(encoding="utf-8"))
+        for p in state["panes"]:
+            if p["pane_id"] == "w16:p1":
+                p["pane_id"] = "w22:p1"
+                p["terminal_id"] = "term_22_1"
+                p["agent_session"] = {"value": "sess_todo_new"}
+        self._update_panes(state["panes"])
+
+        res = _run_cli(
+            "handoff",
+            "--mode",
+            "async",
+            "--to",
+            "TODO管理",
+            "--instruction",
+            "track to w22:p1",
+            env=self.env,
+            cwd=self.repo_a,
+        )
+        self.assertEqual(res.returncode, 0, res.stdout)
+        prompts = self.prompt_log.read_text(encoding="utf-8").strip().splitlines()
+        self.assertEqual(prompts[-1].split("|")[0], "w22:p1")
+
+        # Verify global.json was updated to w22:p1
+        show_res = _run_cli("role", "show", "--global", env=self.env, cwd=self.repo_a)
+        self.assertEqual(json.loads(show_res.stdout)["roles"]["todo管理"], "w22:p1")
+
+    def test_cw08_cw09_cw10_stop_on_ambiguous_candidates_cwd_change_or_shell_state(self) -> None:
+        _run_cli("role", "set", "TODO管理", "w16:p1", "--global", env=self.env, cwd=self.todo_dir)
+
+        # CW-10: Agent exited to shell (agent=None, agent_status="none") -> worker_agent_not_running
+        state = json.loads(self.herdr_state_file.read_text(encoding="utf-8"))
+        for p in state["panes"]:
+            if p["pane_id"] == "w16:p1":
+                p["agent"] = None
+                p["agent_status"] = "none"
+        self._update_panes(state["panes"])
+
+        res_shell = _run_cli(
+            "handoff", "--mode", "async", "--to", "TODO管理", "--instruction", "x", env=self.env, cwd=self.repo_a
+        )
+        self.assertEqual(res_shell.returncode, 1)
+        self.assertEqual(json.loads(res_shell.stdout)["error"], "worker_agent_not_running")
+
+        # CW-09: Agent moved to a different directory -> worker_context_changed
+        for p in state["panes"]:
+            if p["pane_id"] == "w16:p1":
+                p["agent"] = "claude"
+                p["agent_status"] = "idle"
+                p["foreground_cwd"] = str(self.repo_b.resolve())
+        self._update_panes(state["panes"])
+
+        res_cwd = _run_cli(
+            "handoff", "--mode", "async", "--to", "TODO管理", "--instruction", "x", env=self.env, cwd=self.repo_a
+        )
+        self.assertEqual(res_cwd.returncode, 1)
+        self.assertEqual(json.loads(res_cwd.stdout)["error"], "worker_context_changed")
+
+        # CW-08: Old pane w16:p1 closed, and TWO panes (w20:p1, w21:p1) have todo_dir + claude -> worker_ambiguous_candidates
+        state["panes"] = [p for p in state["panes"] if p["pane_id"] != "w16:p1"] + [
+            {
+                "pane_id": "w20:p1",
+                "workspace_id": "w16",
+                "tab_id": "w16:t1",
+                "terminal_id": "term_20_1",
+                "agent": "claude",
+                "agent_status": "idle",
+                "agent_session": {"value": "sess_new_1"},
+                "foreground_cwd": str(self.todo_dir.resolve()),
+            },
+            {
+                "pane_id": "w21:p1",
+                "workspace_id": "w17",
+                "tab_id": "w17:t1",
+                "terminal_id": "term_21_1",
+                "agent": "claude",
+                "agent_status": "idle",
+                "agent_session": {"value": "sess_new_2"},
+                "foreground_cwd": str(self.todo_dir.resolve()),
+            },
+        ]
+        self._update_panes(state["panes"])
+
+        res_amb = _run_cli(
+            "handoff", "--mode", "async", "--to", "TODO管理", "--instruction", "x", env=self.env, cwd=self.repo_a
+        )
+        self.assertEqual(res_amb.returncode, 1)
+        err_amb = json.loads(res_amb.stdout)
+        self.assertEqual(err_amb["error"], "worker_ambiguous_candidates")
+        self.assertEqual(len(err_amb["candidates"]), 2)
+
+    def test_cw11_cw12a_cw12b_multi_role_same_cwd_collision_prevention(self) -> None:
+        # Setup 2 roles in the SAME cwd (self.repo_a) with the SAME agent type ("claude")
+        state = json.loads(self.herdr_state_file.read_text(encoding="utf-8"))
+        for p in state["panes"]:
+            if p["pane_id"] == "w15:p1":
+                p["agent"] = "claude"
+        self._update_panes(state["panes"])
+
+        _run_cli("role", "set", "実装者", "w15:p1", env=self.env, cwd=self.repo_a)
+        _run_cli("role", "set", "レビュワー", "w15:p2", env=self.env, cwd=self.repo_a)
+
+        # CW-12a: Old pane w15:p2 now hosts implementer's known session ('sess_a_impl') -> worker_context_changed
+        for p in state["panes"]:
+            if p["pane_id"] == "w15:p2":
+                p["agent_session"] = {"value": "sess_a_impl"}
+        self._update_panes(state["panes"])
+
+        res_12a = _run_cli(
+            "handoff", "--mode", "async", "--to", "レビュワー", "--instruction", "x", env=self.env, cwd=self.repo_a
+        )
+        self.assertEqual(res_12a.returncode, 1)
+        self.assertEqual(json.loads(res_12a.stdout)["error"], "worker_context_changed")
+
+        # CW-12b (RV018 B-1): Full restart -> new terminal_id AND new session_id in w15:p2 while multiple roles share repo_a -> stops with worker_context_changed
+        for p in state["panes"]:
+            if p["pane_id"] == "w15:p2":
+                p["terminal_id"] = "term_after_server_restart"
+                p["agent_session"] = {"value": "sess_brand_new_unknown"}
+        self._update_panes(state["panes"])
+
+        res_12b = _run_cli(
+            "handoff", "--mode", "async", "--to", "レビュワー", "--instruction", "x", env=self.env, cwd=self.repo_a
+        )
+        self.assertEqual(res_12b.returncode, 1)
+        self.assertEqual(json.loads(res_12b.stdout)["error"], "worker_context_changed")
+
+        # CW-11 (RV017 B-1): Old pane w15:p2 is closed, and a new pane w15:p9 has a brand new session in repo_a -> does NOT auto-track because is_unique_cwd_role is False!
+        state["panes"] = [p for p in state["panes"] if p["pane_id"] != "w15:p2"] + [
+            {
+                "pane_id": "w15:p9",
+                "workspace_id": "w15",
+                "tab_id": "w15:t1",
+                "terminal_id": "term_15_9",
+                "agent": "claude",
+                "agent_status": "idle",
+                "agent_session": {"value": "sess_brand_new_p9"},
+                "foreground_cwd": str(self.repo_a.resolve()),
+            }
+        ]
+        self._update_panes(state["panes"])
+
+        res_11 = _run_cli(
+            "handoff", "--mode", "async", "--to", "レビュワー", "--instruction", "x", env=self.env, cwd=self.repo_a
+        )
+        self.assertEqual(res_11.returncode, 1)
+        self.assertEqual(json.loads(res_11.stdout)["error"], "worker_pane_closed_or_missing")
+
+    def test_cw13a_recipient_verification_detects_mismatch_on_worker_or_other_pane(self) -> None:
+        _run_cli("role", "set", "実装者", "w15:p1", env=self.env, cwd=self.repo_a)
+        _run_cli("role", "set", "レビュワー", "w15:p2", env=self.env, cwd=self.repo_a)
+
+        res_h = _run_cli(
+            "handoff",
+            "--mode",
+            "async",
+            "--to",
+            "レビュワー",
+            "--instruction",
+            "check recipient verification",
+            env=self.env,
+            cwd=self.repo_a,
+        )
+        self.assertEqual(res_h.returncode, 0, res_h.stdout)
+        task_id = json.loads(res_h.stdout)["task_id"]
+
+        # 1. Correct worker (w15:p2 in repo_a) -> verified=True, caller_role_in_task="worker"
+        w_env = {**self.env, "HERDR_PANE_ID": "w15:p2"}
+        st_ok = json.loads(_run_cli("task-status", task_id, env=w_env, cwd=self.repo_a).stdout)
+        self.assertTrue(st_ok["recipient_verification"]["verified"])
+        self.assertEqual(st_ok["recipient_verification"]["caller_role_in_task"], "worker")
+
+        # 2. Unrelated pane (w16:p1) -> verified=False, caller_role_in_task="other", action_required="STOP_AND_REPORT_TO_HUMAN"
+        other_env = {**self.env, "HERDR_PANE_ID": "w16:p1"}
+        st_other = json.loads(_run_cli("task-status", task_id, env=other_env, cwd=self.todo_dir).stdout)
+        self.assertFalse(st_other["recipient_verification"]["verified"])
+        self.assertEqual(st_other["recipient_verification"]["caller_role_in_task"], "other")
+        self.assertEqual(st_other["recipient_verification"]["action_required"], "STOP_AND_REPORT_TO_HUMAN")
+
+        # 3. Worker pane w15:p2 moved to repo_b after dispatch -> verified=False, caller_role_in_task="worker"
+        state = json.loads(self.herdr_state_file.read_text(encoding="utf-8"))
+        for p in state["panes"]:
+            if p["pane_id"] == "w15:p2":
+                p["foreground_cwd"] = str(self.repo_b.resolve())
+        self._update_panes(state["panes"])
+
+        st_moved = json.loads(_run_cli("task-status", task_id, env=w_env, cwd=self.repo_b).stdout)
+        self.assertFalse(st_moved["recipient_verification"]["verified"])
+        self.assertEqual(st_moved["recipient_verification"]["caller_role_in_task"], "worker")
+        self.assertEqual(st_moved["recipient_verification"]["reason"], "recipient_role_or_cwd_mismatch")
+
+    def test_cw14_cw16_outdated_role_binding_rejected_and_null_fingerprints_never_match(self) -> None:
+        # CW-14 (RV019 B-1 / RV020 N-2): Write legacy v0.3.1 Role Binding JSON (no `targets`)
+        repo_id = get_or_create_repository_identity(self.repo_a)
+        path = self.state_home / "herdr-orchestrator" / "roles" / f"{repo_id}.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "repository_id": repo_id,
+                    "roles": {"implementer": "w15:p1", "reviewer": "w15:p2"},
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        # `role show` and `doctor` report outdated_roles
+        show_doc = json.loads(_run_cli("role", "show", env=self.env, cwd=self.repo_a).stdout)
+        self.assertEqual(show_doc["outdated_roles"], ["implementer", "reviewer"])
+        doc_out = json.loads(_run_cli("doctor", env=self.env, cwd=self.repo_a).stdout)
+        self.assertTrue(any(item["scope_id"] == repo_id for item in doc_out["outdated_role_bindings"]))
+
+        # `handoff` stops before dispatch with `role_binding_outdated`
+        res_outdated = _run_cli(
+            "handoff", "--mode", "async", "--to", "reviewer", "--instruction", "x", env=self.env, cwd=self.repo_a
+        )
+        self.assertEqual(res_outdated.returncode, 1)
+        self.assertEqual(json.loads(res_outdated.stdout)["error"], "role_binding_outdated")
+
+        # CW-15: `role set` without HERDR_ENV=1 fails with herdr_env_required
+        env_no_herdr = {k: v for k, v in self.env.items() if k != "HERDR_ENV"}
+        res_no_herdr = _run_cli("role", "set", "reviewer", "w15:p2", env=env_no_herdr, cwd=self.repo_a)
+        self.assertEqual(res_no_herdr.returncode, 1)
+        self.assertEqual(json.loads(res_no_herdr.stdout)["error"], "herdr_env_required")
+
+        # CW-16 (RV020 N-1 / RV021 N-1): Null fingerprints (terminal_id=None, agent_session_id=None) never match `null == null`
+        from orchestrator.handoff_commands import _non_empty_str_match
+
+        self.assertFalse(_non_empty_str_match(None, None))
+        self.assertFalse(_non_empty_str_match("", ""))
+        self.assertFalse(_non_empty_str_match("term_1", None))
+        self.assertTrue(_non_empty_str_match("term_1", "term_1"))
+
+    def test_pattern_a_failure_includes_available_roles_in_details(self) -> None:
+        # B-1: Register 'レビュワー', then try to handoff to 'reviewer'.
+        # Falls back to Pattern A (r-<hash16>-reviewer) which is unavailable,
+        # but the error output must provide available_roles to guide the user.
+        _run_cli("role", "set", "実装者", "w15:p1", env=self.env, cwd=self.repo_a)
+        _run_cli("role", "set", "レビュワー", "w15:p2", env=self.env, cwd=self.repo_a)
+
+        res = _run_cli(
+            "handoff",
+            "--mode",
+            "async",
+            "--to",
+            "reviewer",
+            "--instruction",
+            "test b-1",
+            env=self.env,
+            cwd=self.repo_a,
+        )
+        self.assertEqual(res.returncode, 1)
+        err = json.loads(res.stdout)
+        self.assertEqual(err["error"], "worker_unavailable")
+        self.assertIn("available_roles", err)
+        self.assertIn("レビュワー", err["available_roles"]["local"])
+
+    def test_cas_mismatch_during_handoff_stops_with_worker_context_changed(self) -> None:
+        # N-1: If compare_and_update_role_binding returns False due to concurrent change,
+        # handoff must stop with worker_context_changed rather than delivering to wrong target.
+        _run_cli("role", "set", "reviewer", "w15:p2", env=self.env, cwd=self.repo_a)
+
+        from unittest.mock import patch
+        from orchestrator.handoff_commands import run_handoff, HandoffInput, HandoffCommandError
+        import os
+
+        old_env = os.environ.copy()
+        old_cwd = os.getcwd()
+        try:
+            os.environ.update(self.env)
+            os.chdir(self.repo_a)
+            h_input = HandoffInput(
+                mode="async",
+                worker_role="reviewer",
+                instruction="test n-1",
+                task_type="general",
+                result_wait_timeout_sec=0,
+            )
+            with patch(
+                "orchestrator.handoff_commands.compare_and_update_role_binding",
+                return_value=False,
+            ):
+                with self.assertRaises(HandoffCommandError) as ctx:
+                    run_handoff(h_input)
+                self.assertEqual(ctx.exception.code, "worker_context_changed")
+                self.assertIn("並行操作により変更", ctx.exception.message)
+        finally:
+            os.environ.clear()
+            os.environ.update(old_env)
+            os.chdir(old_cwd)
 
 
 if __name__ == "__main__":
