@@ -31,7 +31,7 @@ Issue #72 により、`herdr agent rename` 依存を廃止し `pane_id` を正�
    - 一時調査のためのログ資料や手順書置き場など、Git リポジトリとして初期化されていないディレクトリ（Non-Git 環境）では、`git_repository_not_initialized` や `worktree root resolution failed` で停止する。
    - また、ターミナルを広く使うために同じディレクトリを複数のワークスペース・タブに分けて開く運用や、将来的な `git worktree` 運用において、厳格すぎる Git パス一致チェックが阻害要因となる。
 3. **ロール登録・指定の UX 課題（自然言語・日本語ロールへの未対応）**:
-   - 既定の英単語 4 種（`design`, `reviewer`, `implementer`, `orchestrator`）しか受け付けないため、人間が英単語ロール名を記憶して指定する必要があり、「レビュワー」「ログ調査」「調査エージェント」「TODO管理」といった自然な日本語での登録・配送ができない。
+   - 既定の英単語 4 種（`design`, `reviewer`, `implementer`, `orchestrator`）しか受け付けないため、人間が英単語ロール名を記憶して指定する必要があり、「レビュワー」「ログ調査」「調査エージェント」「チケット管理」といった自然な日本語での登録・配送ができない。
 4. **ペイン終了・エージェント再起動・Herdr 全再起動時の運用課題**:
    - エージェントのアップデートのために一時的に `exit` して同じペインで再起動する操作や、不要になったペインを閉じた後に誤って配送しようとしたケース、さらに Herdr 本体のアップデートのために全ペイン・全ターミナルを一度 `exit` して 1 個ずつ起動し直したケース（`pane_id` が変化するケース）を、複雑な実装を避けつつ安全に取り扱う必要がある。
    - また、状態変化や同名ロールの重複・不一致を人間へ確認する際、`w15:p2` のような内部ペイン ID だけを提示されても、人間が画面上のどのペインか即座に判別できない。
@@ -46,7 +46,7 @@ Issue #72 により、`herdr agent rename` 依存を廃止し `pane_id` を正�
    - 複数プロジェクトから共通利用できる `--global` スコープを導入し、各ペインのエージェント自身に自然言語で指示してカレントペイン（`HERDR_PANE_ID`）を登録できるようにする。
    - ローカルとグローバルの両方に同名ロール（例: `調査`）が登録されている場合は、勝手に片方へ送らず停止して**ワークスペース名主体の表示**で人間にどちらへ送るか確認する（`--scope local|global` で明示指定も可能）。
 2. **日本語・自然言語ロール名（カスタムロール名）のサポート**:
-   - 「レビュワー」「調査エージェント」「ログ調査」「todo管理」等の任意の日本語・カスタムロール名の登録・配送を可能にする（固定の同義語辞書による暗黙変換は行わず、NFKC正規化後の登録名そのまま方式）。
+   - 「レビュワー」「調査エージェント」「ログ調査」「チケット管理」等の任意の日本語・カスタムロール名の登録・配送を可能にする（固定の同義語辞書による暗黙変換は行わず、NFKC正規化後の登録名そのまま方式）。
 3. **Requester–Worker 間の同一 worktree 強制の解除と、各自のコンテキスト保護・受信側本人確認**:
    - Requester と Worker が同じ Git worktree に居なければならない制約を廃止し、別ワークスペース・Non-Git フォルダ・複数ワークスペース分割運用・将来の `git worktree` でシームレスにやり取りできるようにする。
    - 一方で、「誤配送されたタスクを元に誤ったエージェントが勝手に作業を開始してしまうこと」を最も重大なリスクと位置づけ、**受信側（Worker の `task-status` / `result-submit` および Requester の `task-result` / `task-status`）で自分宛てかどうか（`pane_id`・`cwd`・ロール整合）を照合し、不一致時は受信側のチャット画面に報告して即座に作業を停止する防御機構**を設ける。
@@ -67,7 +67,7 @@ Issue #72 により、`herdr agent rename` 依存を廃止し `pane_id` を正�
 | **Role Binding のスコープ**            | **ローカル（ワークスペース/リポジトリ単位）** と **グローバル（全ワークスペース共通 `--global`）** の 2 階層をサポート                                                                                                                              |
 | **解決規則と同名ロール衝突時の確認**   | ローカルとグローバルの**片方のみ**に登録されていればそちらを採用。**両方に同じロール名が登録されている場合**は勝手に決めず `worker_role_scope_ambiguous` で停止し、ワークスペース名を提示して人間に確認する（`--scope local\|global` で明示指定可） |
 | **カレントペイン自動登録**             | `herdr-orchestrator role set <role> [<pane_id>] [--pane <pane_id>] [--global]` において、ペイン指定省略時は `HERDR_PANE_ID` を使用                                                                                                                  |
-| **日本語・カスタムロール名**           | 暗黙の同義語変換辞書は持たず、NFKC 正規化・ASCII 小文字化（`unicodedata.normalize("NFKC", val).strip().lower()`）のみを行い、登録された日本語・英数字ロール名（例: `調査`, `レビュワー`, `ログ調査`, `todo管理`）をそのまま保存・照合する           |
+| **日本語・カスタムロール名**           | 暗黙の同義語変換辞書は持たず、NFKC 正規化・ASCII 小文字化（`unicodedata.normalize("NFKC", val).strip().lower()`）のみを行い、登録された日本語・英数字ロール名（例: `調査`, `レビュワー`, `ログ調査`, `チケット管理`）をそのまま保存・照合する       |
 | **Requester–Worker 間の一致強制解除**  | Requester の worktree と Worker の worktree が同一であることを要求しない（クロスワークスペース配送の解禁）。ただし Task Registry には Requester の `context.worktree.path` と Worker の `worker.cwd` をそれぞれ必須記録し、各自の照合は維持する     |
 | **受信側での本人確認とチャット報告**   | 受信側が `task-status` / `task-result` / `result-submit` を実行した際、呼び出し元と Task の関係（`worker` / `requester` / `observer`）に応じて照合する。宛先不一致時は即停止し、**受け取った側のチャット画面に不一致を報告して停止**する            |
 | **Non-Git ディレクトリ対応**           | Git 未初期化ディレクトリでもローカル識別子（`dir_<sha256_16>`）を用いてローカル Role Binding・`handoff`・`result-submit` を実行可能とする                                                                                                           |
@@ -75,7 +75,7 @@ Issue #72 により、`herdr agent rename` 依存を廃止し `pane_id` を正�
 | **ペイン閉鎖・Herdr 全再起動時の追従** | 旧 `pane_id` 消滅時、他ロールにバインド済みのペインを除外した上で、① `agent_session_id` 一致の 1 ペイン、または ② 1 フォルダ 1 ロール構成で `cwd` + `agent` 一致の 1 ペインに特定できるときのみ自動更新して配送（UI ラベルは判定に一切使わない）    |
 | **複数候補・不一致時の動作**           | 候補が 0 個（未起動）、2 個以上（同一ディレクトリの複数ワークスペース展開等）、同一フォルダ複数ロール構成での新ターミナル・新セッション起動、または `cwd` 変更時は送信せず停止し、人間向け識別情報で報告                                            |
 | **Herdr UI ペイン表示名の自動連動**    | `role set` 時の表示名（`display_name`）を `herdr pane rename <pane_id> <display_name>` で Herdr UI 上のペインラベルに反映。**UI ラベルは人間向け表示専用であり、照合や自動追従ロジックには一切含めない**                                            |
-| **人間向けのペイン表現**               | **`ワークスペース #2「todo-mcp」の『TODO管理』（Claude Code / w16:p1）`** のように、人間が画面左サイドバーとヘッダーで見て即座に判別できる**ワークスペース名＋ロール表示名**を主役にした表記に統一する                                              |
+| **人間向けのペイン表現**               | **`ワークスペース #2「tickets-mcp」の『チケット管理』（Claude Code / w16:p1）`** のように、人間が画面左サイドバーとヘッダーで見て即座に判別できる**ワークスペース名＋ロール表示名**を主役にした表記に統一する                                       |
 | **Result 提出の柔軟化**                | 別ワークスペースの専任エージェント等がファイルを作らず回答できるよう、`--result-ref` 省略時は `--summary`（非空）のみでの `result-submit`（`succeeded` / `failed`）を許可                                                                           |
 
 ---
@@ -96,7 +96,7 @@ Issue #72 により、`herdr agent rename` 依存を廃止し `pane_id` を正�
     - `role set 調査` ➔ 正規化キー `"調査"`、`display_name: "調査"`
     - `role set レビュワー` ➔ 正規化キー `"レビュワー"`、`display_name: "レビュワー"`
     - `role set Reviewer` / `role set ＲＥＶＩＥＷＥＲ` ➔ 正規化キー `"reviewer"`
-    - `role set TODO管理 --global` ➔ 正規化キー `"todo管理"`、`display_name: "TODO管理"`
+    - `role set チケット管理 --global` ➔ 正規化キー `"チケット管理"`、`display_name: "チケット管理"`
 - **未登録ロール指定時（`worker_role_not_bound`）の登録済みロール一覧提示**:
   - `handoff` 実行時に指定されたロールがローカル・グローバルのいずれにも登録されていない場合（かつ Pattern A 標準4ロール `design`, `reviewer`, `implementer`, `orchestrator` でもない場合）、エラー JSON に現在登録されているロール名一覧 `available_roles: {"local": [...], "global": [...]}` を含めて返す。これにより、AI エージェントや人間は固定辞書なしで現在有効な登録ロール名を即座に把握できる。
 
@@ -104,7 +104,7 @@ Issue #72 により、`herdr agent rename` 依存を廃止し `pane_id` を正�
 
 ### 3.2 ロール名の許容規則と予約語
 
-標準 4 ロール（`design`, `reviewer`, `implementer`, `orchestrator`、Role Binding 未登録時は Pattern A 命名へフォールバック）以外の任意のロール名（例: `調査`, `レビュワー`, `ログ調査`, `todo`, `todo管理`, `社内ツール` など）は、すべて Role Binding 専用のロール名としてそのまま受け付ける。
+標準 4 ロール（`design`, `reviewer`, `implementer`, `orchestrator`、Role Binding 未登録時は Pattern A 命名へフォールバック）以外の任意のロール名（例: `調査`, `レビュワー`, `ログ調査`, `チケット管理`, `社内ツール` など）は、すべて Role Binding 専用のロール名としてそのまま受け付ける。
 
 - **許容文字と長さ**:
   - NFKC 正規化・前後空白除去・ASCII 小文字化後の文字列長が **1〜32 文字** であること。
@@ -159,7 +159,7 @@ Role Binding は `${XDG_STATE_HOME:-~/.local/state}/herdr-orchestrator/roles/` �
 
 - **`display_name` の決定規則と UI 専用原則（重要）**:
   1. `--label <text>` オプションが明示指定された場合はその文字列（前後空白除去、最大 64 文字、制御文字不可）を使用する。
-  2. 省略された場合は、ユーザーが `role set` に渡したロール引数（例: `role set レビュワー` なら `"レビュワー"`、`role set TODO管理` なら `"TODO管理"`、`role set reviewer` なら `"reviewer"`）をそのまま `display_name` とする。
+  2. 省略された場合は、ユーザーが `role set` に渡したロール引数（例: `role set レビュワー` なら `"レビュワー"`、`role set チケット管理` なら `"チケット管理"`、`role set reviewer` なら `"reviewer"`）をそのまま `display_name` とする。
   3. **【厳守】UI 表示名（`display_name` および Herdr の `pane.label`）は人間向けの視覚的目印・チャット報告専用であり、Worker 解決・生存照合・自動追従の判定ロジックには一切使用しない。**
      - herdr 0.9.5 の `pane rename` は `--` を引数終端として扱わずラベルに含めてしまうため `--` は付けない。設定は `herdr pane rename <pane_id> <display_name>`、クリアは `herdr pane rename <pane_id> --clear` の形式で呼び出す。また、`display_name` は Herdr CLI のオプション引数（`--clear` や `--help` 等）との誤認を防ぐため、先頭の `--` を自動的に除去して設定する（除去後に空文字となる場合は不正な入力として拒否される）。
 
@@ -178,19 +178,19 @@ Role Binding は `${XDG_STATE_HOME:-~/.local/state}/herdr-orchestrator/roles/` �
   "schema_version": 1,
   "repository_id": "global",
   "roles": {
-    "todo管理": "w16:p1",
+    "チケット管理": "w16:p1",
     "ログ調査": "w18:p1"
   },
   "targets": {
-    "todo管理": {
+    "チケット管理": {
       "pane_id": "w16:p1",
-      "display_name": "TODO管理",
-      "cwd": "/home/kadena/todo-mcp-workspace",
+      "display_name": "チケット管理",
+      "cwd": "/home/kadena/tickets-mcp-workspace",
       "agent": "claude",
       "terminal_id": "term_65eef3948ae924",
       "agent_session_id": "e3c4bbdf-1945-47b2-97c4-2505ee886bb2",
       "workspace_id": "w16",
-      "workspace_label": "todo-mcp",
+      "workspace_label": "tickets-mcp",
       "workspace_number": 2,
       "tab_id": "w16:t1",
       "tab_number": 1,
@@ -208,7 +208,7 @@ Role Binding は `${XDG_STATE_HOME:-~/.local/state}/herdr-orchestrator/roles/` �
 | `agent`            | **照合・追従指紋**   | 登録時に稼働していたエージェント種別（`claude`, `agy`, `codex`, `cursor` 等。`HERDR_ENV=1` での `role set` 時は対象ペインでエージェントが起動していることを必須とする） |
 | `terminal_id`      | **照合補助指紋**     | 登録時の `terminal_id`（例: `term_65eef3948ae924`）。※ routing key ではなく「同じターミナル内でエージェントを再起動したか」を判別する指紋                               |
 | `agent_session_id` | **照合・追従指紋**   | 登録時の `agent_session.value`（セッション ID。取得不可時は `null`）。※ routing key ではなくセッション同一性確認の補助指紋                                              |
-| `display_name`     | **人間表示専用**     | Herdr UI ペインラベルおよびチャット報告に表示する人間向け名称（例: `TODO管理`, `ログ調査`, `レビュワー`）                                                               |
+| `display_name`     | **人間表示専用**     | Herdr UI ペインラベルおよびチャット報告に表示する人間向け名称（例: `チケット管理`, `ログ調査`, `レビュワー`）                                                           |
 | `workspace_id`     | **人間表示専用**     | Herdr の `workspace_id`（例: `w16`）                                                                                                                                    |
 | `workspace_label`  | **人間表示専用**     | Herdr UI 左サイドバーに表示されるワークスペース名（例: `staff-portal-system`）                                                                                          |
 | `workspace_number` | **人間表示専用**     | Herdr UI 左サイドバーのワークスペース番号（並び順で変化するため照合には使わず表示のみに使用）                                                                           |
@@ -229,11 +229,11 @@ herdr-orchestrator role set レビュワー
 herdr-orchestrator role set reviewer --label "レビュワー"
 
 # 2. カレントペイン（$HERDR_PANE_ID）をグローバルロールとして登録（UIラベルも「ログ調査」等に設定）
-herdr-orchestrator role set TODO管理 --global
+herdr-orchestrator role set チケット管理 --global
 herdr-orchestrator role set ログ調査 --global
 
 # 3. ペインIDを明示して登録（位置引数または --pane のどちらでも指定可能）
-herdr-orchestrator role set TODO管理 w16:p1 --global
+herdr-orchestrator role set チケット管理 w16:p1 --global
 herdr-orchestrator role set reviewer --pane w15:p2 --label "レビュワー"
 
 # 4. 登録状況の表示（ローカル＋グローバルの両方、およびワークスペース名等のUI位置情報を表示）
@@ -241,7 +241,7 @@ herdr-orchestrator role show
 herdr-orchestrator role show --global
 
 # 5. 登録の解除（UIラベルも --clear で解除）
-herdr-orchestrator role clear TODO管理 --global
+herdr-orchestrator role clear チケット管理 --global
 herdr-orchestrator role clear --all --global
 herdr-orchestrator role clear reviewer
 ```
@@ -388,9 +388,9 @@ CLI が `display_summary` / `display_candidate` をエラー JSON の `target` /
 
 - **例3：登録ペインのフォルダまたは状態が変わっていた場合（`worker_context_changed`）**
 
-  > 「**ワークスペース #2「staff-portal-system」の『TODO管理』（`w16:p1`）** を確認したところ、登録時と状態が変わっています。
+  > 「**ワークスペース #2「staff-portal-system」の『チケット管理』（`w16:p1`）** を確認したところ、登録時と状態が変わっています。
   >
-  > - **登録時の状態**: `/home/kadena/todo-mcp-workspace`（Claude Code）
+  > - **登録時の状態**: `/home/kadena/tickets-mcp-workspace`（Claude Code）
   > - **現在の状態**: `/home/kadena/Gitrepo/staff-portal-system`（Antigravity）
   >
   > このペインにそのまま配送してよいですか？それとも別のペインを指定しますか？」
@@ -455,10 +455,10 @@ Task Registry（`schema_version: 1` 拡張）の `worker` オブジェクトに 
     "pane_id": "w15:p1"
   },
   "worker": {
-    "role": "todo管理",
+    "role": "チケット管理",
     "agent_name": "w16:p1",
     "pane_id": "w16:p1",
-    "cwd": "/home/kadena/todo-mcp-workspace"
+    "cwd": "/home/kadena/tickets-mcp-workspace"
   }
 }
 ```
@@ -560,9 +560,9 @@ Requester の `context.worktree.path` と Worker の `worker.cwd` は異なっ�
 - **同一ワークスペース内のレビュワーペインで**:
   > 「あなたをこのリポジトリの `レビュワー` として登録して」
   > （エージェントが内部で `herdr-orchestrator role set レビュワー` を実行）
-- **別ワークスペースの社内ツール（TODO 管理）専任ペインで**:
-  > 「あなたをグローバルの `TODO管理` ロールとして登録して」
-  > （エージェントが内部で `herdr-orchestrator role set TODO管理 --global` を実行）
+- **別ワークスペースの社内ツール（チケット管理）専任ペインで**:
+  > 「あなたをグローバルの `チケット管理` ロールとして登録して」
+  > （エージェントが内部で `herdr-orchestrator role set チケット管理 --global` を実行）
 - **Git 無しの一時調査フォルダのペインで**:
   > 「あなたをグローバルの `ログ調査` として登録して」
   > （エージェントが内部で `herdr-orchestrator role set ログ調査 --global` を実行）
@@ -574,28 +574,28 @@ Requester の `context.worktree.path` と Worker の `worker.cwd` は異なっ�
 プロジェクト A（または B, C）のペインから、以下のように依頼できる：
 
 - **人間からエージェントへの指示**:
-  > 「`TODO管理` エージェントに、このプロジェクトの未完了タスク一覧を確認してもらって」
+  > 「`チケット管理` エージェントに、このプロジェクトの未完了タスク一覧を確認してもらって」
   > 「`ログ調査` エージェントに、エラーログの原因を調査してもらって」
 - **エージェントが実行する CLI**:
 
   ```bash
   herdr-orchestrator handoff \
     --mode sync \
-    --to TODO管理 \
+    --to チケット管理 \
     --type research \
-    --instruction "プロジェクトAの未完了TODO一覧を取得して報告してください"
+    --instruction "プロジェクトAの未完了チケット一覧を取得して報告してください"
   ```
 
 <a id="sec-8-3"></a>
 
 ### 8.3 専任エージェント側での結果返却（ファイル作成不要）
 
-依頼を受け取った `TODO管理` ペインのエージェントは、MCP ツール等で処理を行った後、ファイルを作らず `--summary` だけで結果を返せる：
+依頼を受け取った `チケット管理` ペインのエージェントは、MCP ツール等で処理を行った後、ファイルを作らず `--summary` だけで結果を返せる：
 
 ```bash
 herdr-orchestrator result-submit task_xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx \
   --result-status succeeded \
-  --summary "未完了TODOは2件です: 1. ログイン画面修正, 2. APIテスト追加"
+  --summary "未完了チケットは2件です: 1. ログイン画面修正, 2. APIテスト追加"
 ```
 
 ---
@@ -644,7 +644,7 @@ herdr-orchestrator result-submit task_xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx \
 
 | ID     | テスト項目                                                                     | 期待される動作                                                                                                                                                                                                                                                                                          |
 | ------ | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| CW-01  | カレントペイン省略でのローカル・グローバル登録と UI ラベル連動                 | `role set レビュワー` / `role set TODO管理 --global` で `$HERDR_PANE_ID`・指紋（`terminal_id` 含む）・`display_name` が保存され `pane rename` が呼ばれる                                                                                                                                                |
+| CW-01  | カレントペイン省略でのローカル・グローバル登録と UI ラベル連動                 | `role set レビュワー` / `role set チケット管理 --global` で `$HERDR_PANE_ID`・指紋（`terminal_id` 含む）・`display_name` が保存され `pane rename` が呼ばれる                                                                                                                                            |
 | CW-02  | 日本語ロール名の登録と NFKC・小文字化正規化                                    | `レビュワー` がそのまま `レビュワー` として保存され、`ＴＯＤＯ管理` が NFKC・小文字化により `todo管理` として登録・解決される                                                                                                                                                                           |
 | CW-03  | ローカルとグローバルの片方登録時の解決と、両方同名登録時の確認停止             | 片方のみならそちらが解決され、両方に同名ロール（例: `調査`）がある場合は `worker_role_scope_ambiguous`（ワークスペース名付き）で停止し `--scope` で解決できる                                                                                                                                           |
 | CW-04  | 別ワークスペース・Non-Git フォルダへの `handoff`（未バインド依頼元含む）       | 未バインドの依頼元（`requester.role = "unbound"`）や Non-Git フォルダから別ワークスペースの Worker へ正常に `handoff` でき、`worker.cwd` が記録される                                                                                                                                                   |

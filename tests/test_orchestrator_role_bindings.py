@@ -771,8 +771,8 @@ raise SystemExit(99)
         self.assertEqual(prompts[-1].split("|")[0], "w17:p1")
 
     def test_cw04_cw05_cross_workspace_and_nongit_handoff_and_summary_only_submit(self) -> None:
-        # CW-04 & CW-05: Unbound requester in Non-Git directory (w17:p1) sends handoff to global TODO role (w16:p1)
-        _run_cli("role", "set", "TODO管理", "w16:p1", "--global", env=self.env, cwd=self.todo_dir)
+        # CW-04 & CW-05: Unbound requester in Non-Git directory (w17:p1) sends handoff to global ticket role (w16:p1)
+        _run_cli("role", "set", "チケット管理", "w16:p1", "--global", env=self.env, cwd=self.todo_dir)
 
         nogit_env = {**self.env, "HERDR_PANE_ID": "w17:p1"}
         res_h = _run_cli(
@@ -780,9 +780,9 @@ raise SystemExit(99)
             "--mode",
             "async",
             "--to",
-            "TODO管理",
+            "チケット管理",
             "--instruction",
-            "add todo item",
+            "add ticket item",
             env=nogit_env,
             cwd=self.nogit_dir,
         )
@@ -846,7 +846,7 @@ raise SystemExit(99)
 
     def test_cw07_auto_tracking_on_pane_close_or_restart(self) -> None:
         # CW-07 Condition A (session match) & Condition B (1-folder 1-role single cwd+agent match)
-        _run_cli("role", "set", "TODO管理", "w16:p1", "--global", env=self.env, cwd=self.todo_dir)
+        _run_cli("role", "set", "チケット管理", "w16:p1", "--global", env=self.env, cwd=self.todo_dir)
 
         # Simulate Herdr restart: w16:p1 is gone, replaced by w22:p1 with a new session in todo_dir (Condition B)
         state = json.loads(self.herdr_state_file.read_text(encoding="utf-8"))
@@ -862,7 +862,7 @@ raise SystemExit(99)
             "--mode",
             "async",
             "--to",
-            "TODO管理",
+            "チケット管理",
             "--instruction",
             "track to w22:p1",
             env=self.env,
@@ -874,10 +874,10 @@ raise SystemExit(99)
 
         # Verify global.json was updated to w22:p1
         show_res = _run_cli("role", "show", "--global", env=self.env, cwd=self.repo_a)
-        self.assertEqual(json.loads(show_res.stdout)["roles"]["todo管理"], "w22:p1")
+        self.assertEqual(json.loads(show_res.stdout)["roles"]["チケット管理"], "w22:p1")
 
     def test_cw08_cw09_cw10_stop_on_ambiguous_candidates_cwd_change_or_shell_state(self) -> None:
-        _run_cli("role", "set", "TODO管理", "w16:p1", "--global", env=self.env, cwd=self.todo_dir)
+        _run_cli("role", "set", "チケット管理", "w16:p1", "--global", env=self.env, cwd=self.todo_dir)
 
         # CW-10: Agent exited to shell (agent=None, agent_status="none") -> worker_agent_not_running
         state = json.loads(self.herdr_state_file.read_text(encoding="utf-8"))
@@ -888,7 +888,7 @@ raise SystemExit(99)
         self._update_panes(state["panes"])
 
         res_shell = _run_cli(
-            "handoff", "--mode", "async", "--to", "TODO管理", "--instruction", "x", env=self.env, cwd=self.repo_a
+            "handoff", "--mode", "async", "--to", "チケット管理", "--instruction", "x", env=self.env, cwd=self.repo_a
         )
         self.assertEqual(res_shell.returncode, 1)
         self.assertEqual(json.loads(res_shell.stdout)["error"], "worker_agent_not_running")
@@ -902,7 +902,7 @@ raise SystemExit(99)
         self._update_panes(state["panes"])
 
         res_cwd = _run_cli(
-            "handoff", "--mode", "async", "--to", "TODO管理", "--instruction", "x", env=self.env, cwd=self.repo_a
+            "handoff", "--mode", "async", "--to", "チケット管理", "--instruction", "x", env=self.env, cwd=self.repo_a
         )
         self.assertEqual(res_cwd.returncode, 1)
         self.assertEqual(json.loads(res_cwd.stdout)["error"], "worker_context_changed")
@@ -933,7 +933,7 @@ raise SystemExit(99)
         self._update_panes(state["panes"])
 
         res_amb = _run_cli(
-            "handoff", "--mode", "async", "--to", "TODO管理", "--instruction", "x", env=self.env, cwd=self.repo_a
+            "handoff", "--mode", "async", "--to", "チケット管理", "--instruction", "x", env=self.env, cwd=self.repo_a
         )
         self.assertEqual(res_amb.returncode, 1)
         err_amb = json.loads(res_amb.stdout)
