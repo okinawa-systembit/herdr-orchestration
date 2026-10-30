@@ -54,6 +54,9 @@ def create_task(payload: dict[str, Any]) -> dict[str, Any]:
     task_in = payload["task"]
     mode = task_in["mode"]
     completion_action = payload["completion"]["action"]
+    worker_doc = copy.deepcopy(payload["worker"])
+    if not worker_doc.get("cwd"):
+        worker_doc["cwd"] = str(Path(payload["context"]["worktree"]["path"]).resolve())
     doc: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "task": {
@@ -65,7 +68,7 @@ def create_task(payload: dict[str, Any]) -> dict[str, Any]:
         },
         "context": copy.deepcopy(payload["context"]),
         "requester": copy.deepcopy(payload["requester"]),
-        "worker": copy.deepcopy(payload["worker"]),
+        "worker": worker_doc,
         "dispatch": {
             "status": "pending",
             "reason": None,
@@ -146,7 +149,7 @@ def repair_missing_prompt_started_at(task_id: str) -> dict[str, Any]:
 
 
 def assert_handoff_continuable(task_id: str) -> dict[str, Any]:
-    from orchestrator.live_agent import LiveAgentError, verify_live_agent_context
+    from orchestrator.live_agent import LiveAgentError, verify_live_party_cwd
 
     def verify_registry_state(doc: dict[str, Any]) -> dict[str, Any]:
         task = doc["task"]
@@ -163,11 +166,14 @@ def assert_handoff_continuable(task_id: str) -> dict[str, Any]:
 
     doc = io.mutate_task(task_id, verify_registry_state)
     worker_name = doc["worker"]["agent_name"]
+    worktree_path = Path(doc["context"]["worktree"]["path"])
+    worker_cwd = Path(doc["worker"].get("cwd") or worktree_path)
     try:
-        verify_live_agent_context(
+        verify_live_party_cwd(
             worker_name,
-            expected_worktree_path=Path(doc["context"]["worktree"]["path"]),
-            expected_repository_identity=doc["context"]["repository"]["identity"],
+            expected_cwd=worker_cwd,
+            worktree_path=worktree_path,
+            repository_identity=doc["context"]["repository"]["identity"],
             require_promptable=True,
         )
     except LiveAgentError as exc:
@@ -299,9 +305,19 @@ def update_result(
             if result_ref is not None:
                 raise RegistryError("invalid_input", message="unavailable result must have ref=null")
         else:
-            if result_ref is None:
-                raise RegistryError("invalid_input", message="result.ref required")
-            require_result_artifact(worktree, result_ref)
+            if result_ref is not None:
+                require_result_artifact(worktree, result_ref)
+            else:
+                if not isinstance(summary, str) or not summary.strip():
+                    raise RegistryError(
+                        "invalid_input",
+                        message="result.ref or non-empty summary is required for succeeded/failed result",
+                    )
+                if len(summary) > 2000:
+                    raise RegistryError(
+                        "invalid_input",
+                        message="summary exceeds maximum length of 2000 characters",
+                    )
 
         out = copy.deepcopy(doc)
         out["result"]["status"] = result_status

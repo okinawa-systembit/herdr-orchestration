@@ -37,34 +37,34 @@ Repository Identity の生成方式を、Git のリモート URL 依存から UU
 3. リポジトリのディレクトリ名やパスに依存しない。
 4. 人間による手動初期化と、依頼元エージェントによる自動初期化の両方に対応する。
 5. 将来的な `git worktree` 利用時にも、同じ Git リポジトリで UUID を共有できる。
-6. Git 未初期化ディレクトリでは処理を停止し、人間にチャットで報告する。
+6. Git 未初期化ディレクトリでは、`identity` コマンドおよび Role Binding 未登録（Pattern A フォールバック）での handoff 処理を停止し、人間にチャットで報告する（※ Role Binding で明示登録されたロールへの handoff / `role` 操作については、[クロスワークスペース設計書 §4.1](herdr-orchestrator-cross-workspace.md#sec-4-1) のディレクトリスコープ `dir_<hash16>` により Non-Git ディレクトリでも利用可能）。
 
 ---
 
 ## 2. 基本設計方針
 
-| 項目                     | 設計方針                                                                             |
-| ------------------------ | ------------------------------------------------------------------------------------ |
-| Repository Identity      | UUID v4 に統一                                                                       |
-| UUID の必須性            | すべての Git リポジトリで必須                                                        |
-| UUID 生成タイミング      | 手動初期化時、または初回 handoff 時                                                  |
-| UUID 生成主体            | Orchestrator の共通関数                                                              |
-| UUID 保存先              | 共通 Git ディレクトリ配下の `config` ファイル（`<git-common-dir>/config`）           |
-| Git config キー          | `herdr.repository-id`                                                                |
-| 既存 UUID                | 再利用し、変更しない                                                                 |
-| UUID 形式不正            | エラーとして停止                                                                     |
-| UUID 自動再生成          | 禁止                                                                                 |
-| 保存失敗時の動作         | handoff を中止。次回実行時は有効な保存済み UUID があれば再利用し、安易に再生成しない |
-| origin URL               | Repository Identity の生成・照合に使用しない                                         |
-| ディレクトリ名           | UUID 生成・Agent 名生成に使用しない                                                  |
-| Agent 命名規則           | パターン A `r-<hash16>-<role>` に正式確定（パス・ディレクトリ名・URL 完全非依存）    |
-| Git 未初期化             | フォールバックせず停止（CLI 専用エラー `git_repository_not_initialized` 返却）       |
-| Git 未初期化時の報告     | 依頼元エージェント / Skill がチャットで報告                                          |
-| Git 自動初期化           | 禁止                                                                                 |
-| 同時初期化               | 共通 Git ディレクトリ単位で排他制御                                                  |
-| git worktree             | 同一 Git リポジトリ（共通 Git ディレクトリ）で UUID を共有                           |
-| `config.worktree` の影響 | 共通 config ファイルを明示指定して読み書きするため、影響を受けない                   |
-| 旧 origin 方式との互換性 | 維持しない                                                                           |
+| 項目                     | 設計方針                                                                                                                                                                                       |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Repository Identity      | UUID v4 に統一                                                                                                                                                                                 |
+| UUID の必須性            | すべての Git リポジトリで必須                                                                                                                                                                  |
+| UUID 生成タイミング      | 手動初期化時、または初回 handoff 時                                                                                                                                                            |
+| UUID 生成主体            | Orchestrator の共通関数                                                                                                                                                                        |
+| UUID 保存先              | 共通 Git ディレクトリ配下の `config` ファイル（`<git-common-dir>/config`）                                                                                                                     |
+| Git config キー          | `herdr.repository-id`                                                                                                                                                                          |
+| 既存 UUID                | 再利用し、変更しない                                                                                                                                                                           |
+| UUID 形式不正            | エラーとして停止                                                                                                                                                                               |
+| UUID 自動再生成          | 禁止                                                                                                                                                                                           |
+| 保存失敗時の動作         | handoff を中止。次回実行時は有効な保存済み UUID があれば再利用し、安易に再生成しない                                                                                                           |
+| origin URL               | Repository Identity の生成・照合に使用しない                                                                                                                                                   |
+| ディレクトリ名           | UUID 生成・Agent 名生成に使用しない                                                                                                                                                            |
+| Agent 命名規則           | パターン A `r-<hash16>-<role>` に正式確定（パス・ディレクトリ名・URL 完全非依存）                                                                                                              |
+| Git 未初期化             | `identity` および未バインド Pattern A ロールへの handoff はフォールバックせず停止（CLI 専用エラー `git_repository_not_initialized` 返却。Role Binding 明示登録ロールは `dir_<hash16>` で動作） |
+| Git 未初期化時の報告     | 依頼元エージェント / Skill がチャットで報告                                                                                                                                                    |
+| Git 自動初期化           | 禁止                                                                                                                                                                                           |
+| 同時初期化               | 共通 Git ディレクトリ単位で排他制御                                                                                                                                                            |
+| git worktree             | 同一 Git リポジトリ（共通 Git ディレクトリ）で UUID を共有                                                                                                                                     |
+| `config.worktree` の影響 | 共通 config ファイルを明示指定して読み書きするため、影響を受けない                                                                                                                             |
+| 旧 origin 方式との互換性 | 維持しない                                                                                                                                                                                     |
 
 ### 2.1 UUID の利用範囲
 
@@ -414,7 +414,7 @@ worker 側では UUID を自動生成しない。
 
 ### 7.1 基本方針
 
-Git リポジトリとして初期化されていないディレクトリでは、Orchestrator による handoff を禁止する。
+Git リポジトリとして初期化されていないディレクトリでは、`identity` コマンドによる Repository Identity UUID 発行および Role Binding 未登録ロール（Pattern A `r-<hash16>-<role>`）への handoff を禁止する（※ `herdr-orchestrator role set` で明示的に Role Binding 登録されたローカル `dir_<hash16>` / グローバル `global` ロールへの handoff は [クロスワークスペース設計書 §4.1](herdr-orchestrator-cross-workspace.md#sec-4-1) に従い許可される）。
 
 Issue #50 起票時に検討された旧フォールバック案（ディレクトリ名による識別）は、本設計の Git 共通 config への UUID 保存方式によって完全に置き換えられた。したがって、Git 未初期化ディレクトリに対する代替フォールバックは一切実装しない：
 

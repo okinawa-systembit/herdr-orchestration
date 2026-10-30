@@ -4,12 +4,13 @@
 
 Herdr 上の live 名は環境依存。logical role は handoff の `reviewer` / requester pane。
 
-| 論理 role               | 例（この workspace）       | 備考                              |
-| ----------------------- | -------------------------- | --------------------------------- |
-| requester / implementer | `${HERDR_WORKSPACE_ID}:p1` | handoff 実行 pane                 |
-| reviewer worker         | `${HERDR_WORKSPACE_ID}:p2` | `--worker-role reviewer` の解決先 |
+| 論理 role               | 例（この workspace）       | 備考                                                               |
+| ----------------------- | -------------------------- | ------------------------------------------------------------------ |
+| requester / implementer | `${HERDR_WORKSPACE_ID}:p1` | handoff 実行 pane                                                  |
+| reviewer worker         | `${HERDR_WORKSPACE_ID}:p2` | `--worker-role reviewer`（または登録したカスタムロール名）の解決先 |
 
 `herdr agent list`（および `herdr-orchestrator role show`）で pane と role の紐づけを確認。Registry の `worker.agent_name`（Role Binding 利用時は `pane_id` が格納済み）と reviewer 自身の `HERDR_PANE_ID`（`pane_id`）または live `agent.name` が一致すること（§11.4）。
+※ 本リポジトリのレビュー連携では標準ロール名 `reviewer`（UI 表示は `--label "レビュワー"`）での登録を推奨。日本語ロール名（例: `レビュワー`）で登録している環境では handoff 時に `--to レビュワー` を指定する。
 
 - **GitHub 操作権限とコメント投稿条件**:
   - **コメント投稿条件**: 内部レビューはローカル完結を基本とし、依頼元から明示的に指示された場合（request や instruction での指定）に限り、対象 Finding Issue へレビュー結果をコメント投稿（`gh issue comment`）する。投稿前に Issue 番号・リポジトリ・対象 SHA を確認し、レビューGO を「解決完了」と表現しない。API エラー時はレビュー自体を失敗とせず警告として扱う。

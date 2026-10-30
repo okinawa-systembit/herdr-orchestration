@@ -163,7 +163,7 @@ sync 動作確認後、async を検証する。sync handoff についても同�
 19. durable result が保存される。
 20. `result.ref` が Task Registry に記録される。
 21. `result.ref` の絶対 path、`../`、`context.worktree.path` 外 symlink を拒否する。
-    21a. `result.status ∈ {succeeded, failed}` で `result.ref=null` または artifact 不存在の submit を拒否する（[§10](06-results-and-workflows.md#sec-10)）。
+    21a. `result.status ∈ {succeeded, failed}` で `result.ref` と `result.summary` の両方が空（null）、または `result.ref` 指定時に artifact が存在しない submit を拒否し、非空 `result.summary`（2000文字以内）単独での submit を受理する（[§10](06-results-and-workflows.md#sec-10)）。
     21b. `result.status=unavailable` で `result.ref≠null` の submit を拒否する。
 22. `task.id` だけから Task Registry を検索し、安全に成果物へ到達できる。
 23. `completion.action = resume_requester` が動作する。
@@ -273,6 +273,8 @@ sync 動作確認後、async を検証する。sync handoff についても同�
 123. path が同形でも host が異なる URL（例: `github.com/org/repo` と `gitlab.com/org/repo`）は **異なる** canonical identity になる。
 124. remote URL の hostname が大文字を含む場合（例: `https://GitHub.com/org/repo`）、canonical identity の host は **小文字**（`github.com/org/repo`）になる。
 125. remote URL の path 部分の大文字小文字は **保持**され、`Org/Repo` と `org/repo` は **異なる** canonical identity になる（同一 host でも path 大小文字のみの差は別 repository として扱う）。
+
+126. Role Binding（ローカルおよび `--global`、日本語・カスタムロール名含む）において、旧形式（`targets` 指紋なし）は `role_binding_outdated` で配送前に停止し、ローカルとグローバルの同名ロール重複時は `worker_role_scope_ambiguous`（ワークスペース名表示付き）で停止すること。また、同一ペインでのエージェント再起動やペイン閉鎖後の単一候補自動追従が [クロスワークスペース設計書 §5.2](../herdr-orchestrator-cross-workspace.md#sec-5-2) の条件どおりに動作し、受信側 `task-status` / `task-result` の `recipient_verification` により宛先不一致時に即時停止できること。
 
 <a id="sec-19"></a>
 

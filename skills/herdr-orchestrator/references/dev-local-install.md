@@ -75,6 +75,9 @@ herdr-orchestrator doctor
 which herdr-orchestrator   # 例: ~/.local/bin/herdr-orchestrator
 ```
 
+- **旧バージョン（v0.3.1 以前）からの更新時の注意**:
+  - `targets` 指紋を持たない旧形式の Role Binding ファイルが残っている場合、`herdr-orchestrator doctor` や `role show` で `outdated` として表示され、そのまま `handoff` を実行すると配送前に `role_binding_outdated` で停止する。更新後は対象ペイン（`HERDR_ENV=1`）で `herdr-orchestrator role set <role> [<pane_id>]` を再実行して指紋付きの新形式に更新すること。
+
 `~/.local/bin` が PATH に無い場合のみ:
 
 ```bash

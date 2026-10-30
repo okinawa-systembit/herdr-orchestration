@@ -108,7 +108,7 @@ requester Agent を自動的に再開する。
 - 大規模な要件・設計調査（worker: `design`）
 - worker 完了後に requester が後続処理を継続する workflow
 
-専任 `tester` / `researcher` は初期標準外のため、上記の worker role にマッピングする（[§4](02-roles-and-task-contract.md#sec-4)）。
+Role Binding により登録された日本語・カスタムロール（`調査`, `todo管理` 等）の非同期委譲でも同様に `resume_requester` を利用できる（[§4](02-roles-and-task-contract.md#sec-4)、[クロスワークスペース設計書](../herdr-orchestrator-cross-workspace.md)）。
 
 再開手順:
 
@@ -116,7 +116,7 @@ requester Agent を自動的に再開する。
 1. completion.status を pending -> processing へ claim
 2. Task Registry に保存された requester.agent_name（Role Binding 利用時は pane_id）を現在の live agent から再解決（現在の Role Binding は参照しない）
 3. 見つからなければ completion.status = skipped / reason = requester_unavailable（別 pane や別名へ自動 fallback しない）
-4. repository identity / worktree path、および workflow が要求する branch / commit を Task Registry の期待値と照合
+4. repository identity / worktree path（Non-Git ディレクトリの場合は実パス一致、[クロスワークスペース設計書 §4.1](../herdr-orchestrator-cross-workspace.md#sec-4-1)）、および workflow が要求する branch / commit を Task Registry の期待値と照合
 5. context が不一致・確認不能・曖昧なら completion.status = skipped / reason = requester_context_mismatch
 6. **prompt 直前**に手順 2–5 を live 観測で再実行する（[§11.4](06-results-and-workflows.md#sec-11-4) TOCTOU。再確認のみでは安全を保証しない）
 7. requester state が idle / done の場合のみ Agent へ入力して再開（working / blocked / unknown は 8 へ）

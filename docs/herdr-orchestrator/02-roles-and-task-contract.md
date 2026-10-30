@@ -19,9 +19,11 @@
 
 論理 role は担当する作業を表し、Herdr の `agent.name` そのものではない。4つの role は4つの live Agent の常駐、固定の handoff 順序、人間と `design` だけが対話する運用を要求しない。タスクごとの requester / worker 関係と sync / async の選択は [§7](04-handoff-and-requester.md#sec-7) に従う。
 
-`orchestrator` は委譲や進行確認を担当できる Agent の role であり、Task Registry の状態遷移を実行する `herdr-orchestrator` CLI とは別である。Agent は Registry を直接編集しない。`tester` / `researcher` は初期標準の role には含めず、専任の委譲先が必要になった場合に追加する。
+`orchestrator` は委譲や進行確認を担当できる Agent の role であり、Task Registry の状態遷移を実行する `herdr-orchestrator` CLI とは別である。Agent は Registry を直接編集しない。
 
-専任 role 追加前の委譲先は次に統一する。
+上記の初期標準 4 role は Pattern A（`r-<hash16>-<role>`）命名フォールバックの対象である。これに加え、[§4.1](#sec-4-1) の Role Binding（ローカルまたは `--global`）では、任意の日本語・カスタムロール名（例: `調査`, `レビュワー`, `実装者`, `ログ調査`, `todo管理`, `tester`, `researcher` 等。システム予約値 `"unbound"` を除く）を登録・委譲先として指定できる（詳細は [クロスワークスペース設計書 §3](../herdr-orchestrator-cross-workspace.md#sec-3)）。
+
+専任のカスタムロールを Role Binding で登録していない環境では、標準 4 role への委譲先は次に統一する。
 
 | 依頼の種類（例）           | worker logical role                                           |
 | -------------------------- | ------------------------------------------------------------- |
@@ -30,7 +32,7 @@
 | 要件整理・設計判断・調査   | `design`                                                      |
 | 委譲・進行確認（作業本体） | 該当 worker を [§7](04-handoff-and-requester.md#sec-7) で明示 |
 
-「テスト依頼」「調査依頼」等の自然言語 handoff も、repository Skill / orchestrator が上表に従い worker role を決定する。`tester` / `researcher` への委譲は [§24](09-maintenance-and-roadmap.md#sec-24) の将来拡張まで設計・例示・動作確認から除外する。
+Role Binding で専任ロール（`調査` や `tester` 等）が登録されている場合はその登録ロール名へ直接 handoff し、未登録の場合は repository Skill / orchestrator が上表に従い標準 4 role を決定する（複数 worker への並列 fan-out と結果集約は [§24](09-maintenance-and-roadmap.md#sec-24) の将来拡張とする）。
 
 <a id="sec-4-1"></a>
 
@@ -42,9 +44,9 @@ Herdr 公式 Skill の仕様上、エージェント操作コマンド（`herdr 
 
 そのため、`herdr-orchestrator` では **Role Binding（リポジトリごとの論理 role と `pane_id` の 1対1 マッピング）** を標準のルーティング解決手段とし、`herdr agent rename` によるエージェント名変更を不要とする。
 
-- 保存先: `${XDG_STATE_HOME:-$HOME/.local/state}/herdr-orchestrator/roles/<repository_id>.json`
-- 操作 CLI: `herdr-orchestrator role set <role> [--pane <pane_id>]`、`herdr-orchestrator role show`、`herdr-orchestrator role clear [<role>|--all]`
-- **解決タイミングと不変性**: Role Binding を参照するのは **`handoff` 開始時の初期解決のみ** とする。Role Binding が登録されている場合、Orchestrator は `handoff` 時点で対象 role の `pane_id` を routing locator として解決し、Task Registry の `requester.agent_name`（および `requester.pane_id`）と `worker.agent_name`（および `worker.pane_id`）にその `pane_id` を保存する。後続の段階（`assert-handoff-continuable`、`result-submit` の [§10.3](06-results-and-workflows.md#sec-10-3) 提出元検証、`reconcile-dispatch`、`resume_requester` 等の completion）はすべて **Task Registry に保存された locator（`requester.agent_name` / `worker.agent_name`）のみ** を参照し、実行途中の Role Binding 再設定（`role set`）によって in-flight task の宛先や照合先が別ペインへ切り替わることはない。
+- 保存先: `${XDG_STATE_HOME:-$HOME/.local/state}/herdr-orchestrator/roles/<repository_id>.json`（ローカル: Git `<uuid>.json` または Non-Git `dir_<hash16>.json`）および `global.json`（グローバル共通ロール。詳細は [ワークスペース跨ぎ配送・グローバルロール・日本語ロール名・ペイン自動追従 設計書](../herdr-orchestrator-cross-workspace.md)）
+- 操作 CLI: `herdr-orchestrator role set <role> [<pane_id>] [--pane <pane_id>] [--label <display_name>] [--global]`、`herdr-orchestrator role show [--global]`、`herdr-orchestrator role clear [<role>|--all] [--global]`（ライブペイン指紋を取得する `role set` は `HERDR_ENV=1` 必須、`role show` / `role clear` はセッション外からも実行可。NFKC・小文字化によるロール名正規化・カスタムロール名・`herdr pane rename` による UI ラベル自動連動・指紋メタデータ `targets` の保存と旧形式 `role_binding_outdated` 検出については [クロスワークスペース設計書 §3](../herdr-orchestrator-cross-workspace.md#sec-3) を正本とする）
+- **解決タイミングと不変性**: Role Binding を参照するのは **`handoff` 開始時の初期解決のみ** とする（同一ペインでのエージェント再起動時の透過配送、およびペイン閉鎖・Herdr 全再起動時の単一候補自動追従の条件は [クロスワークスペース設計書 §5.2](../herdr-orchestrator-cross-workspace.md#sec-5-2) に従う）。Role Binding が登録されている場合、Orchestrator は `handoff` 時点で対象 role の `pane_id` を routing locator として解決し、Task Registry の `requester.agent_name`（および `requester.pane_id`）と `worker.agent_name`（および `worker.pane_id`、`worker.cwd`）に保存する。後続の段階（`assert-handoff-continuable`、`result-submit` の [§10.3](06-results-and-workflows.md#sec-10-3) 提出元検証、`reconcile-dispatch`、`resume_requester` 等の completion）はすべて **Task Registry に保存された locator（`requester.agent_name` / `worker.agent_name`）のみ** を参照し、実行途中の Role Binding 再設定（`role set`）によって in-flight task の宛先や照合先が別ペインへ切り替わることはない。
 - **受け入れるリスクと安全対策（Fail Closed）**:
   - 同一ペイン内でのエージェント終了・別 occupant 起動、または `herdr pane move` による新しい `pane_id` の採番、あるいはサーバー再起動時にレイアウト復元で `pane_id` が維持されない場合があり得る。これらに対しては、handoff・`result-submit`・completion の各段階で必ず `foreground_cwd` からの worktree root および `repository_identity` 照合（[§11.0](06-results-and-workflows.md#sec-11-0)）と受信側 Registry 検証（[§11.4](06-results-and-workflows.md#sec-11-4)）を実施し、対象不在または別 worktree / 別リポジトリによる context 不一致時は別ペインへ自動 fallback せず安全停止（`worker_unavailable` / `requester_unavailable` / `requester_context_mismatch`）する。なお、同一 worktree 内で複数ペインの担当 role（例: `implementer` と `reviewer` のペイン）を入れ替えた場合は worktree 照合だけでは区別できないため、ペイン配置変更時や再起動後は運用上 `herdr-orchestrator role show` / `role set` でバインディングを確認・更新する。
   - Role Binding は `repository_id`（UUID）単位で共有されるため（Pattern A 命名と同様、「同一リポジトリ内では 1 role につき 1 エージェント稼働」が基本前提）、同一リポジトリの複数 worktree を別ペインで切り替えて運用する場合は、作業対象 worktree のペインに対して `role set` を更新して使用する（別 worktree のペインがバインドされたままの場合は [§11.0](06-results-and-workflows.md#sec-11-0) の `worktree.path` 照合により誤配送が防止される）。

@@ -1,9 +1,18 @@
 ---
 name: herdr-orchestration
 description: >-
-  Central Herdr orchestration Skill (Task Registry, role routing, handoff). Operate
-  via the herdr-orchestrator CLI. Distinct from the official herdr Skill. Not the
-  simple two-agent inbox prototype.
+  Central Herdr orchestration Skill (Task Registry, role routing, handoff).
+  Use when the user instructs to delegate, hand off, or request tasks to other roles/panes via Herdr
+  (e.g., 「herdr経由」「herdrで」「ハーダーで」「herdrオーケストラ経由で」
+  「レビュー依頼をして」「〜に依頼して」「〜に頼んで」「委託して」).
+  IMPORTANT: When the user asks to "依頼して" (request/delegate to another role), DO NOT perform
+  the task (such as code review or investigation) yourself in the current pane;
+  always hand it off to the target role via herdr-orchestrator.
+  NOTE: If the user explicitly asks for official Herdr commands/behavior
+  (e.g., 「herdr公式で」「公式Herdrで」), DO NOT use this skill; instead read the
+  official Herdr skill installed globally (e.g., ~/.agents/skills/herdr/SKILL.md).
+  If the user specifically asks for the official documentation (e.g., 「公式ドキュメントで」
+  「herdrのドキュメントで」), also read the official documentation at https://herdr.dev/llms.txt.
 ---
 
 # herdr-orchestration（中央 Skill）
@@ -12,9 +21,20 @@ description: >-
 
 ## Agent の原則
 
-- Herdr 操作は **herdr** 公式 Skill の意味論に従う。
-- Registry 更新は **`herdr-orchestrator` public CLI** 経由のみ（JSON 直接編集禁止）。
-- `HERDR_ENV=1` の pane 以外では handoff 等を実行しない。
+- **発動条件とセルフ作業の禁止**:
+  - ユーザーから「herdr経由」「herdrで」「ハーダーで」「herdrオーケストラ経由で」が指定された場合、またはHerdr環境下の登録ロール宛てに「レビュー依頼をして」「〜に依頼して」「〜に頼んで」「委託して」と指示された場合は本スキルを発動する。
+  - **他者への委託（「依頼をして」等）を指示された場合、現在の自ペインでその作業（コードレビューや調査・実装など）を直接セルフ実行することは厳禁**。必ず本スキルの `herdr-orchestrator handoff` を使って対象 Worker ロールへ委託すること。
+- **委託時の登録ロール柔軟マッチングと曖昧時の人間確認**:
+  - `handoff` を実行する前に、必ず **`herdr-orchestrator role show`** を実行して現在有効な登録ロール一覧を確認する。
+  - ユーザーの指示語（例: 「レビュー依頼」「調査依頼」「ログ調べて」）に対し、登録一覧の中から最も意味の合致する登録ロール名（例: `レビュワー`、`reviewer`、`調査担当`、`ログ調査`）を AI が判断して `--to <role>` または `--worker-role <role>` に指定する（完全一致で安全に届かせる）。
+  - **曖昧時の人間確認**: 指示語と完全一致するロールがなく、かつ意味的に合致する候補が 0 件または 2 件以上ある場合は、AI の独断で handoff せず、`role show` の一覧を示して人間に宛先を確認すること。
+- **公式 Herdr / 公式ドキュメント指定時の切り替え**:
+  - ユーザー指示に「herdr公式で」「公式Herdrで」など「公式」が含まれる場合は、本 Orchestrator CLI は使わず、グローバルにインストールされている公式 **herdr** Skill（`~/.agents/skills/herdr/SKILL.md` 等）を読み込んで raw の Herdr 操作を行う。
+  - 「公式ドキュメントで」「herdrのドキュメントで」などドキュメント自体が明示された場合は、公式 LLM ドキュメント（[https://herdr.dev/llms.txt](https://herdr.dev/llms.txt)）を追加で参照して回答・対応する。
+- **CLI 経由の厳守**:
+  - Herdr 操作は **herdr** 公式 Skill の意味論に従う。
+  - Registry 更新は **`herdr-orchestrator` public CLI** 経由のみ（JSON 直接編集禁止）。
+  - `HERDR_ENV=1` の pane 以外では handoff 等を実行しない。
 
 ## Public CLI
 

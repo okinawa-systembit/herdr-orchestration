@@ -232,9 +232,9 @@ Orchestrator 側で Herdr CLI の変更を追従実装しない。
 
 ## 24. 将来構成
 
-MVP および専任 role 追加前は、テスト・調査依頼の worker 割当を [§4](02-roles-and-task-contract.md#sec-4) に統一する。以下は **将来** の目標図である。
+単一 worker に対する Role Binding（ローカル / `--global`、日本語・カスタムロール名を含む）による委譲は [§4](02-roles-and-task-contract.md#sec-4) および [クロスワークスペース設計書](../herdr-orchestrator-cross-workspace.md) で提供される。以下は **複数 worker への並列 fan-out と結果集約**に関する将来の目標図である。
 
-将来的には `tester` / `researcher` 等の専任 role を追加し、以下のような複数 Agent orchestration を同一規約で扱えることを目標とする。
+将来的には `reviewer` / `tester` / `researcher` 等の複数ロールへ 1 回の指示で並列 handoff し、複数 Agent orchestration の結果集約を同一規約で扱えることを目標とする。
 
 ```text
                     ┌─ reviewer ────┐

@@ -24,12 +24,21 @@ from orchestrator.completion_commands import (
 from orchestrator.dispatch_commands import run_doctor, run_reconcile_dispatch
 from orchestrator.handoff_commands import HandoffCommandError, HandoffInput, run_handoff
 from orchestrator.identity import (
+    GLOBAL_SCOPE_ID,
     GitRepositoryNotInitializedError,
     RepositoryIdentityError,
+    derive_directory_scope_id,
     get_or_create_repository_identity,
     get_repository_identity,
+    resolve_git_common_dir,
 )
-from orchestrator.live_agent import LiveAgentError, verify_live_agent_context
+from orchestrator.live_agent import (
+    LiveAgentError,
+    format_pane_display_summary,
+    inspect_pane_for_role_set,
+    sync_herdr_pane_label,
+    verify_live_agent_context,
+)
 from orchestrator.registry.errors import RegistryError
 from orchestrator.env import HerdrEnvError, require_herdr_env
 from orchestrator.errors import emit_error
@@ -39,9 +48,14 @@ from orchestrator.result_commands import ResultCommandError, result_submit, task
 from orchestrator.list_commands import run_task_list
 from orchestrator.role_bindings import (
     RoleBindingError,
+    _utc_now_iso,
     clear_role_binding,
+    get_role_binding_document,
     get_role_bindings,
     set_role_binding,
+    validate_display_name,
+    validate_pane_id,
+    validate_role_name,
 )
 from orchestrator.worktree import WorktreeError, resolve_worktree_root
 
@@ -155,14 +169,29 @@ def _cmd_handoff(ns: argparse.Namespace) -> int:
         require_herdr_env()
     except HerdrEnvError as exc:
         emit_herdr_env_error(exc)
+    raw_role = ns.worker_role or getattr(ns, "to_role", None)
+    if not raw_role:
+        emit_error("invalid_input", retryable=False, message="--worker-role or --to is required")
+    if ns.worker_role and getattr(ns, "to_role", None):
+        try:
+            if validate_role_name(ns.worker_role) != validate_role_name(ns.to_role):
+                emit_error(
+                    "invalid_input",
+                    retryable=False,
+                    message="conflicting --worker-role and --to values",
+                )
+        except RoleBindingError as exc:
+            emit_error(exc.code, retryable=False, message=exc.message)
+    task_type = ns.task_type or getattr(ns, "type_alias", None) or "general"
     try:
         payload = run_handoff(
             HandoffInput(
                 mode=ns.mode,
-                worker_role=ns.worker_role,
-                task_type=ns.task_type,
+                worker_role=raw_role,
+                task_type=task_type,
                 instruction=ns.instruction,
                 result_wait_timeout_sec=ns.result_wait_timeout_sec,
+                scope=getattr(ns, "scope", None),
             )
         )
     except HandoffCommandError as exc:
@@ -279,27 +308,19 @@ def _cmd_identity(ns: argparse.Namespace) -> int:
     )
 
 
-def _cmd_role(ns: argparse.Namespace) -> int:
-    action = getattr(ns, "role_action", None)
-    cwd = Path.cwd()
-    if action == "set":
-        pane_id = (ns.pane or os.environ.get("HERDR_PANE_ID") or "").strip()
-        if not pane_id:
-            emit_command_error(
-                "invalid_input",
-                retryable=False,
-                message="--pane or HERDR_PANE_ID is required for 'role set'",
-                exit_code=1,
-            )
+def _resolve_role_scope_id(cwd: Path, *, is_global: bool, create_if_missing: bool) -> str:
+    if is_global:
+        return GLOBAL_SCOPE_ID
+    try:
+        wt = resolve_worktree_root(cwd)
+        if create_if_missing:
+            return get_or_create_repository_identity(wt)
+        return get_repository_identity(wt)
+    except WorktreeError:
         try:
-            repo_id = get_or_create_repository_identity(cwd)
-        except GitRepositoryNotInitializedError as exc:
-            emit_command_error(
-                "git_repository_not_initialized",
-                retryable=False,
-                message=str(exc),
-                exit_code=1,
-            )
+            resolve_git_common_dir(cwd)
+        except GitRepositoryNotInitializedError:
+            return derive_directory_scope_id(cwd)
         except RepositoryIdentityError as exc:
             emit_command_error(
                 "repository_identity_error",
@@ -307,8 +328,68 @@ def _cmd_role(ns: argparse.Namespace) -> int:
                 message=str(exc),
                 exit_code=1,
             )
+        emit_command_error(
+            "repository_identity_error",
+            retryable=False,
+            message=f"failed to resolve worktree root for {cwd}",
+            exit_code=1,
+        )
+    except GitRepositoryNotInitializedError:
+        return derive_directory_scope_id(cwd)
+    except RepositoryIdentityError as exc:
+        code = (
+            "repository_identity_not_initialized"
+            if "not initialized" in str(exc)
+            else "repository_identity_error"
+        )
+        emit_command_error(
+            code,
+            retryable=False,
+            message=str(exc),
+            exit_code=1,
+        )
+
+
+def _enrich_targets_with_summary(targets: dict[str, dict[str, object]]) -> dict[str, dict[str, object]]:
+    enriched: dict[str, dict[str, object]] = {}
+    for role, meta in targets.items():
+        if isinstance(meta, dict):
+            enriched[role] = {
+                **meta,
+                "display_summary": format_pane_display_summary(meta, fallback_role=role),
+            }
+    return enriched
+
+
+def _cmd_role(ns: argparse.Namespace) -> int:
+    action = getattr(ns, "role_action", None)
+    is_global = bool(getattr(ns, "is_global", False))
+    cwd = Path.cwd()
+    if action == "set":
+        pos_pane = getattr(ns, "pane_id", None)
+        opt_pane = getattr(ns, "pane", None)
+        if pos_pane and opt_pane and pos_pane.strip() != opt_pane.strip():
+            emit_command_error(
+                "invalid_input",
+                retryable=False,
+                message="conflicting positional pane_id and --pane values",
+                exit_code=1,
+            )
+        pane_id = (opt_pane or pos_pane or os.environ.get("HERDR_PANE_ID") or "").strip()
+        if not pane_id:
+            emit_command_error(
+                "invalid_input",
+                retryable=False,
+                message="<pane_id>, --pane, or HERDR_PANE_ID is required for 'role set'",
+                exit_code=1,
+            )
         try:
-            roles = set_role_binding(repo_id, ns.role, pane_id)
+            canonical_role = validate_role_name(ns.role)
+            valid_pane = validate_pane_id(pane_id)
+            display_name = validate_display_name(
+                getattr(ns, "label", None),
+                default_from_role_arg=ns.role,
+            )
         except RoleBindingError as exc:
             emit_command_error(
                 exc.code,
@@ -316,52 +397,67 @@ def _cmd_role(ns: argparse.Namespace) -> int:
                 message=exc.message,
                 exit_code=1,
             )
+
+        try:
+            require_herdr_env()
+        except HerdrEnvError as exc:
+            emit_herdr_env_error(exc)
+
+        try:
+            target_meta = inspect_pane_for_role_set(
+                valid_pane,
+                display_name=display_name,
+                bound_at=_utc_now_iso(),
+            )
+        except LiveAgentError as exc:
+            emit_command_error(
+                "role_target_agent_not_running",
+                retryable=False,
+                message=str(exc),
+                exit_code=1,
+            )
+
+        scope_id = _resolve_role_scope_id(cwd, is_global=is_global, create_if_missing=True)
+        try:
+            before_roles = get_role_bindings(scope_id)
+            old_pane_for_role = before_roles.get(canonical_role)
+            roles = set_role_binding(
+                scope_id,
+                canonical_role,
+                valid_pane,
+                target_meta=target_meta,
+            )
+        except RoleBindingError as exc:
+            emit_command_error(
+                exc.code,
+                retryable=False,
+                message=exc.message,
+                exit_code=1,
+            )
+        if old_pane_for_role and old_pane_for_role != valid_pane:
+            sync_herdr_pane_label(old_pane_for_role, clear=True)
+        sync_herdr_pane_label(valid_pane, display_name)
+        target_with_summary = {
+            **target_meta,
+            "display_summary": format_pane_display_summary(target_meta, fallback_role=canonical_role),
+        }
         out_payload: dict[str, object] = {
             "command": "role",
             "action": "set",
-            "repository_id": repo_id,
-            "role": ns.role,
-            "pane_id": roles[ns.role],
+            "scope": "global" if is_global else "local",
+            "repository_id": scope_id,
+            "role": canonical_role,
+            "display_name": display_name,
+            "pane_id": roles[canonical_role],
+            "target": target_with_summary,
             "roles": roles,
         }
-        if os.environ.get("HERDR_ENV") == "1":
-            try:
-                wt_root = resolve_worktree_root(cwd)
-                verify_live_agent_context(
-                    roles[ns.role],
-                    expected_worktree_path=wt_root,
-                    expected_repository_identity=repo_id,
-                    require_promptable=False,
-                )
-            except (WorktreeError, LiveAgentError) as exc:
-                out_payload["warning"] = (
-                    f"bound pane {roles[ns.role]!r} could not be verified in current worktree: {exc}"
-                )
         return emit_json(out_payload)
     elif action == "show":
+        scope_id = _resolve_role_scope_id(cwd, is_global=is_global, create_if_missing=False)
         try:
-            repo_id = get_repository_identity(cwd)
-        except GitRepositoryNotInitializedError as exc:
-            emit_command_error(
-                "git_repository_not_initialized",
-                retryable=False,
-                message=str(exc),
-                exit_code=1,
-            )
-        except RepositoryIdentityError as exc:
-            code = (
-                "repository_identity_not_initialized"
-                if "not initialized" in str(exc)
-                else "repository_identity_error"
-            )
-            emit_command_error(
-                code,
-                retryable=False,
-                message=str(exc),
-                exit_code=1,
-            )
-        try:
-            roles = get_role_bindings(repo_id)
+            doc = get_role_binding_document(scope_id)
+            global_doc = get_role_binding_document(GLOBAL_SCOPE_ID) if not is_global else doc
         except RoleBindingError as exc:
             emit_command_error(
                 exc.code,
@@ -369,37 +465,26 @@ def _cmd_role(ns: argparse.Namespace) -> int:
                 message=exc.message,
                 exit_code=1,
             )
-        return emit_json({
+        show_payload: dict[str, object] = {
             "command": "role",
             "action": "show",
-            "repository_id": repo_id,
-            "roles": roles,
-        })
+            "scope": "global" if is_global else "local",
+            "repository_id": scope_id,
+            "roles": doc["roles"],
+            "targets": _enrich_targets_with_summary(doc["targets"]),
+            "outdated_roles": doc["outdated_roles"],
+        }
+        if not is_global:
+            show_payload["global_roles"] = global_doc["roles"]
+            show_payload["global_targets"] = _enrich_targets_with_summary(global_doc["targets"])
+            show_payload["global_outdated_roles"] = global_doc["outdated_roles"]
+        return emit_json(show_payload)
     elif action == "clear":
+        scope_id = _resolve_role_scope_id(cwd, is_global=is_global, create_if_missing=False)
         try:
-            repo_id = get_repository_identity(cwd)
-        except GitRepositoryNotInitializedError as exc:
-            emit_command_error(
-                "git_repository_not_initialized",
-                retryable=False,
-                message=str(exc),
-                exit_code=1,
-            )
-        except RepositoryIdentityError as exc:
-            code = (
-                "repository_identity_not_initialized"
-                if "not initialized" in str(exc)
-                else "repository_identity_error"
-            )
-            emit_command_error(
-                code,
-                retryable=False,
-                message=str(exc),
-                exit_code=1,
-            )
-        try:
+            before_roles = get_role_bindings(scope_id)
             roles = clear_role_binding(
-                repo_id,
+                scope_id,
                 role=getattr(ns, "role", None),
                 clear_all=bool(getattr(ns, "all", False)),
             )
@@ -410,10 +495,14 @@ def _cmd_role(ns: argparse.Namespace) -> int:
                 message=exc.message,
                 exit_code=1,
             )
+        cleared_panes = set(before_roles.values()) - set(roles.values())
+        for c_pane in sorted(cleared_panes):
+            sync_herdr_pane_label(c_pane, clear=True)
         return emit_json({
             "command": "role",
             "action": "clear",
-            "repository_id": repo_id,
+            "scope": "global" if is_global else "local",
+            "repository_id": scope_id,
             "roles": roles,
         })
     emit_command_error(
@@ -453,20 +542,37 @@ def build_parser() -> argparse.ArgumentParser:
         elif name == "handoff":
             p.add_argument(
                 "--mode",
-                required=True,
+                default="sync",
                 choices=("sync", "async"),
-                help="委託方式（sync: 完了待機, async: 即時返還）",
+                help="委託方式（sync: 完了待機, async: 即時返還。既定値: sync）",
             )
             p.add_argument(
                 "--worker-role",
-                required=True,
-                choices=("design", "reviewer", "implementer", "orchestrator"),
-                help="委託先 Worker の論理ロール",
+                default=None,
+                help="委託先 Worker の論理ロール（標準ロール・日本語ロール名・カスタムロール名）",
+            )
+            p.add_argument(
+                "--to",
+                dest="to_role",
+                default=None,
+                help="--worker-role の短縮エイリアス（例: --to reviewer, --to TODO管理）",
+            )
+            p.add_argument(
+                "--scope",
+                choices=("local", "global"),
+                default=None,
+                help="同名ロール重複時に参照するスコープを明示指定（local または global）",
             )
             p.add_argument(
                 "--task-type",
-                required=True,
-                help="タスク種別（例: review, implementation）",
+                default=None,
+                help="タスク種別（例: review, implementation, research。省略時: general）",
+            )
+            p.add_argument(
+                "--type",
+                dest="type_alias",
+                default=None,
+                help="--task-type の短縮エイリアス",
             )
             p.add_argument(
                 "--instruction",
@@ -547,23 +653,45 @@ def build_parser() -> argparse.ArgumentParser:
             role_sub = p.add_subparsers(dest="role_action", required=True)
             role_set = role_sub.add_parser(
                 "set",
-                help="論理ロールと pane_id を紐づけて保存",
-                description="論理ロールと pane_id を紐づけて保存",
+                help="論理ロールと pane_id を紐づけて保存（UIラベルも自動同期）",
+                description="論理ロールと pane_id を紐づけて保存（UIラベルも自動同期）",
             )
             role_set.add_argument(
                 "role",
-                choices=sorted(STANDARD_ROLES),
-                help="紐づける論理ロール（design, reviewer, implementer, orchestrator）",
+                help="紐づけるロール（標準ロール・日本語・カスタムロール名）",
+            )
+            role_set.add_argument(
+                "pane_id",
+                nargs="?",
+                default=None,
+                help="対象の pane_id（省略時は --pane または HERDR_PANE_ID 環境変数を使用）",
             )
             role_set.add_argument(
                 "--pane",
                 default=None,
-                help="対象の pane_id（省略時は HERDR_PANE_ID 環境変数を使用）",
+                help="対象の pane_id（省略時は位置引数または HERDR_PANE_ID 環境変数を使用）",
             )
-            role_sub.add_parser(
+            role_set.add_argument(
+                "--label",
+                default=None,
+                help="Herdr UI および人間向け報告に表示するラベル名（省略時はロール引数を使用）",
+            )
+            role_set.add_argument(
+                "--global",
+                dest="is_global",
+                action="store_true",
+                help="全ワークスペース・全プロジェクト共通のグローバルロールとして登録",
+            )
+            role_show = role_sub.add_parser(
                 "show",
-                help="現在のリポジトリのロールと pane_id の紐づけ一覧を表示",
-                description="現在のリポジトリのロールと pane_id の紐づけ一覧を表示",
+                help="ロールと pane_id の紐づけ一覧を表示",
+                description="ロールと pane_id の紐づけ一覧を表示",
+            )
+            role_show.add_argument(
+                "--global",
+                dest="is_global",
+                action="store_true",
+                help="グローバルロールのみを表示",
             )
             role_clear = role_sub.add_parser(
                 "clear",
@@ -573,14 +701,19 @@ def build_parser() -> argparse.ArgumentParser:
             role_clear.add_argument(
                 "role",
                 nargs="?",
-                choices=sorted(STANDARD_ROLES),
                 default=None,
-                help="解除する論理ロール（--all 指定時は不要）",
+                help="解除するロール（--all 指定時は不要）",
             )
             role_clear.add_argument(
                 "--all",
                 action="store_true",
                 help="すべてのロール紐づけを一括解除",
+            )
+            role_clear.add_argument(
+                "--global",
+                dest="is_global",
+                action="store_true",
+                help="グローバルロールの紐づけを解除",
             )
         else:
             p.add_argument("task_id", nargs="?", metavar="task.id", help="対象タスクID")

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import fcntl
+import hashlib
 import os
 import re
 import subprocess
@@ -18,9 +19,12 @@ class GitRepositoryNotInitializedError(RepositoryIdentityError):
     pass
 
 
+GLOBAL_SCOPE_ID = "global"
+
 _UUID_V4_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
 )
+_DIR_SCOPE_RE = re.compile(r"^dir_[0-9a-f]{16}$")
 
 _SCP_RE = re.compile(r"^(?P<user>[^@]+)@(?P<host>[^:]+):(?P<path>.+)$")
 CONFIG_KEY = "herdr.repository-id"
@@ -55,6 +59,20 @@ def is_valid_uuid_v4(val: str) -> bool:
     if not isinstance(val, str):
         return False
     return bool(_UUID_V4_RE.match(val))
+
+
+def is_dir_scope_id(val: str) -> bool:
+    """Validate Non-Git directory scope ID (dir_<16-hex-chars>)."""
+    if not isinstance(val, str):
+        return False
+    return bool(_DIR_SCOPE_RE.match(val))
+
+
+def derive_directory_scope_id(directory: Path) -> str:
+    """Derive deterministic Non-Git directory scope ID (dir_<sha256[:16]>) from resolved path."""
+    resolved = directory.resolve()
+    digest = hashlib.sha256(str(resolved).encode("utf-8")).hexdigest()[:16]
+    return f"dir_{digest}"
 
 
 def is_not_git_repository_error(stderr: str) -> bool:

@@ -163,23 +163,32 @@ herdr-orchestrator --help
 
 ### 3. Repository Identity と Role Binding の設定
 
-Orchestrator を利用する各開発 Git リポジトリのルートで、リポジトリ識別子の初期化と、各論理ロールが稼働する Herdr の `pane_id` の紐づけを行います（Herdr のエージェント名変更 `herdr agent rename` は不要です）。
+Orchestrator を利用する各ペイン（`HERDR_ENV=1`）で、各ロール（標準ロール・日本語名・任意のカスタムロール名）と Herdr の `pane_id` の紐づけを行います（Herdr のエージェント名変更 `herdr agent rename` は不要で、`herdr pane rename` により UI 上のペイン表示名も自動連動します）。また、`--global` を付けることでワークスペースや Git 管理の有無を問わずどこからでも呼び出せるグローバル共通ロールとして登録できます。
+
+> [!TIP]
+> ターミナルから CLI を直接打つ代わりに、エージェントのチャット欄から「このペインを『メイン』、隣のペインを『レビュワー』として登録して」のように自然言語で依頼することも可能です（詳細は [AI Agent に指示して利用する](#a-ai-agent-に指示して利用する推奨) を参照）。
 
 ```bash
 cd /path/to/your-project-repo
 
-# 1. リポジトリ固有の UUID を初期化（または role set 実行時に自動初期化されます）
+# 1. リポジトリ固有の UUID を初期化（または Git リポジトリ内で role set 実行時に自動初期化されます）
 herdr-orchestrator identity init
 
-# 2. 各ロールと pane_id を紐づける（自身のペインで実行する場合は --pane 省略可）
-herdr-orchestrator role set implementer --pane w15:p1
-herdr-orchestrator role set reviewer --pane w15:p2
+# 2. 各ロールと pane_id を紐づける（自身のペインで実行する場合は pane_id 省略可）
+# ※本リポジトリの repo-review / repo-workflow 等のリポジトリ内連携ツールは標準ロール名 `implementer` / `reviewer` で handoff します。
+#   UI 上で日本語表示したい場合は `--label` を指定してください。
+herdr-orchestrator role set implementer
+herdr-orchestrator role set reviewer w15:p2 --label "レビュワー"
+
+# 別ワークスペースの調査用ペイン等をグローバル共通ロールとして登録する場合（任意の日本語名も指定可能）
+herdr-orchestrator role set 調査 --label "調査 (ログ解析)" --global
 
 # 3. 登録内容の確認
 herdr-orchestrator role show
+herdr-orchestrator role show --global
 ```
 
-`.git/config` にリポジトリ固有の UUID が登録され、`~/.local/state/herdr-orchestrator/roles/` にロールと `pane_id` の対応が永続保存されます。Herdr サーバー再起動後に同じ `pane_id` で各エージェントが自動再開（resume）された場合は再設定なしで継続できます。別リポジトリ・別 worktree のペインへの誤配送は worktree / identity 照合により拒否されますが、ペイン移動や再起動によって同一 worktree 内でペイン配置（ロールと `pane_id` の対応）を変更・入れ替えた場合は、`herdr-orchestrator role show` で確認し `herdr-orchestrator role set` で更新してください。
+`.git/config` にリポジトリ固有の UUID が登録され、`~/.local/state/herdr-orchestrator/roles/` にロールと `pane_id` および環境の指紋メタデータ（`targets`）が永続保存されます。同一ペインでエージェントプロセスを再起動した場合や、ペインを閉じて再度開いた（または Herdr 全体を再起動した）場合でも、単一候補の安全条件を満たせば自動的に新しいペインへ追従します（旧バージョン v0.3.1 以前の `targets` 指紋を持たない Role Binding は配送前に `role_binding_outdated` で検出・停止するため、再インストール後は一度 `herdr-orchestrator role set <role>` を再実行してください）。
 
 ### 4. 環境診断の実行
 
@@ -229,7 +238,7 @@ codex execpolicy check --rules ~/.codex/rules/default.rules -- herdr-orchestrato
 
 ### A. AI Agent に指示して利用する（推奨）
 
-利用者はチャット欄からエージェントへ自然言語プロンプトで指示を出すだけで、Skill の参照、タスク委託、結果確認を行えます。
+利用者はターミナルで複雑な CLI コマンドを打つ必要はなく、チャット欄からエージェントへ自然言語で指示を出すだけで、ロールの設定、タスクの委託、結果確認を行えます。
 
 #### 1. Skill の読み込みと環境確認
 
@@ -242,54 +251,108 @@ codex execpolicy check --rules ~/.codex/rules/default.rules -- herdr-orchestrato
 > ```
 
 - **エージェントの内部動作**:  
-  Skill 定義（`SKILL.md`）を参照し、`herdr-orchestrator doctor` や `herdr-orchestrator identity show` を実行して動作環境とリポジトリ識別子を確認します。
+  Skill 定義（[SKILL.md](skills/herdr-orchestrator/SKILL.md)）を参照し、`herdr-orchestrator doctor` や `herdr-orchestrator identity show` を実行して動作環境とリポジトリ識別子を確認します。
 
-#### 2. Worker エージェントへレビューを依頼する (handoff)
+#### 2. ロール設定をエージェントに依頼する（準備）
 
-作業ブランチの変更や Pull Request のレビューを、別の Reviewer エージェントへ委託します。
+各ペインで稼働するエージェントに対し、自身や相手の役割（ロール）を設定させます。ロールを登録すると、Herdr UI 上のペイン表示名（ラベル）も自動的に連動して更新されます。
 
-> **プロンプト例（同期実行・結果待機）:**
+> **自ペインを登録するプロンプト例:**
 >
 > ```text
-> 現在の作業ブランチの変更内容について、Reviewer エージェントへコードレビュー依頼を出してください。結果が返ってくるまで待機してください。
+> このペインを「メイン」ロールとして登録して。
 > ```
 >
-> **プロンプト例（非同期実行・即時復帰）:**
+> ```text
+> あなたをこのリポジトリの「実装担当（implementer）」として登録して。
+> ```
+>
+> **別のペイン（Worker）を登録するプロンプト例:**
 >
 > ```text
-> 現在の作業ブランチの変更内容について、Reviewer エージェントへコードレビューを非同期（async）で依頼してください。結果の完了は待たず、発行されたタスク ID を教えてください。
+> 隣のペイン（w15:p2）を「レビュワー」ロールとして登録して。
+> ```
+>
+> **別ワークスペースのペインをグローバルロールとして登録するプロンプト例:**
+>
+> ```text
+> 別ワークスペースにあるペイン w16:p1 を、どこからでも呼び出せるグローバルな「調査担当」として登録して。
 > ```
 
 - **エージェントの内部動作**:  
-  エージェントがタスク契約（Task Contract）を組み立て、以下のコマンドを実行して Worker を呼び出します。
+  エージェントが `herdr-orchestrator role set <role> [<pane_id>] [--global]` を実行します。同時に `herdr pane rename` が呼び出され、Herdr UI 上のペイン名が指定ロール名（またはラベル）へと即座に変更されます。
+
+#### 3. Worker エージェントへタスクを委託する（レビュー依頼・調査依頼）
+
+作業のレビューやログ調査などを別エージェントへ委託（handoff）します。エージェントは自ペインで作業を抱え込まず（セルフ作業を防止）、登録済みロールを確認して適切なロール宛てにタスクを委託します。
+
+> **レビュー依頼のプロンプト例（同期実行・結果待機）:**
+>
+> ```text
+> 現在の作業ブランチの変更内容について、レビュワーにレビュー依頼をして。結果が返ってくるまで待機して。
+> ```
+>
+> （※ 「レビュー依頼をして」とだけ指示した場合でも、エージェントは自前でレビューを始めず、登録済みロールから「レビュワー」等を推測して委託します。なお、候補が複数あるなど曖昧な場合は勝手に委託せず、一覧を示して人間に宛先を確認します）
+>
+> **調査依頼・解析依頼のプロンプト例:**
+>
+> ```text
+> 調査担当に、最新のサーバーエラーログの原因調査を依頼して。
+> ```
+>
+> ```text
+> 調査依頼をして。再現手順のログから異常箇所の特定をお願い。
+> ```
+>
+> **非同期（async）での依頼プロンプト例（即時復帰）:**
+>
+> ```text
+> レビュワーにコードレビューを非同期（async）で依頼して。完了待ちは不要なので、発行されたタスク ID を教えて。
+> ```
+
+> [!TIP]
+> **委託トリガーワードと公式機能・公式ドキュメント参照の使い分け**
+>
+> - **Orchestrator スキルの明示起動**: リポジトリ固有の別スキル（ローカルレビュー用スクリプト等）と混同させず、確実に本ツールで他ペインへ委託させたい場合は、「**herdr経由で**レビュー依頼をして」「**ハーダーで**調査を委託して」「**herdrオーケストラ経由で**依頼して」のようにキーワードを添えるとより確実です。
+> - **Herdr 本体の公式機能・スキルの利用**: Herdr 本体の機能・仕様・直接操作を行わせたい場合は、「**herdr公式で**ペインを分割して」「**公式herdrで**エージェントを起動して」のように「公式」を含めて指示してください。エージェントは本 Orchestrator ではなく、ローカルのグローバル環境に導入されている公式 herdr スキル（`~/.agents/skills/herdr/SKILL.md`）を読み込んで動作します。
+> - **Herdr 公式ドキュメント自体の調査**: 公式ドキュメントそのものを調べさせたい場合は、「**公式ドキュメントで**設定方法を調べて」「**herdrのドキュメントで**仕様を確認して」のように「ドキュメント」を明示して指示してください。エージェントは公式 LLM ドキュメント（`https://herdr.dev/llms.txt`）を追加で参照して回答します。
+
+- **エージェントの内部動作**:
+  1. エージェントは自ペインでコードレビューや調査作業を始めず、まず `herdr-orchestrator role show` で登録されているロールを確認します。
+  2. 指示（「レビュー」「調査」等）に最も合致するロール名（例: `reviewer`、`レビュワー`、`調査担当`）を特定します（合致候補が特定できない場合や複数ある場合は人間に宛先を確認します）。
+  3. タスク契約（Task Contract）を作成し、`herdr-orchestrator handoff` を実行して対象ペインへタスクを送信します。
+     - **sync モード**: CLI は Worker の作業完了（`result-submit`）まで待機して実行結果を返し、エージェントはその結果を受け取って人間にレビュー・調査結果を報告します。
+     - **async モード**: タスク登録後に即座に CLI から制御が戻ります。エージェントは発行されたタスク ID を受け取って人間に提示します。
   ```bash
-  # 同期実行（結果待機）の場合
+  # 同期実行（結果待機）の場合の CLI 実行例
   herdr-orchestrator handoff \
     --mode sync \
-    --worker-role reviewer \
+    --worker-role レビュワー \
     --task-type review \
     --instruction "ブランチのコードレビューを実施してください。"
 
-  # 非同期実行（即時復帰）の場合
+  # 非同期実行（即時復帰）の場合の CLI 実行例
   herdr-orchestrator handoff \
     --mode async \
-    --worker-role reviewer \
+    --worker-role レビュワー \
     --task-type review \
     --instruction "ブランチのコードレビューを実施してください。"
   ```
-  - **sync モード**: CLI は Worker の作業完了まで待機して実行結果を返し、エージェントはその結果を受け取ってユーザーへレビュー結果を報告します。
-  - **async モード**: タスク登録後に待機せず即座に CLI から制御が戻ります。エージェントは発行されたタスク ID を受け取ってユーザーへ提示し、後から状態や結果を確認します。
 
-#### 3. タスク結果の確認・作業再開 (async モード時)
+#### 4. タスク結果の確認・作業再開 (async モード時)
 
 非同期（`async`）で委託したタスクの結果を確認させたり、後続の作業を再開させます。
 
-※ `task_example` は説明用の仮の ID です。実際には Step 2 の非同期委託時に発行されたタスク ID に置き換えてください。
+※ `task_example` は説明用の仮の ID です。実際には Step 3 の非同期委託時に発行されたタスク ID に置き換えてください。
 
 > **プロンプト例:**
 >
 > ```text
 > タスク task_example のレビュー結果を確認して、指摘事項があれば対応方針を教えてください。
+> ```
+>
+> ```text
+> さっき依頼した調査タスク task_example の結果を取得して教えて。
 > ```
 
 - **エージェントの内部動作**:  
@@ -307,15 +370,25 @@ codex execpolicy check --rules ~/.codex/rules/default.rules -- herdr-orchestrato
 #### 1. Worker へタスクを委託する (handoff)
 
 ```bash
+# 基本的な同期委託（--worker-role または短縮形 --to が利用可能）
 herdr-orchestrator handoff \
   --mode sync \
-  --worker-role reviewer \
+  --to reviewer \
   --task-type review \
   --instruction "PR #56 のコードレビューを実施してください。"
+
+# ローカルとグローバルで同名ロール（例: 調査）が重複している場合にスコープを明示する例
+herdr-orchestrator handoff \
+  --mode async \
+  --to 調査 \
+  --scope global \
+  --instruction "エラーログの原因調査をお願いします。"
 ```
 
 - `--mode sync`: Worker の結果提出が完了するまでブロッキング待機します。
 - `--mode async`: タスク登録後、待機せず即座に制御を返します。
+- `--to <role>`（または `--worker-role <role>`）: 宛先ロール名を指定します（日本語ロール名も可）。
+- `--scope local|global`: 同名ロールが重複している場合に宛先スコープを限定します（省略時は重複検知で安全停止）。
 
 #### 2. タスクの状態を確認する
 
@@ -334,18 +407,23 @@ herdr-orchestrator task-list --worktree "$(git rev-parse --show-toplevel)"
 #### 4. Worker が実行結果を提出する (result-submit)
 
 Worker Agent は作業完了後、タスク結果を提出します（Requester ではなく Worker が実行します）。  
-`--result-ref` には作業成果物ファイルの worktree 相対パス（本リポジトリの内部レビュー運用の場合は `repo-review-helper record-save` が出力した記録パス）を指定します。
+`--result-ref` には作業成果物ファイルの worktree 相対パス（本リポジトリの内部レビュー運用の場合は `repo-review-helper record-save` が出力した記録パス）を指定します。また、別ワークスペースの調査等で成果物ファイルを作成しない場合は `--result-ref` を省略し、`--summary`（2000 文字以内）単独で提出することも可能です（`--result-ref` と `--summary` の少なくとも一方が必須）。
 
 ```bash
-# 例: 内部レビュー（Phase 1）のレビュー記録を提出する場合
+# 例1: 内部レビュー（Phase 1）のレビュー記録ファイルを提出する場合
 # （※ <instance-id> や RV001.md は例示であり、実際には record-save が返したパスを指定します）
 herdr-orchestrator result-submit task_example \
   --result-status succeeded \
   --result-ref "docs/reviews/internal/<instance-id>/RV001.md" \
   --summary "レビュー完了。指摘なし（GO）。"
+
+# 例2: 成果物ファイルを作らず要約メッセージのみで提出する場合（クロスワークスペース調査等）
+herdr-orchestrator result-submit task_example \
+  --result-status succeeded \
+  --summary "調査完了。原因は設定ファイルのタイムアウト値不足でした。"
 ```
 
-※ 一般的なタスクでも、`--result-ref` には worktree 内に実在するファイルの相対パスを指定します（URL・絶対パス・worktree 外のパスは拒否されます）。
+※ `--result-ref` を指定する場合は、依頼元 worktree 内に実在するファイルの相対パスを指定します（URL・絶対パス・worktree 外のパスは拒否されます）。
 
 #### 5. Requester がタスク結果を取得する
 
@@ -379,6 +457,7 @@ curl -fsSL 'https://raw.githubusercontent.com/okinawa-systembit/herdr-orchestrat
   - Task Registry に蓄積された過去のタスク履歴データ（`~/.local/state/herdr-orchestrator/`）は更新時も保持されます。
 - **更新時の注意点**:
   - タスク実行中の予期せぬ競合を防ぐため、**未完了（実行中）のタスクが存在しない状態で更新を実行してください**。
+  - **旧バージョン（v0.3.1 以前）からの更新時**: 旧形式で作成された Role Binding（`targets` 指紋情報を持たない設定）が残っている場合、更新後の `handoff` 実行時に `role_binding_outdated` で停止します（`herdr-orchestrator doctor` または `role show` でも `outdated` として確認できます）。更新後は各ペイン（`HERDR_ENV=1`）で一度 `herdr-orchestrator role set <role> [<pane_id>]` を再実行してください。
 
 ### 開発者環境の更新
 
@@ -440,8 +519,10 @@ rm -f ~/.local/bin/herdr-orchestrator
 | ---------------------------------------------------------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `herdr-orchestrator: command not found`                                | PATH が通っていない / インストール未完了      | `~/.local/bin` が `PATH` 環境変数に含まれているか確認してください（`export PATH="$HOME/.local/bin:$PATH"`）。                                                                                                                                                                   |
 | Agent が Skill を認識しない                                            | Skill 配置パスの不一致 / 再読み込み未実施     | `~/.agents/skills/herdr-orchestration/SKILL.md` が存在するか確認し、Agent（Cursor / Codex 等）を再起動または再読み込みしてください。                                                                                                                                            |
-| `{"error": "herdr_env_required"}`                                      | Herdr ペイン外での実行                        | タスク操作コマンド（`handoff` や `task-status` 等）は、`HERDR_ENV=1` が設定された Herdr のセッションペイン内で実行してください。                                                                                                                                                |
-| `{"error": "git_repository_not_initialized"}`                          | 非 Git ディレクトリでの実行                   | `identity` コマンドは Git 管理下のリポジトリ内で実行してください（`git init` を実行）。                                                                                                                                                                                         |
+| `{"error": "herdr_env_required"}`                                      | Herdr ペイン外での実行                        | タスク操作コマンド（`handoff`, `task-status`, `role set` 等）は、`HERDR_ENV=1` が設定された Herdr のセッションペイン内で実行してください（`--help`, `identity`, `role show`, `role clear` はペイン外でも実行可能）。                                                            |
+| `{"error": "git_repository_not_initialized"}`                          | 非 Git ディレクトリでの実行                   | `identity` コマンド、または Role Binding 未登録の標準 4 ロール（Pattern A）への `handoff` は Git 管理下のリポジトリ内で実行してください（Non-Git ディレクトリで `handoff` する場合は先に `herdr-orchestrator role set <role> [--global]` でロールを登録してください）。         |
+| `{"error": "role_binding_outdated"}`                                   | 旧バージョンの Role Binding 設定の残存        | v0.3.1 以前の指紋情報（`targets`）を持たない設定ファイルです。対象ペイン（`HERDR_ENV=1`）で `herdr-orchestrator role set <role> [<pane_id>] [--global]` を再実行してください。                                                                                                  |
+| `{"error": "worker_role_scope_ambiguous"}`                             | ローカルとグローバルで同名ロールが重複登録    | `--scope local` または `--scope global` を指定して宛先スコープを明示してください（出力 JSON の `candidates` で各候補のワークスペース名を確認可能）。                                                                                                                            |
 | `{"error": "live_agent_not_found"}` 等                                 | 宛先エージェントの未起動 / 命名不一致         | Herdr 上で対象ロールのエージェントが起動しているか確認してください。                                                                                                                                                                                                            |
 | インストーラーが `Another installation... is currently running` で失敗 | 別のインストール処理の同時実行 / ロック保持中 | 別のインストール・更新処理が実行中でないか確認してください。`flock` による排他ロックは通常、保持プロセスの終了時に自動解放されます。ロックファイル（`~/.agents/skills/.herdr-orchestrator.install.lock`）が存在していること自体は正常な状態であり、安易に削除しないでください。 |
 
@@ -504,3 +585,4 @@ rm -f ~/.local/bin/herdr-orchestrator
 
 - [distribution-install.md](skills/herdr-orchestrator/references/distribution-install.md) — 配布・更新仕様書
 - [docs/herdr-orchestrator-identity-uuid.md](docs/herdr-orchestrator-identity-uuid.md) — Repository Identity UUID 仕様書
+- [docs/herdr-orchestrator-cross-workspace.md](docs/herdr-orchestrator-cross-workspace.md) — ワークスペース跨ぎ配送・グローバルロール・日本語ロール名・ペイン自動追従 設計書

@@ -42,6 +42,8 @@ def emit_handoff_command_error(exc: HandoffCommandError) -> NoReturn:
     fields: dict[str, Any] = {"message": exc.message}
     if exc.task_id:
         fields["task_id"] = exc.task_id
+    if getattr(exc, "details", None):
+        fields.update(exc.details)
     emit_command_error(exc.code, retryable=exc.retryable, **fields)
 
 
