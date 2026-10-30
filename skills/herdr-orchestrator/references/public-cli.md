@@ -122,10 +122,12 @@ herdr-orchestrator handoff \
   --instruction "最新のサーバーエラーログを解析してください。"
 ```
 
-- `--mode sync|async`: 同期（完了待機）または非同期（即時復帰）。
+- `--mode sync|async`: 同期（完了待機）または非同期（即時復帰。既定値: `sync`）。
 - `--to <role>`（または `--worker-role <role>`）: 登録済みロール名を指定（日本語名可）。
+- `--task-type <type>`（または `--type <type>`）: タスクの種別（`review`, `research`, `implementation`, `general` 等。既定値: `general`）。
 - `--scope local|global`: ローカルとグローバルで同名ロールが重複している場合にスコープを限定。
 - `--instruction <text>`: Worker Agent への指示本文。
+- `--result-wait-timeout-sec <seconds>`: 同期（`--mode sync`）実行時の完了待機タイムアウト秒数（既定値: 1800 秒 / 30分）。
 
 ---
 
@@ -151,8 +153,9 @@ herdr-orchestrator task-list --worktree "$(git rev-parse --show-toplevel)"
 
 1. `herdr-orchestrator task-list --worktree "$(git rev-parse --show-toplevel)"` を実行する（`HERDR_ENV=1` ペイン内）。
 2. `exit = 0` かつ `complete=true` で正常取得。`exit = 3` の場合は一部ファイルが破損（`anomalies` を人間に報告）。
-3. 各タスクの `overview.warnings` を必ず確認。`inconsistent_state_combination` が付与されている場合は、`overview.state` が `closed` であっても正常完了とみなさず、状態不整合として人間に報告する。
-4. `open` / `uncertain` や警告ありのタスクは `task-status <task-id>` で詳細を確認し、次の操作を判断する。
+3. `truncated=true` の場合は最大件数で切り詰められているため、対象タスクが見当たらない場合でも `truncated=false` でない限り不存在と断定せず、`--limit` を増やすかフィルタ条件（`--status` 等）で絞り込んで再実行する。
+4. 各タスクの `overview.warnings` を必ず確認。`inconsistent_state_combination` が付与されている場合は、`overview.state` が `closed` であっても正常完了とみなさず、状態不整合として人間に報告する。
+5. `open` / `uncertain` や警告ありのタスクは `task-status <task-id>` で詳細を確認し、次の操作を判断する。
 
 ### 5.3 結果の提出 (`result-submit`)
 
