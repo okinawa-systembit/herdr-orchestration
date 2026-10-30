@@ -42,12 +42,82 @@ def b64url(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).decode("utf-8").rstrip("=")
 
 
-def load_bot_config(repo_root: Path) -> BotConfig | None:
+def resolve_repo_root(start_dir: Path | None = None) -> Path:
+    """カレントディレクトリまたは指定パスからリポジトリルートを解決する.
+
+    1. git rev-parse --show-toplevel を試行
+    2. 失敗した場合は start_dir から親方向へ .git または .env.github-app/.env.github を探索
+    3. 見つからなければ start_dir (または cwd) を返す
+    """
+    base = (start_dir if start_dir is not None else Path.cwd()).resolve()
+
+    try:
+        proc = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=base,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if proc.returncode == 0:
+            top_level = proc.stdout.strip()
+            if top_level:
+                return Path(top_level).resolve()
+    except OSError:
+        pass
+
+    # git コマンドが使えない環境での親ディレクトリ探索
+    curr = base
+    while True:
+        if (curr / ".git").exists():
+            return curr
+        if (curr / ".env.github-app").is_file() or (curr / ".env.github").is_file():
+            return curr
+        if curr.parent == curr:
+            break
+        curr = curr.parent
+
+    return base
+
+
+def _parse_env_line(line: str) -> tuple[str, str] | None:
+    """設定ファイルの 1 行をキーと値に分解する."""
+    line = line.strip()
+    if not line or line.startswith("#"):
+        return None
+    if "=" not in line:
+        return None
+
+    k, v = line.split("=", 1)
+    k = k.strip()
+    v = v.strip()
+
+    if not v:
+        return k, ""
+
+    # クォートで始まっている場合: "val" または 'val'
+    if v[0] in ('"', "'"):
+        quote_char = v[0]
+        close_idx = v.find(quote_char, 1)
+        if close_idx != -1:
+            val = v[1:close_idx]
+            return k, val
+
+    # クォートで始まっていない場合: 行末コメント ( #...) を除去
+    if " #" in v:
+        v = v.split(" #", 1)[0].rstrip()
+    elif "\t#" in v:
+        v = v.split("\t#", 1)[0].rstrip()
+
+    return k, v
+
+
+def load_bot_config(repo_root: Path | None = None) -> BotConfig | None:
     """環境変数または設定ファイルから Bot 設定を読み込む.
 
     優先順位:
     1. 環境変数 (GITHUB_BOT_APP_ID, GITHUB_BOT_INSTALL_ID, GITHUB_APP_PRIVATE_KEY_PATH)
-    2. リポジトリ直下の .env.github-app または .env.github
+    2. リポジトリ内の .env.github-app または .env.github
 
     いずれのソースでも、1 項目でも設定があればそのソースから BotConfig を生成する.
     まったく設定が存在しない場合は None を返す.
@@ -64,19 +134,17 @@ def load_bot_config(repo_root: Path) -> BotConfig | None:
             source="env",
         )
 
+    root = resolve_repo_root(repo_root) if repo_root is not None else resolve_repo_root()
+
     for env_filename in (".env.github-app", ".env.github"):
-        env_file = repo_root / env_filename
+        env_file = root / env_filename
         if env_file.is_file():
             file_values: dict[str, str] = {}
             try:
                 for line in env_file.read_text(encoding="utf-8").splitlines():
-                    line = line.strip()
-                    if not line or line.startswith("#"):
-                        continue
-                    if "=" in line:
-                        k, v = line.split("=", 1)
-                        k = k.strip()
-                        v = v.strip().strip("'\"")
+                    parsed = _parse_env_line(line)
+                    if parsed is not None:
+                        k, v = parsed
                         file_values[k] = v
             except OSError as err:
                 raise RuntimeError(
@@ -100,20 +168,35 @@ def load_bot_config(repo_root: Path) -> BotConfig | None:
     return None
 
 
-def _sign_rs256(data: bytes, private_key_pem: bytes) -> bytes:
+def _sign_rs256(
+    data: bytes,
+    private_key_pem: bytes | None = None,
+    private_key_path: Path | None = None,
+) -> bytes:
     """RS256 (SHA-256 with RSA PKCS#1 v1.5) でデータを署名する.
 
     cryptography ライブラリが利用可能な場合はそれを使用し、
     未導入の場合は OS 標準の openssl CLI サブプロセスで署名する。
+    private_key_path が指定されている場合はディスク上のファイルを直接
+    openssl に渡し、一時ファイルの複製を作成しない。
     """
+    if private_key_pem is None and private_key_path is None:
+        raise ValueError("private_key_pem または private_key_path のいずれかが必要です。")
+
     try:
         from cryptography.hazmat.primitives import hashes
         from cryptography.hazmat.primitives.asymmetric import padding
         from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey
         from cryptography.hazmat.primitives.serialization import load_pem_private_key
 
+        pem_data = (
+            private_key_pem
+            if private_key_pem is not None
+            else private_key_path.read_bytes()  # type: ignore[union-attr]
+        )
+
         try:
-            private_key = load_pem_private_key(private_key_pem, password=None)
+            private_key = load_pem_private_key(pem_data, password=None)
         except Exception as err:
             raise ValueError(f"秘密鍵 PEM の解析に失敗しました: {err}") from err
 
@@ -139,10 +222,30 @@ def _sign_rs256(data: bytes, private_key_pem: bytes) -> bytes:
             "署名に必要な cryptography パッケージまたは openssl コマンドが見つかりません。"
         )
 
-    # セキュアな一時ファイルに秘密鍵を書き出して署名
-    temp_fd, temp_key_path = tempfile.mkstemp(prefix="gh_app_key_", suffix=".pem")
+    # 既存の秘密鍵ファイルが存在する場合は直接利用 (一時ファイル作成なし)
+    if private_key_path is not None and private_key_path.is_file():
+        proc = subprocess.run(
+            [openssl_path, "dgst", "-sha256", "-sign", str(private_key_path)],
+            input=data,
+            capture_output=True,
+            check=False,
+        )
+        if proc.returncode != 0:
+            err_msg = proc.stderr.decode("utf-8", errors="replace").strip()
+            raise ValueError(f"openssl による署名に失敗しました: {err_msg}")
+        return proc.stdout
+
+    # メモリ上の PEM バイト列のみの場合は一時ファイルを作成して署名
+    temp_dir = os.environ.get("XDG_RUNTIME_DIR")
+    if temp_dir and not os.path.isdir(temp_dir):
+        temp_dir = None
+
+    temp_fd, temp_key_path = tempfile.mkstemp(
+        prefix="gh_app_key_", suffix=".pem", dir=temp_dir
+    )
     try:
         with os.fdopen(temp_fd, "wb") as f:
+            assert private_key_pem is not None
             f.write(private_key_pem)
 
         proc = subprocess.run(
@@ -163,7 +266,12 @@ def _sign_rs256(data: bytes, private_key_pem: bytes) -> bytes:
             pass
 
 
-def generate_jwt(app_id: str, private_key_pem: bytes, now: int | None = None) -> str:
+def generate_jwt(
+    app_id: str,
+    private_key_pem: bytes | None = None,
+    now: int | None = None,
+    private_key_path: Path | None = None,
+) -> str:
     """RS256 で署名された GitHub App JWT を生成する."""
     current_time = int(time.time()) if now is None else now
     header = {"alg": "RS256", "typ": "JWT"}
@@ -177,7 +285,11 @@ def generate_jwt(app_id: str, private_key_pem: bytes, now: int | None = None) ->
     encoded_payload = b64url(json.dumps(payload).encode("utf-8"))
     signing_input = f"{encoded_header}.{encoded_payload}".encode("utf-8")
 
-    signature = _sign_rs256(signing_input, private_key_pem)
+    signature = _sign_rs256(
+        signing_input,
+        private_key_pem=private_key_pem,
+        private_key_path=private_key_path,
+    )
     encoded_signature = b64url(signature)
     return f"{encoded_header}.{encoded_payload}.{encoded_signature}"
 
@@ -200,7 +312,7 @@ def fetch_installation_token(
 
     try:
         if opener is not None:
-            response = opener.open(req)
+            response = opener.open(req, timeout=15)
         else:
             response = urllib.request.urlopen(req, timeout=15)
         response_body = response.read().decode("utf-8")
@@ -234,7 +346,7 @@ def fetch_installation_token(
     return token
 
 
-def obtain_token(repo_root: Path) -> AuthResult:
+def obtain_token(repo_root: Path | None = None) -> AuthResult:
     """Bot 設定があればトークンを取得し、なければ個人認証モードとする."""
     try:
         config = load_bot_config(repo_root)
@@ -263,6 +375,26 @@ def obtain_token(repo_root: Path) -> AuthResult:
             ),
         )
 
+    if not config.install_id.isdigit():
+        return AuthResult(
+            token=None,
+            mode="bot",
+            error=(
+                f"GITHUB_BOT_INSTALL_ID には数値を指定してください: "
+                f"{config.install_id!r}"
+            ),
+        )
+
+    if not config.app_id.isdigit():
+        return AuthResult(
+            token=None,
+            mode="bot",
+            error=(
+                f"GITHUB_BOT_APP_ID には数値を指定してください: "
+                f"{config.app_id!r}"
+            ),
+        )
+
     key_file = Path(os.path.expanduser(config.key_path))
     if not key_file.is_file():
         return AuthResult(
@@ -272,16 +404,8 @@ def obtain_token(repo_root: Path) -> AuthResult:
         )
 
     try:
-        pem_bytes = key_file.read_bytes()
-    except OSError as err:
-        return AuthResult(
-            token=None,
-            mode="bot",
-            error=f"秘密鍵ファイルの読み込みに失敗しました: {err}",
-        )
-
-    try:
-        jwt = generate_jwt(config.app_id, pem_bytes)
+        # ディスク上の秘密鍵ファイルを直接使用 (一時ファイル複製なし)
+        jwt = generate_jwt(config.app_id, private_key_path=key_file)
         token = fetch_installation_token(jwt, config.install_id)
     except Exception as err:
         return AuthResult(token=None, mode="bot", error=str(err))
@@ -294,7 +418,7 @@ def main() -> int:
     repo_root = (
         Path(sys.argv[1]).resolve()
         if len(sys.argv) > 1
-        else Path.cwd().resolve()
+        else resolve_repo_root()
     )
 
     result = obtain_token(repo_root)
