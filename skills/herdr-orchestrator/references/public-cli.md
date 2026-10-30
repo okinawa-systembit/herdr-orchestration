@@ -191,7 +191,7 @@ herdr-orchestrator task-result <task_id>
 
 ### 5.5 未確定 dispatch の復旧 (`reconcile-dispatch`)
 
-プロンプト送信タイムアウト等で dispatch の成否が不明（`dispatch.status: uncertain`）となったタスクを安全に復旧します（詳細は [04-handoff-and-requester.md](../../../docs/herdr-orchestrator/04-handoff-and-requester.md#sec-7-6) を参照）。
+handoff の途中停止等により `dispatch.status: pending` のまま残ったタスクを、`uncertain` または `failed` に確定させて安全に復旧します（詳細は [03-task-registry.md](../../../docs/herdr-orchestrator/03-task-registry.md#sec-6-12) を参照）。
 
 ```bash
 herdr-orchestrator reconcile-dispatch <task_id> \
@@ -199,8 +199,8 @@ herdr-orchestrator reconcile-dispatch <task_id> \
   --dispatch-reason "Worker ペインがビジー状態でタイムアウト"
 ```
 
-- `--dispatch-outcome uncertain|failed`: dispatch 確定結果のステータス。
-- `--dispatch-reason <text>`: dispatch 結果の理由または説明。
+- `--dispatch-outcome uncertain|failed`: dispatch 確定結果のステータス（未指定時はプロンプト未開始シナリオで `action: await_human` を返却）。
+- `--dispatch-reason <text>`: dispatch 結果の理由または説明（`--dispatch-outcome failed` 指定時は必須）。
 
 ---
 
