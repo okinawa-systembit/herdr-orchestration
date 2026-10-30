@@ -78,6 +78,7 @@ herdr-orchestrator role set 調査担当 w16:p1 --global
 
 - `--global`: 全ワークスペース・全リポジトリ共通のロールとして登録します（`~/.local/state/herdr-orchestrator/roles/global.json` に保存）。
 - `--label <display_name>`: Herdr UI のペイン表示名（タブ上のラベル）を個別に指定します（先頭の `--` は自動除去されます）。
+- 出力 JSON には `label_sync`（同期成否・アクション）および `target.label_synced`（同期成功フラグ）が含まれます。
 
 ### 3.2 登録内容の確認 (`role show`)
 
@@ -92,13 +93,15 @@ herdr-orchestrator role show --global
 ### 3.3 ロールの解除 (`role clear`)
 
 ```bash
-# 特定ロールを解除（Herdr UI ペイン名も --clear で復元）
+# 特定ロールを解除（他スコープに残存ロールがなければ Herdr UI ペイン名も --clear で解除）
 herdr-orchestrator role clear レビュワー
 
 # 全ロールを一括解除
 herdr-orchestrator role clear --all
 herdr-orchestrator role clear --all --global
 ```
+
+※ **残存ロールの UI ラベル保護**: 解除対象のペインが別スコープ（ローカルまたはグローバル）で他の現役ロールを兼任している場合、UI ペイン表示名は `--clear` されず残存ロールの表示名が自動維持されます。どのスコープにもロールが存在しなくなった場合のみ `--clear` が実行されます。
 
 ---
 

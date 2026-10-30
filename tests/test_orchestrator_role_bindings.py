@@ -518,7 +518,7 @@ raise SystemExit(99)
 
 
 class CrossWorkspaceRoleBindingTests(unittest.TestCase):
-    """Comprehensive tests for Issue #74 (CW-01 through CW-21)."""
+    """Comprehensive tests for Issue #74 and #79 (CW-01 through CW-23)."""
 
     def setUp(self) -> None:
         self._tmpdir = tempfile.TemporaryDirectory()
@@ -1395,6 +1395,89 @@ raise SystemExit(99)
         self.assertEqual(h3_data["command"], "handoff")
         prompts2 = self.prompt_log.read_text(encoding="utf-8").strip().splitlines()
         self.assertEqual(prompts2[-1].split("|")[0], "w15:p9")
+
+    def test_cw22_role_clear_preserves_surviving_role_pane_label(self) -> None:
+        # CW-22 (Issue #79): Pane bound to both local and global roles.
+        # Clearing one scope preserves the other scope's display_name rather than clearing the UI label.
+        # 1. Bind w15:p2 to local role 'レビュワー'
+        r1 = _run_cli("role", "set", "レビュワー", "w15:p2", env=self.env, cwd=self.repo_a)
+        self.assertEqual(r1.returncode, 0)
+        d1 = json.loads(r1.stdout)
+        self.assertTrue(d1["target"]["label_synced"])
+        self.assertTrue(d1["label_sync"]["synced"])
+        self.assertEqual(d1["label_sync"]["action"], "rename")
+
+        # 2. Bind same w15:p2 to global role 'ticket管理' with custom label
+        r2 = _run_cli(
+            "role",
+            "set",
+            "チケット管理",
+            "w15:p2",
+            "--label=チケット管理 (共通)",
+            "--global",
+            env=self.env,
+            cwd=self.repo_a,
+        )
+        self.assertEqual(r2.returncode, 0)
+        d2 = json.loads(r2.stdout)
+        self.assertTrue(d2["target"]["label_synced"])
+        self.assertEqual(d2["display_name"], "チケット管理 (共通)")
+
+        renames = self.rename_log.read_text(encoding="utf-8").strip().splitlines()
+        self.assertEqual(renames[-1], "w15:p2 チケット管理 (共通)")
+
+        # 3. Clear local role 'レビュワー'.
+        # Since w15:p2 still holds global role 'ticket管理', the label must be preserved / re-synced, NOT cleared!
+        r_clear_local = _run_cli("role", "clear", "レビュワー", env=self.env, cwd=self.repo_a)
+        self.assertEqual(r_clear_local.returncode, 0)
+        d_clear_local = json.loads(r_clear_local.stdout)
+        self.assertIn("w15:p2", d_clear_local["label_sync"])
+        self.assertTrue(d_clear_local["label_sync"]["w15:p2"]["synced"])
+        self.assertEqual(d_clear_local["label_sync"]["w15:p2"]["action"], "rename")
+        self.assertEqual(d_clear_local["label_sync"]["w15:p2"]["label"], "チケット管理 (共通)")
+
+        renames_after_local = self.rename_log.read_text(encoding="utf-8").strip().splitlines()
+        self.assertNotEqual(renames_after_local[-1], "w15:p2 --clear")
+        self.assertEqual(renames_after_local[-1], "w15:p2 チケット管理 (共通)")
+
+        # 4. Clear global role 'チケット管理'.
+        # Now w15:p2 holds no more roles in either scope -> UI label should now be cleared!
+        r_clear_global = _run_cli("role", "clear", "チケット管理", "--global", env=self.env, cwd=self.repo_a)
+        self.assertEqual(r_clear_global.returncode, 0)
+        d_clear_global = json.loads(r_clear_global.stdout)
+        self.assertIn("w15:p2", d_clear_global["label_sync"])
+        self.assertTrue(d_clear_global["label_sync"]["w15:p2"]["synced"])
+        self.assertEqual(d_clear_global["label_sync"]["w15:p2"]["action"], "clear")
+
+        renames_after_global = self.rename_log.read_text(encoding="utf-8").strip().splitlines()
+        self.assertEqual(renames_after_global[-1], "w15:p2 --clear")
+
+    def test_cw23_role_clear_global_from_uninitialized_git_repo(self) -> None:
+        # CW-23 (Issue #79 / RV048 B-1): Clearing a global role from an uninitialized git repo (no identity)
+        # must succeed with exit 0 and clear the UI pane label without crashing on RepositoryIdentityError.
+        # 1. Bind w15:p2 to global role '調査担当'
+        r1 = _run_cli(
+            "role",
+            "set",
+            "調査担当",
+            "w15:p2",
+            "--label=調査担当",
+            "--global",
+            env=self.env,
+            cwd=self.repo_a,
+        )
+        self.assertEqual(r1.returncode, 0)
+        self.assertEqual(self.rename_log.read_text(encoding="utf-8").strip().splitlines()[-1], "w15:p2 調査担当")
+
+        # 2. In repo_b (git init done, but .git/herdr-identity not created yet), run `role clear 調査担当 --global`
+        r_clear = _run_cli("role", "clear", "調査担当", "--global", env=self.env, cwd=self.repo_b)
+        self.assertEqual(r_clear.returncode, 0, r_clear.stdout + r_clear.stderr)
+        d_clear = json.loads(r_clear.stdout)
+        self.assertEqual(d_clear["action"], "clear")
+        self.assertEqual(d_clear["scope"], "global")
+        self.assertIn("w15:p2", d_clear["label_sync"])
+        self.assertEqual(d_clear["label_sync"]["w15:p2"]["action"], "clear")
+        self.assertEqual(self.rename_log.read_text(encoding="utf-8").strip().splitlines()[-1], "w15:p2 --clear")
 
 
 if __name__ == "__main__":

@@ -361,6 +361,102 @@ def _enrich_targets_with_summary(targets: dict[str, dict[str, object]]) -> dict[
     return enriched
 
 
+def _try_resolve_local_scope_id(dir_path: Path | str | None) -> str | None:
+    """Safely resolve local scope_id (repository UUID or dir hash) without raising or exiting on errors."""
+    if not dir_path:
+        return None
+    try:
+        p = Path(dir_path).resolve()
+    except Exception:
+        return None
+
+    # 1. Try Git worktree repository identity
+    try:
+        wt = resolve_worktree_root(p)
+        try:
+            return get_repository_identity(wt)
+        except Exception:
+            # Git repository present but identity uninitialized: no local role binding exists
+            return None
+    except WorktreeError:
+        pass
+    except Exception:
+        pass
+
+    # 2. Try Non-Git directory scope
+    try:
+        resolve_git_common_dir(p)
+        # Inside a git repository: do not fall back to dir-scope binding
+        return None
+    except GitRepositoryNotInitializedError:
+        return derive_directory_scope_id(p)
+    except Exception:
+        return None
+
+
+def _sync_pane_label_after_unbind(
+    pane_id: str,
+    cwd: Path,
+    *,
+    target_cwd: str | Path | None = None,
+) -> dict[str, object]:
+    """Sync Herdr UI pane label after an unbind, preserving label if the pane still holds other roles."""
+    surviving_display_name: str | None = None
+
+    # Determine local directories to check: target_cwd first, then command cwd
+    local_dirs_to_check: list[Path] = []
+    if target_cwd:
+        try:
+            p_target = Path(target_cwd).resolve()
+            local_dirs_to_check.append(p_target)
+        except Exception:
+            pass
+    try:
+        p_cwd = Path(cwd).resolve()
+        if p_cwd not in local_dirs_to_check:
+            local_dirs_to_check.append(p_cwd)
+    except Exception:
+        pass
+
+    # 1. Check local scopes for surviving roles
+    for d in local_dirs_to_check:
+        local_scope = _try_resolve_local_scope_id(d)
+        if local_scope:
+            try:
+                local_doc = get_role_binding_document(local_scope)
+                for r_name, p_id in local_doc.get("roles", {}).items():
+                    if p_id == pane_id:
+                        t_meta = local_doc.get("targets", {}).get(r_name, {})
+                        if isinstance(t_meta, dict):
+                            surviving_display_name = str(t_meta.get("display_name") or r_name)
+                        else:
+                            surviving_display_name = str(r_name)
+                        break
+            except Exception:
+                pass
+        if surviving_display_name is not None:
+            break
+
+    # 2. Check global scope if not found in local scope
+    if surviving_display_name is None:
+        try:
+            global_doc = get_role_binding_document(GLOBAL_SCOPE_ID)
+            for r_name, p_id in global_doc.get("roles", {}).items():
+                if p_id == pane_id:
+                    t_meta = global_doc.get("targets", {}).get(r_name, {})
+                    if isinstance(t_meta, dict):
+                        surviving_display_name = str(t_meta.get("display_name") or r_name)
+                    else:
+                        surviving_display_name = str(r_name)
+                    break
+        except Exception:
+            pass
+
+    if surviving_display_name is not None:
+        return sync_herdr_pane_label(pane_id, surviving_display_name)
+    return sync_herdr_pane_label(pane_id, clear=True)
+
+
 def _cmd_role(ns: argparse.Namespace) -> int:
     action = getattr(ns, "role_action", None)
     is_global = bool(getattr(ns, "is_global", False))
@@ -419,8 +515,11 @@ def _cmd_role(ns: argparse.Namespace) -> int:
 
         scope_id = _resolve_role_scope_id(cwd, is_global=is_global, create_if_missing=True)
         try:
-            before_roles = get_role_bindings(scope_id)
+            before_doc = get_role_binding_document(scope_id)
+            before_roles = before_doc.get("roles", {})
             old_pane_for_role = before_roles.get(canonical_role)
+            old_target_meta = before_doc.get("targets", {}).get(canonical_role, {})
+            old_cwd = old_target_meta.get("cwd") if isinstance(old_target_meta, dict) else None
             roles = set_role_binding(
                 scope_id,
                 canonical_role,
@@ -435,11 +534,12 @@ def _cmd_role(ns: argparse.Namespace) -> int:
                 exit_code=1,
             )
         if old_pane_for_role and old_pane_for_role != valid_pane:
-            sync_herdr_pane_label(old_pane_for_role, clear=True)
-        sync_herdr_pane_label(valid_pane, display_name)
+            _sync_pane_label_after_unbind(old_pane_for_role, cwd, target_cwd=old_cwd)
+        label_sync = sync_herdr_pane_label(valid_pane, display_name)
         target_with_summary = {
             **target_meta,
             "display_summary": format_pane_display_summary(target_meta, fallback_role=canonical_role),
+            "label_synced": label_sync.get("synced", False),
         }
         out_payload: dict[str, object] = {
             "command": "role",
@@ -450,6 +550,7 @@ def _cmd_role(ns: argparse.Namespace) -> int:
             "display_name": display_name,
             "pane_id": roles[canonical_role],
             "target": target_with_summary,
+            "label_sync": label_sync,
             "roles": roles,
         }
         return emit_json(out_payload)
@@ -482,7 +583,9 @@ def _cmd_role(ns: argparse.Namespace) -> int:
     elif action == "clear":
         scope_id = _resolve_role_scope_id(cwd, is_global=is_global, create_if_missing=False)
         try:
-            before_roles = get_role_bindings(scope_id)
+            before_doc = get_role_binding_document(scope_id)
+            before_roles = before_doc.get("roles", {})
+            before_targets = before_doc.get("targets", {})
             roles = clear_role_binding(
                 scope_id,
                 role=getattr(ns, "role", None),
@@ -496,14 +599,23 @@ def _cmd_role(ns: argparse.Namespace) -> int:
                 exit_code=1,
             )
         cleared_panes = set(before_roles.values()) - set(roles.values())
+        label_sync_results: dict[str, object] = {}
         for c_pane in sorted(cleared_panes):
-            sync_herdr_pane_label(c_pane, clear=True)
+            c_cwd = None
+            for r_name, p_id in before_roles.items():
+                if p_id == c_pane:
+                    t_meta = before_targets.get(r_name, {})
+                    if isinstance(t_meta, dict) and t_meta.get("cwd"):
+                        c_cwd = str(t_meta["cwd"])
+                        break
+            label_sync_results[c_pane] = _sync_pane_label_after_unbind(c_pane, cwd, target_cwd=c_cwd)
         return emit_json({
             "command": "role",
             "action": "clear",
             "scope": "global" if is_global else "local",
             "repository_id": scope_id,
             "roles": roles,
+            "label_sync": label_sync_results,
         })
     emit_command_error(
         "invalid_input",

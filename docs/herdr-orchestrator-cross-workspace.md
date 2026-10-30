@@ -162,6 +162,7 @@ Role Binding は `${XDG_STATE_HOME:-~/.local/state}/herdr-orchestrator/roles/` �
   2. 省略された場合は、ユーザーが `role set` に渡したロール引数（例: `role set レビュワー` なら `"レビュワー"`、`role set チケット管理` なら `"チケット管理"`、`role set reviewer` なら `"reviewer"`）をそのまま `display_name` とする。
   3. **【厳守】UI 表示名（`display_name` および Herdr の `pane.label`）は人間向けの視覚的目印・チャット報告専用であり、Worker 解決・生存照合・自動追従の判定ロジックには一切使用しない。**
      - herdr 0.9.5 の `pane rename` は `--` を引数終端として扱わずラベルに含めてしまうため `--` は付けない。設定は `herdr pane rename <pane_id> <display_name>`、クリアは `herdr pane rename <pane_id> --clear` の形式で呼び出す。また、`display_name` は Herdr CLI のオプション引数（`--clear` や `--help` 等）との誤認を防ぐため、先頭の `--` を自動的に除去して設定する（除去後に空文字となる場合は不正な入力として拒否される）。
+     - **兼任ペインにおける `role clear` 時の残存ロール UI ラベル保護**: ペインが複数のロール（ローカルとグローバル等）を兼任している場合、片方のロールを `role clear` しても UI ラベルを無条件に `--clear` してはならない。他スコープに依然としてバインド中の現役ロールが存在する場合は、その残存ロールの `display_name` でラベルを維持・再同期し、どのスコープにもロールが存在しなくなった場合のみ `<pane_id> --clear` を実行する（Issue #79）。
 
 #### 保存 JSON 構造と旧形式ファイルの配送前停止（RV019 B-1 対応）
 
@@ -667,3 +668,5 @@ herdr-orchestrator result-submit task_xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx \
 | CW-19  | Role Binding 更新時の CAS（Compare-And-Swap）競合検出                          | 追従処理中の並行更新を検出し、競合時は `worker_context_changed` として安全に停止する                                                                                                                                                                                                                    |
 | CW-20  | 同一ペインのローカル/グローバル別ロール兼任時の照合検証および提出許可          | 同一ペインにローカル（`レビュワー`）とグローバル（`調査担当`）が登録されている場合、タスク受信時に登録ロール群に含まれていればローカル宛て・グローバル宛てともに `verified: true` で作業着手可能であり、`result-submit` も正常受理される。無関係な別ロール宛ての場合は `verified: false` で安全停止する |
 | CW-21  | 同一ペイン兼任ロールの片側追従後の安全停止と再設定                             | 兼任ペインの片方ロール追従後、もう一方のロール宛て handoff はセッション一致時でも `worker_pane_closed_or_missing` で安全停止し、`role set` で新ペインに再バインドした後は正常配送できる                                                                                                                 |
+| CW-22  | 同一ペイン兼任ロールの片側解除（`role clear`）時の残存ロール UI ラベル保護     | ローカルとグローバルを兼任するペインで片側を `role clear` した場合に `--clear` されず残存ロールの `display_name` が維持され、全スコープ未バインドとなった場合のみ `--clear` される（Issue #79）                                                                                                         |
+| CW-23  | identity 未初期化 Git リポジトリからの `role clear --global` 実行              | Git リポジトリの identity が未初期化の環境からグローバルロールを解除しても `RepositoryIdentityError` でクラッシュせず正常に exit 0 で解除・UI ラベル同期される（Issue #79 / RV048 B-1 回帰）                                                                                                            |
