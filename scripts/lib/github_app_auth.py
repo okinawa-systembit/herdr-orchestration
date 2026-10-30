@@ -46,6 +46,7 @@ def resolve_repo_root(start_dir: Path | None = None) -> Path:
     """カレントディレクトリまたは指定パスからリポジトリルートを解決する.
 
     1. git rev-parse --show-toplevel を試行
+       - 対象 worktree に .env.github-app がない場合、--git-common-dir の親 (メインリポジトリ) も探索
     2. 失敗した場合は start_dir から親方向へ .git または .env.github-app/.env.github を探索
     3. 見つからなければ start_dir (または cwd) を返す
     """
@@ -62,7 +63,31 @@ def resolve_repo_root(start_dir: Path | None = None) -> Path:
         if proc.returncode == 0:
             top_level = proc.stdout.strip()
             if top_level:
-                return Path(top_level).resolve()
+                top_path = Path(top_level).resolve()
+                if (top_path / ".env.github-app").is_file() or (
+                    top_path / ".env.github"
+                ).is_file():
+                    return top_path
+
+                # linked worktree の場合、メインリポジトリ側の設定もフォールバック探索
+                proc_common = subprocess.run(
+                    ["git", "rev-parse", "--git-common-dir"],
+                    cwd=base,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                if proc_common.returncode == 0:
+                    common_dir = proc_common.stdout.strip()
+                    if common_dir:
+                        common_path = (top_path / common_dir).resolve()
+                        main_root = common_path.parent
+                        if (main_root / ".env.github-app").is_file() or (
+                            main_root / ".env.github"
+                        ).is_file():
+                            return main_root
+
+                return top_path
     except OSError:
         pass
 
@@ -375,22 +400,25 @@ def obtain_token(repo_root: Path | None = None) -> AuthResult:
             ),
         )
 
-    if not config.install_id.isdigit():
+    def _is_valid_positive_int(s: str) -> bool:
+        return s.isascii() and s.isdigit() and int(s) > 0
+
+    if not _is_valid_positive_int(config.install_id):
         return AuthResult(
             token=None,
             mode="bot",
             error=(
-                f"GITHUB_BOT_INSTALL_ID には数値を指定してください: "
+                f"GITHUB_BOT_INSTALL_ID には正の整数を指定してください: "
                 f"{config.install_id!r}"
             ),
         )
 
-    if not config.app_id.isdigit():
+    if not _is_valid_positive_int(config.app_id):
         return AuthResult(
             token=None,
             mode="bot",
             error=(
-                f"GITHUB_BOT_APP_ID には数値を指定してください: "
+                f"GITHUB_BOT_APP_ID には正の整数を指定してください: "
                 f"{config.app_id!r}"
             ),
         )

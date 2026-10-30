@@ -420,25 +420,37 @@ class TestGitHubAppAuth(unittest.TestCase):
         self.assertIn("GITHUB_APP_PRIVATE_KEY_PATH", res.error)
 
     def test_obtain_token_non_numeric_ids_stops_with_error(self) -> None:
-        """app_id または install_id が非数値の場合、エラーになる (P3-3)."""
+        """app_id または install_id が正の整数でない場合、エラーになる (P3-3, RV059 P3-1)."""
         key_path = self.tmp_path / "bot.pem"
         key_path.write_bytes(self.test_rsa_pem)
 
-        # 不正な install_id
+        # 不正な install_id (記号混入)
         os.environ["GITHUB_BOT_APP_ID"] = "123"
         os.environ["GITHUB_BOT_INSTALL_ID"] = "456/invalid"
         os.environ["GITHUB_APP_PRIVATE_KEY_PATH"] = str(key_path)
 
         res = obtain_token(self.tmp_path)
         self.assertEqual(res.mode, "bot")
-        self.assertIn("GITHUB_BOT_INSTALL_ID には数値を指定してください", res.error or "")
+        self.assertIn("GITHUB_BOT_INSTALL_ID には正の整数を指定してください", res.error or "")
+
+        # 不正な install_id (全角数字)
+        os.environ["GITHUB_BOT_INSTALL_ID"] = "１２３"
+        res = obtain_token(self.tmp_path)
+        self.assertEqual(res.mode, "bot")
+        self.assertIn("GITHUB_BOT_INSTALL_ID には正の整数を指定してください", res.error or "")
+
+        # 不正な install_id (0)
+        os.environ["GITHUB_BOT_INSTALL_ID"] = "0"
+        res = obtain_token(self.tmp_path)
+        self.assertEqual(res.mode, "bot")
+        self.assertIn("GITHUB_BOT_INSTALL_ID には正の整数を指定してください", res.error or "")
 
         # 不正な app_id
         os.environ["GITHUB_BOT_INSTALL_ID"] = "456"
         os.environ["GITHUB_BOT_APP_ID"] = "abc_app"
         res = obtain_token(self.tmp_path)
         self.assertEqual(res.mode, "bot")
-        self.assertIn("GITHUB_BOT_APP_ID には数値を指定してください", res.error or "")
+        self.assertIn("GITHUB_BOT_APP_ID には正の整数を指定してください", res.error or "")
 
     def test_obtain_token_missing_key_file_stops_with_error(self) -> None:
         """秘密鍵ファイルが存在しない場合、個人認証へフォールバックせずエラーになる."""
