@@ -33,16 +33,17 @@ Herdr 本体の自動セッション復元（`resume`）に干渉しないよう
 > [!TIP]
 > **ロール設定・スコープ変更時のベストプラクティス**:
 >
+> - **自ペイン特定と `--pane` の明示義務（環境変数残留防止）**: エージェントのツール実行環境（バックグラウンドワーカー／常駐シェル）が再利用される場合、以前に実行した別ペインの環境変数（`HERDR_PANE_ID` やセッションID）が引き継がれていることがあります。環境変数の暗黙解決による別ペインへの誤登録を防ぐため、ロール設定時はペイン引数の省略を行わず、まず `herdr pane list` で現在の作業ディレクトリ（CWD）やプロジェクトと一致する自ペインID（例: `wV:p1`）を特定し、必ず `--pane <pane_id>` を明示して実行してください。
 > - **人間向け表示名の明示**: ロール登録時は、人間が Herdr UI 上で一目で役割を把握できるよう、常に `--label "<人間向け表示名>"`（例: `--label "チケット管理 (共通)"`）を明示することを推奨します。
-> - **スコープ変更（ローカル⇔グローバル）時の2段階移行手順**: ロールをローカルからグローバルへ（またはその逆へ）変更する際は、先に `role clear` を実行すると一時的にラベルが途切れてしまうため、**① 新スコープで `role set <role> --label "<表示名>" [--global]`** を実行し、続けて **② 旧スコープで必ず `role clear <role> [--global]`** を実行して移行を完結させてください。残存ロール保護により旧スコープ解除時も新スコープのラベルは維持されます。※ 旧スコープの解除を忘れると同名ロール重複となり、以降の `handoff` が `worker_role_scope_ambiguous` で確認停止します。
+> - **スコープ変更（ローカル⇔グローバル）時の2段階移行手順**: ロールをローカルからグローバルへ（またはその逆へ）変更する際は、先に `role clear` を実行すると一時的にラベルが途切れてしまうため、**① 新スコープで `role set <role> --pane <pane_id> --label "<表示名>" [--global]`** を実行し、続けて **② 旧スコープで必ず `role clear <role> [--global]`** を実行して移行を完結させてください。残存ロール保護により旧スコープ解除時も新スコープのラベルは維持されます。※ 旧スコープの解除を忘れると同名ロール重複となり、以降の `handoff` が `worker_role_scope_ambiguous` で確認停止します。
 
 ```bash
-# 現在のペイン（HERDR_PANE_ID）にローカルロールを紐づける（<pane_id> 省略可）
-herdr-orchestrator role set implementer
-herdr-orchestrator role set reviewer w15:p2 --label "レビュワー"
+# herdr pane list で自ペイン（例: w15:p1, w15:p2）の CWD を確認してロールを紐づける
+herdr-orchestrator role set implementer --pane w15:p1 --label "実装者"
+herdr-orchestrator role set reviewer --pane w15:p2 --label "レビュワー"
 
-# 現在のペインをグローバルロール「調査」として登録し、UI 表示名を指定する
-herdr-orchestrator role set 調査 --label "調査 (ログ解析)" --global
+# グローバル共通ロールとして登録し、UI 表示名を指定する（自ペインの --pane を明示）
+herdr-orchestrator role set 調査 --pane w15:p1 --label "調査 (ログ解析)" --global
 
 # 紐づけ一覧を確認する（--global でグローバル一覧）
 herdr-orchestrator role show

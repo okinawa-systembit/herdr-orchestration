@@ -63,19 +63,20 @@ herdr-orchestrator identity show
 ### 3.1 ロールの登録 (`role set`)
 
 ```bash
-# 自ペインを「メイン」として登録（pane_id を省略すると現在の HERDR_PANE_ID を使用）
-herdr-orchestrator role set メイン
+# 自ペインを「メイン」として登録（herdr pane list で CWD を確認して --pane を明示することを推奨）
+herdr-orchestrator role set メイン --pane w15:p1 --label "メイン"
 
 # 特定のペイン（w15:p2）を「レビュワー」として登録
-herdr-orchestrator role set レビュワー w15:p2
+herdr-orchestrator role set レビュワー --pane w15:p2 --label "レビュワー"
 
 # 英語ロール名で登録し、Herdr UI 上の表示名を日本語にする場合
-herdr-orchestrator role set reviewer w15:p2 --label "レビュワー"
+herdr-orchestrator role set reviewer --pane w15:p2 --label "レビュワー"
 
 # 別ワークスペースのペインをグローバル共通ロールとして登録する場合
-herdr-orchestrator role set 調査担当 w16:p1 --global
+herdr-orchestrator role set 調査担当 --pane w16:p1 --label "調査担当" --global
 ```
 
+- `--pane <pane_id>`: 対象ペイン ID（位置引数 `<pane_id>` でも可）。省略時は環境変数 `HERDR_PANE_ID` を使用しますが、エージェントの常駐プロセス再利用等による環境変数残留を防ぐため、`herdr pane list` で CWD を確認して `--pane` を明示することを推奨します。
 - `--global`: 全ワークスペース・全リポジトリ共通のロールとして登録します（`~/.local/state/herdr-orchestrator/roles/global.json` に保存）。
 - `--label <display_name>`: Herdr UI のペイン表示名（タブ上のラベル）を個別に指定します（先頭の `--` は自動除去されます）。
 - 出力 JSON には `label_sync`（同期成否・アクション）および `target.label_synced`（同期成功フラグ）が含まれます。
