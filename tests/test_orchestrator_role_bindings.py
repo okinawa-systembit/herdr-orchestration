@@ -809,14 +809,14 @@ raise SystemExit(99)
             "--result-status",
             "succeeded",
             "--summary",
-            "未完了TODOは2件です: 1. 設計レビュー, 2. テスト追加",
+            "未完了チケットは2件です: 1. 設計レビュー, 2. テスト追加",
             env=todo_env,
             cwd=self.todo_dir,
         )
         self.assertEqual(sub_res.returncode, 0, sub_res.stdout + sub_res.stderr)
         sub_json = json.loads(sub_res.stdout)
         self.assertIsNone(sub_json["result"]["ref"])
-        self.assertIn("未完了TODOは2件です", sub_json["result"]["summary"])
+        self.assertIn("未完了チケットは2件です", sub_json["result"]["summary"])
         self.assertEqual(sub_json["completion_chain"]["completion"]["status"], "sent")
 
     def test_cw06_same_pane_same_terminal_agent_restart_continues_transparently(self) -> None:
@@ -1234,17 +1234,17 @@ raise SystemExit(99)
         self.assertEqual(res_sub_local.returncode, 0, res_sub_local.stdout)
         self.assertEqual(json.loads(res_sub_local.stdout)["task_id"], local_task_id)
 
-        # --- Case 3: Task for another pane ('todo管理' on w16:p1) queried from w15:p2 ---
-        res_set_other = _run_cli("role", "set", "todo管理", "w16:p1", env=self.env, cwd=self.repo_a)
+        # --- Case 3: Task for another pane ('チケット管理' on w16:p1) queried from w15:p2 ---
+        res_set_other = _run_cli("role", "set", "チケット管理", "w16:p1", env=self.env, cwd=self.repo_a)
         self.assertEqual(res_set_other.returncode, 0, res_set_other.stdout)
         res_h_other = _run_cli(
             "handoff",
             "--mode",
             "async",
             "--to",
-            "todo管理",
+            "チケット管理",
             "--instruction",
-            "manage todos",
+            "manage tickets",
             env=self.env,
             cwd=self.repo_a,
         )

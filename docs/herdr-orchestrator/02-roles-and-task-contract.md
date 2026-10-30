@@ -21,7 +21,7 @@
 
 `orchestrator` は委譲や進行確認を担当できる Agent の role であり、Task Registry の状態遷移を実行する `herdr-orchestrator` CLI とは別である。Agent は Registry を直接編集しない。
 
-上記の初期標準 4 role は Pattern A（`r-<hash16>-<role>`）命名フォールバックの対象である。これに加え、[§4.1](#sec-4-1) の Role Binding（ローカルまたは `--global`）では、任意の日本語・カスタムロール名（例: `調査`, `レビュワー`, `実装者`, `ログ調査`, `todo管理`, `tester`, `researcher` 等。システム予約値 `"unbound"` を除く）を登録・委譲先として指定できる（詳細は [クロスワークスペース設計書 §3](../herdr-orchestrator-cross-workspace.md#sec-3)）。
+上記の初期標準 4 role は Pattern A（`r-<hash16>-<role>`）命名フォールバックの対象である。これに加え、[§4.1](#sec-4-1) の Role Binding（ローカルまたは `--global`）では、任意の日本語・カスタムロール名（例: `調査`, `レビュワー`, `実装者`, `ログ調査`, `チケット管理`, `tester`, `researcher` 等。システム予約値 `"unbound"` を除く）を登録・委譲先として指定できる（詳細は [クロスワークスペース設計書 §3](../herdr-orchestrator-cross-workspace.md#sec-3)）。
 
 専任のカスタムロールを Role Binding で登録していない環境では、標準 4 role への委譲先は次に統一する。
 
