@@ -555,7 +555,7 @@ def build_parser() -> argparse.ArgumentParser:
                 "--to",
                 dest="to_role",
                 default=None,
-                help="--worker-role の短縮エイリアス（例: --to reviewer, --to TODO管理）",
+                help="--worker-role の短縮エイリアス（例: --to reviewer, --to チケット管理）",
             )
             p.add_argument(
                 "--scope",
