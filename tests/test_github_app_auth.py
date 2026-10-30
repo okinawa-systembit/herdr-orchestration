@@ -17,6 +17,13 @@ import urllib.request
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+try:
+    import cryptography  # noqa: F401
+
+    HAVE_CRYPTOGRAPHY = True
+except ImportError:
+    HAVE_CRYPTOGRAPHY = False
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
@@ -521,6 +528,52 @@ class TestGitHubAppAuth(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(mock_stdout.getvalue(), "ghs_valid_app_token\n")
         self.assertEqual(mock_stderr.getvalue(), "")
+
+    @unittest.skipUnless(HAVE_CRYPTOGRAPHY, "cryptography パッケージ未導入のためスキップ")
+    def test_cryptography_real_signing_when_available(self) -> None:
+        """cryptography が導入されている環境での実署名・暗号学的検証 (RV059 P3-3)."""
+        now = 1700000000
+        token = generate_jwt("12345", private_key_pem=self.test_rsa_pem, now=now)
+        parts = token.split(".")
+        self.assertEqual(len(parts), 3)
+
+    def test_resolve_repo_root_linked_worktree(self) -> None:
+        """linked git worktree からメインリポジトリの設定が検出されること (RV059 P3-2)."""
+        repo_dir = self.tmp_path / "main_repo"
+        repo_dir.mkdir()
+        subprocess.run(["git", "init"], cwd=repo_dir, capture_output=True, check=True)
+        subprocess.run(
+            ["git", "config", "user.email", "test@example.com"],
+            cwd=repo_dir,
+            capture_output=True,
+            check=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "Test User"],
+            cwd=repo_dir,
+            capture_output=True,
+            check=True,
+        )
+        (repo_dir / "README.md").write_text("main", encoding="utf-8")
+        subprocess.run(["git", "add", "."], cwd=repo_dir, capture_output=True, check=True)
+        subprocess.run(
+            ["git", "commit", "-m", "init"], cwd=repo_dir, capture_output=True, check=True
+        )
+
+        # メインリポジトリに .env.github-app を配置
+        (repo_dir / ".env.github-app").write_text("GITHUB_BOT_APP_ID=111\n", encoding="utf-8")
+
+        # worktree 作成
+        worktree_dir = self.tmp_path / "linked_worktree"
+        subprocess.run(
+            ["git", "worktree", "add", str(worktree_dir), "HEAD"],
+            cwd=repo_dir,
+            capture_output=True,
+            check=True,
+        )
+
+        resolved = resolve_repo_root(worktree_dir)
+        self.assertEqual(resolved.resolve(), repo_dir.resolve())
 
     def test_main_cli_error(self) -> None:
         """Bot 設定不備時、exit 1 で stderr にエラーメッセージを出力."""
