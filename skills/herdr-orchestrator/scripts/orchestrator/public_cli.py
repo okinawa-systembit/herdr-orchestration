@@ -373,12 +373,22 @@ def _try_resolve_local_scope_id(dir_path: Path | str | None) -> str | None:
     # 1. Try Git worktree repository identity
     try:
         wt = resolve_worktree_root(p)
-        return get_repository_identity(wt)
+        try:
+            return get_repository_identity(wt)
+        except Exception:
+            # Git repository present but identity uninitialized: no local role binding exists
+            return None
+    except WorktreeError:
+        pass
     except Exception:
         pass
 
     # 2. Try Non-Git directory scope
     try:
+        resolve_git_common_dir(p)
+        # Inside a git repository: do not fall back to dir-scope binding
+        return None
+    except GitRepositoryNotInitializedError:
         return derive_directory_scope_id(p)
     except Exception:
         return None

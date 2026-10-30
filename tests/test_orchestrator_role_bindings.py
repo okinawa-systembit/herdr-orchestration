@@ -518,7 +518,7 @@ raise SystemExit(99)
 
 
 class CrossWorkspaceRoleBindingTests(unittest.TestCase):
-    """Comprehensive tests for Issue #74 (CW-01 through CW-21)."""
+    """Comprehensive tests for Issue #74 and #79 (CW-01 through CW-23)."""
 
     def setUp(self) -> None:
         self._tmpdir = tempfile.TemporaryDirectory()
