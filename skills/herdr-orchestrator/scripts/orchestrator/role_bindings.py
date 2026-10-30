@@ -132,6 +132,9 @@ def validate_display_name(label: str | None, *, default_from_role_arg: str) -> s
         text = label.strip()
     else:
         text = default_from_role_arg.strip() if isinstance(default_from_role_arg, str) else ""
+    # 先頭の '--' を除去（Herdr CLI のオプション引数誤認を全般的に防止）
+    while text.startswith("--"):
+        text = text[2:].strip()
     if not text or len(text) > 64 or any(ord(c) < 32 or ord(c) == 127 for c in text):
         raise RoleBindingError("invalid_input", message=f"invalid display_name: {text!r}")
     return text

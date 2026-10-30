@@ -50,6 +50,26 @@ def _registry_to_public(exc: RegistryError) -> ResultCommandError:
     )
 
 
+def _lookup_all_bound_roles(repo_id: str, pane_id: str | None) -> dict[str, str]:
+    """Return dict of scope -> bound_role for the pane (e.g., {'local': 'レビュワー', 'global': '調査担当'})."""
+    roles: dict[str, str] = {}
+    if not pane_id:
+        return roles
+    try:
+        lr = resolve_role_by_pane(repo_id, pane_id)
+        if lr:
+            roles["local"] = lr
+    except RoleBindingError:
+        pass
+    try:
+        gr = resolve_role_by_pane(GLOBAL_SCOPE_ID, pane_id)
+        if gr:
+            roles["global"] = gr
+    except RoleBindingError:
+        pass
+    return roles
+
+
 def _lookup_bound_role(repo_id: str, pane_id: str | None) -> str | None:
     if not pane_id:
         return None
@@ -120,7 +140,8 @@ def build_recipient_verification(doc: dict[str, Any]) -> dict[str, Any]:
 
     caller_pane = (caller.pane_id or caller.name or "").strip()
     caller_cwd = caller.foreground_cwd.resolve()
-    bound_role = _lookup_bound_role(repo_id, caller_pane)
+    bound_roles = _lookup_all_bound_roles(repo_id, caller_pane)
+    bound_role = bound_roles.get("local") or bound_roles.get("global")
 
     is_worker_caller = caller_pane == worker_pane or caller.name == worker_agent_name
     is_requester_caller = caller_pane == requester_pane or caller.name == requester_agent_name
@@ -132,17 +153,24 @@ def build_recipient_verification(doc: dict[str, Any]) -> dict[str, Any]:
             worktree_path=worktree_path,
             repository_identity=repo_id,
         )
-        role_ok = bound_role is None or bound_role == worker_role
+        if not bound_roles:
+            role_ok = True
+        else:
+            role_ok = (worker_role in bound_roles.values()) if worker_role else True
+
         if cwd_ok and role_ok:
+            caller_payload = {
+                "bound_role": worker_role if (worker_role and bound_roles and worker_role in bound_roles.values()) else (bound_role or worker_role),
+                "pane_id": caller_pane,
+                "cwd": str(caller_cwd),
+            }
+            if bound_roles:
+                caller_payload["bound_roles"] = bound_roles
             return {
                 "verified": True,
                 "caller_role_in_task": "worker",
                 "expected_worker": expected_worker_summary,
-                "actual_caller": {
-                    "bound_role": bound_role or worker_role,
-                    "pane_id": caller_pane,
-                    "cwd": str(caller_cwd),
-                },
+                "actual_caller": caller_payload,
             }
         return {
             "verified": False,
@@ -152,6 +180,7 @@ def build_recipient_verification(doc: dict[str, Any]) -> dict[str, Any]:
             "expected_worker": expected_worker_summary,
             "actual_caller": {
                 "bound_role": bound_role,
+                "bound_roles": bound_roles,
                 "pane_id": caller_pane,
                 "cwd": str(caller_cwd),
             },
@@ -284,13 +313,13 @@ def verify_worker_submit_context(
             task_id=None,
         )
     if expected_worker_role is not None and caller.pane_id:
-        bound_role = _lookup_bound_role(expected_repository_identity, caller.pane_id)
-        if bound_role is not None and bound_role != expected_worker_role:
+        bound_roles = _lookup_all_bound_roles(expected_repository_identity, caller.pane_id)
+        if bound_roles and expected_worker_role not in bound_roles.values():
             raise ResultCommandError(
                 "worker_context_unverified",
                 message=(
-                    f"caller pane {caller.pane_id!r} was rebound to role {bound_role!r} "
-                    f"(expected {expected_worker_role!r})"
+                    f"caller pane {caller.pane_id!r} is not bound to expected role {expected_worker_role!r} "
+                    f"(bound roles: {bound_roles})"
                 ),
                 retryable=False,
             )

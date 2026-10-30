@@ -368,14 +368,18 @@ def sync_herdr_pane_label(
     *,
     clear: bool = False,
 ) -> None:
-    """Best-effort Herdr UI pane rename (`herdr pane rename -- <pane_id> <display_name>`)."""
+    """Best-effort Herdr UI pane rename (`herdr pane rename <pane_id> <display_name>` / `herdr pane rename <pane_id> --clear`)."""
     if os.environ.get("HERDR_ENV") != "1":
         return
     try:
         if clear:
-            run_herdr(["pane", "rename", "--clear", "--", pane_id])
+            run_herdr(["pane", "rename", pane_id, "--clear"])
         elif display_name:
-            run_herdr(["pane", "rename", "--", pane_id, display_name])
+            clean_name = display_name
+            while clean_name.startswith("--"):
+                clean_name = clean_name[2:].strip()
+            if clean_name:
+                run_herdr(["pane", "rename", pane_id, clean_name])
     except HerdrCliError:
         pass
 

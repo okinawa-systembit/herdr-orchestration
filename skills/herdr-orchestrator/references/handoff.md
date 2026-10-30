@@ -8,6 +8,15 @@
 
 `herdr-orchestrator handoff` は public CLI で提供（段階 4+）。repository 側は [worker-receive.md](worker-receive.md) / [requester-receive.md](requester-receive.md) を Skill に組み込む。
 
+## 委託前（Requester）の手順
+
+1. **登録ロールの確認と柔軟マッチング**:
+   - `handoff` 実行前に `herdr-orchestrator role show` を実行し、現在有効な登録ロール一覧を確認する。
+   - ユーザーの指示（例: 「レビュー依頼をして」「調査依頼をして」）に対して、一覧の中から最も意味の合致する登録ロール名（例: `レビュワー`、`reviewer`、`調査担当`、`ログ調査`）を AI が判断し、その正確な登録名を `--to <role>` または `--worker-role <role>` に指定する。
+   - **曖昧時の人間確認**: 指示語と完全一致する登録ロールがなく、かつ意味的に合致する候補が 0 件、または 2 件以上存在する場合（例: `調査` と `ログ調査`、`reviewer` と `レビュワー` が併存しどちらか特定できない場合）は、AI 自身の独断で委託してはならない。必ず `herdr-orchestrator role show` の登録ロール一覧を提示し、人間に宛先ロールの確認を仰ぐこと。
+2. **セルフ作業の禁止**:
+   - ユーザーから「依頼をして」「委託して」と指示されたタスクについて、依頼元（Requester）ペイン自身で作業（コードレビューや調査・ファイル編集など）を直接セルフ実行してはならない。必ず `handoff` を用いて委託すること。
+
 ## クロスワークスペース配送・スコープ重複・ペイン状態変更時の対応
 
 正本: [herdr-orchestrator-cross-workspace.md](../../../docs/herdr-orchestrator-cross-workspace.md)

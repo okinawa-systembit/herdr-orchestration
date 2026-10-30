@@ -83,6 +83,7 @@ description: >-
 3. テスト実行と結果確認:
    `npm run test:orchestrator`（必要なら `npm run verify:orchestrator`）を実行。
 4. 同一 worktree・requester pane から **sync handoff**（instruction は短く、inbox を指す）:
+   ※ 対象ペインが標準ロール名 `reviewer`（日本語表示は `--label "レビュワー"`）で Role Binding 登録されている必要があります。日本語名（例: `レビュワー`）で登録している環境では、`role show` で確認した登録名を `--worker-role` または `--to` に指定してください（例: `--to レビュワー`）。
 
 ```bash
 herdr-orchestrator handoff \

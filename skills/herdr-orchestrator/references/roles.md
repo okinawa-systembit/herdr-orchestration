@@ -27,7 +27,7 @@ Herdr 本体の自動セッション復元（`resume`）に干渉しないよう
 
 - **ローカル Role Binding**: 現在の Git リポジトリ（`<uuid>.json`）または Non-Git ディレクトリ（`dir_<hash16>.json`）固有の紐づけ。
 - **グローバル Role Binding（`--global`）**: ワークスペースを跨いでどのディレクトリからでも呼び出せる共通ロール（`global.json`）。
-- **UI ラベルの自動連動**: `role set` 実行時に `herdr pane rename -- <pane_id> <display_name>` で Herdr UI 上のペイン表示名にも自動反映される（`role clear` 時は `--clear` で解除）。※ UI ラベルは 100% 人間向けの表示用であり、照合や自動追従の判定ロジックには一切使用しない。
+- **UI ラベルの自動連動**: `role set` 実行時に `herdr pane rename <pane_id> <display_name>` で Herdr UI 上のペイン表示名にも自動反映される（`role clear` 時は `<pane_id> --clear` で解除）。※ UI ラベルは 100% 人間向けの表示用であり、照合や自動追従の判定ロジックには一切使用しない。
 
 ```bash
 # 現在のペイン（HERDR_PANE_ID）にローカルロールを紐づける（<pane_id> 省略可）

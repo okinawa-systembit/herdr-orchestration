@@ -518,7 +518,7 @@ raise SystemExit(99)
 
 
 class CrossWorkspaceRoleBindingTests(unittest.TestCase):
-    """Comprehensive tests for Issue #74 (CW-01 through CW-16)."""
+    """Comprehensive tests for Issue #74 (CW-01 through CW-21)."""
 
     def setUp(self) -> None:
         self._tmpdir = tempfile.TemporaryDirectory()
@@ -678,9 +678,9 @@ raise SystemExit(99)
         state["panes"] = panes
         self.herdr_state_file.write_text(json.dumps(state), encoding="utf-8")
 
-    def test_cw01_cw02_japanese_synonyms_custom_roles_and_pane_rename(self) -> None:
+    def test_cw01_cw02_japanese_and_custom_roles_and_pane_rename(self) -> None:
         # CW-01 & CW-02: Implicit $HERDR_PANE_ID, Japanese role stored as-is ('レビュワー' -> 'レビュワー'),
-        # NFKC + lowercase normalization ('ＴＯＤＯ管理' -> 'todo管理'), and Herdr UI pane rename (-- and --clear)
+        # NFKC + lowercase normalization ('ＴＯＤＯ管理' -> 'todo管理'), and Herdr UI pane rename (display_name and --clear)
         rev_env = {**self.env, "HERDR_PANE_ID": "w15:p2"}
         r1 = _run_cli("role", "set", "レビュワー", env=rev_env, cwd=self.repo_a)
         self.assertEqual(r1.returncode, 0, r1.stdout + r1.stderr)
@@ -699,18 +699,32 @@ raise SystemExit(99)
         self.assertEqual(d2["display_name"], "ＴＯＤＯ管理")
         self.assertIn("ワークスペース #2「todo-ws」の『ＴＯＤＯ管理』", d2["target"]["display_summary"])
 
-        # Clear global role -> triggers `herdr pane rename --clear -- w16:p1`
+        # Clear global role -> triggers `herdr pane rename w16:p1 --clear`
         r_clear = _run_cli("role", "clear", "todo管理", "--global", env=self.env, cwd=self.repo_a)
         self.assertEqual(r_clear.returncode, 0)
         renames = self.rename_log.read_text(encoding="utf-8").strip().splitlines()
         self.assertEqual(
             renames,
             [
-                "-- w15:p2 レビュワー",
-                "-- w16:p1 ＴＯＤＯ管理",
-                "--clear -- w16:p1",
+                "w15:p2 レビュワー",
+                "w16:p1 ＴＯＤＯ管理",
+                "w16:p1 --clear",
             ],
         )
+
+        # CW-17: Leading '--' stripped from display_name to prevent option collision (e.g., '--clear' -> 'clear')
+        r_strip = _run_cli("role", "set", "reviewer", "w15:p2", "--label=--clear", env=self.env, cwd=self.repo_a)
+        self.assertEqual(r_strip.returncode, 0, r_strip.stdout)
+        d_strip = json.loads(r_strip.stdout)
+        self.assertEqual(d_strip["display_name"], "clear")
+        renames = self.rename_log.read_text(encoding="utf-8").strip().splitlines()
+        self.assertEqual(renames[-1], "w15:p2 clear")
+
+        # But bare '--' becomes empty after stripping leading '--' -> rejected as invalid_input
+        r_empty = _run_cli("role", "set", "reviewer", "w15:p2", "--label=--", env=self.env, cwd=self.repo_a)
+        self.assertEqual(r_empty.returncode, 1)
+        d_empty = json.loads(r_empty.stdout)
+        self.assertEqual(d_empty["error"], "invalid_input")
 
     def test_cw03_scope_ambiguity_and_explicit_scope_resolution(self) -> None:
         # CW-03: Same role name ('調査') bound in both local and global
@@ -1070,7 +1084,7 @@ raise SystemExit(99)
         self.assertTrue(_non_empty_str_match("term_1", "term_1"))
 
     def test_pattern_a_failure_includes_available_roles_in_details(self) -> None:
-        # B-1: Register 'レビュワー', then try to handoff to 'reviewer'.
+        # CW-18 (B-1): Register 'レビュワー', then try to handoff to 'reviewer'.
         # Falls back to Pattern A (r-<hash16>-reviewer) which is unavailable,
         # but the error output must provide available_roles to guide the user.
         _run_cli("role", "set", "実装者", "w15:p1", env=self.env, cwd=self.repo_a)
@@ -1094,7 +1108,7 @@ raise SystemExit(99)
         self.assertIn("レビュワー", err["available_roles"]["local"])
 
     def test_cas_mismatch_during_handoff_stops_with_worker_context_changed(self) -> None:
-        # N-1: If compare_and_update_role_binding returns False due to concurrent change,
+        # CW-19 (N-1): If compare_and_update_role_binding returns False due to concurrent change,
         # handoff must stop with worker_context_changed rather than delivering to wrong target.
         _run_cli("role", "set", "reviewer", "w15:p2", env=self.env, cwd=self.repo_a)
 
@@ -1126,6 +1140,261 @@ raise SystemExit(99)
             os.environ.clear()
             os.environ.update(old_env)
             os.chdir(old_cwd)
+
+    def test_cw20_multi_role_pane_verification_and_submit(self) -> None:
+        # CW-20: Same pane bound to local role ('レビュワー') and global role ('調査担当').
+        # 1. When receiving task for global role, recipient_verification returns verified=True,
+        #    caller_role_in_task='worker', and bound_role='調査担当'. result-submit succeeds.
+        # 2. When receiving task for local role, recipient_verification returns verified=True,
+        #    caller_role_in_task='worker', and bound_role='レビュワー'. result-submit succeeds.
+        # 3. When querying task bound to another pane ('テスター' on w15:p3), recipient_verification returns
+        #    verified=False, caller_role_in_task='other', and reason='caller_not_task_participant'.
+        # 4. If pane is rebound to an unrelated role ('記録係') after task creation, recipient_verification returns
+        #    verified=False (reason='recipient_role_or_cwd_mismatch'), and result-submit fails (worker_context_unverified).
+        _run_cli("role", "set", "メイン", "w15:p1", env=self.env, cwd=self.repo_a)
+        _run_cli("role", "set", "レビュワー", "w15:p2", env=self.env, cwd=self.repo_a)
+        _run_cli("role", "set", "調査担当", "w15:p2", "--global", env=self.env, cwd=self.repo_a)
+
+        p2_env = {**self.env, "HERDR_PANE_ID": "w15:p2"}
+
+        # --- Case 1: Global task for '調査担当' ---
+        res_h_global = _run_cli(
+            "handoff",
+            "--mode",
+            "async",
+            "--to",
+            "調査担当",
+            "--scope",
+            "global",
+            "--instruction",
+            "investigate logs",
+            env=self.env,
+            cwd=self.repo_a,
+        )
+        self.assertEqual(res_h_global.returncode, 0, res_h_global.stdout)
+        global_task_id = json.loads(res_h_global.stdout)["task_id"]
+
+        res_stat_global = _run_cli("task-status", global_task_id, env=p2_env, cwd=self.repo_a)
+        self.assertEqual(res_stat_global.returncode, 0, res_stat_global.stdout)
+        stat_global_data = json.loads(res_stat_global.stdout)
+        rec_global = stat_global_data["recipient_verification"]
+        self.assertTrue(rec_global["verified"])
+        self.assertEqual(rec_global["caller_role_in_task"], "worker")
+        self.assertEqual(rec_global["actual_caller"]["bound_role"], "調査担当")
+        self.assertEqual(rec_global["actual_caller"]["bound_roles"], {"local": "レビュワー", "global": "調査担当"})
+
+        res_sub_global = _run_cli(
+            "result-submit",
+            global_task_id,
+            "--result-status",
+            "succeeded",
+            "--summary",
+            "investigation complete",
+            env=p2_env,
+            cwd=self.repo_a,
+        )
+        self.assertEqual(res_sub_global.returncode, 0, res_sub_global.stdout)
+        self.assertEqual(json.loads(res_sub_global.stdout)["task_id"], global_task_id)
+
+        # --- Case 2: Local task for 'レビュワー' ---
+        res_h_local = _run_cli(
+            "handoff",
+            "--mode",
+            "async",
+            "--to",
+            "レビュワー",
+            "--scope",
+            "local",
+            "--instruction",
+            "review PR",
+            env=self.env,
+            cwd=self.repo_a,
+        )
+        self.assertEqual(res_h_local.returncode, 0, res_h_local.stdout)
+        local_task_id = json.loads(res_h_local.stdout)["task_id"]
+
+        res_stat_local = _run_cli("task-status", local_task_id, env=p2_env, cwd=self.repo_a)
+        self.assertEqual(res_stat_local.returncode, 0, res_stat_local.stdout)
+        stat_local_data = json.loads(res_stat_local.stdout)
+        rec_local = stat_local_data["recipient_verification"]
+        self.assertTrue(rec_local["verified"])
+        self.assertEqual(rec_local["caller_role_in_task"], "worker")
+        self.assertEqual(rec_local["actual_caller"]["bound_role"], "レビュワー")
+
+        res_sub_local = _run_cli(
+            "result-submit",
+            local_task_id,
+            "--result-status",
+            "succeeded",
+            "--summary",
+            "review complete",
+            env=p2_env,
+            cwd=self.repo_a,
+        )
+        self.assertEqual(res_sub_local.returncode, 0, res_sub_local.stdout)
+        self.assertEqual(json.loads(res_sub_local.stdout)["task_id"], local_task_id)
+
+        # --- Case 3: Task for another pane ('todo管理' on w16:p1) queried from w15:p2 ---
+        res_set_other = _run_cli("role", "set", "todo管理", "w16:p1", env=self.env, cwd=self.repo_a)
+        self.assertEqual(res_set_other.returncode, 0, res_set_other.stdout)
+        res_h_other = _run_cli(
+            "handoff",
+            "--mode",
+            "async",
+            "--to",
+            "todo管理",
+            "--instruction",
+            "manage todos",
+            env=self.env,
+            cwd=self.repo_a,
+        )
+        self.assertEqual(res_h_other.returncode, 0, res_h_other.stdout)
+        other_task_id = json.loads(res_h_other.stdout)["task_id"]
+
+        res_stat_other = _run_cli("task-status", other_task_id, env=p2_env, cwd=self.repo_a)
+        self.assertEqual(res_stat_other.returncode, 0, res_stat_other.stdout)
+        stat_other_data = json.loads(res_stat_other.stdout)
+        rec_other = stat_other_data["recipient_verification"]
+        self.assertFalse(rec_other["verified"])
+        self.assertEqual(rec_other["caller_role_in_task"], "other")
+        self.assertEqual(rec_other["reason"], "caller_not_task_participant")
+
+        # --- Case 4: Rebound to unrelated role after task creation ---
+        res_h_rebound = _run_cli(
+            "handoff",
+            "--mode",
+            "async",
+            "--to",
+            "レビュワー",
+            "--instruction",
+            "check style",
+            env=self.env,
+            cwd=self.repo_a,
+        )
+        self.assertEqual(res_h_rebound.returncode, 0, res_h_rebound.stdout)
+        rebound_task_id = json.loads(res_h_rebound.stdout)["task_id"]
+
+        # Overwrite w15:p2 with unrelated role, clearing previous bindings
+        _run_cli("role", "clear", "--all", env=self.env, cwd=self.repo_a)
+        _run_cli("role", "clear", "--all", "--global", env=self.env, cwd=self.repo_a)
+        _run_cli("role", "set", "メイン", "w15:p1", env=self.env, cwd=self.repo_a)
+        _run_cli("role", "set", "記録係", "w15:p2", env=self.env, cwd=self.repo_a)
+
+        res_stat_rebound = _run_cli("task-status", rebound_task_id, env=p2_env, cwd=self.repo_a)
+        self.assertEqual(res_stat_rebound.returncode, 0, res_stat_rebound.stdout)
+        stat_rebound_data = json.loads(res_stat_rebound.stdout)
+        rec_rebound = stat_rebound_data["recipient_verification"]
+        self.assertFalse(rec_rebound["verified"])
+        self.assertEqual(rec_rebound["caller_role_in_task"], "worker")
+        self.assertEqual(rec_rebound["reason"], "recipient_role_or_cwd_mismatch")
+        self.assertEqual(rec_rebound["action_required"], "STOP_AND_REPORT_TO_HUMAN")
+
+        res_sub_rebound = _run_cli(
+            "result-submit",
+            rebound_task_id,
+            "--result-status",
+            "succeeded",
+            "--summary",
+            "should fail",
+            env=p2_env,
+            cwd=self.repo_a,
+        )
+        self.assertEqual(res_sub_rebound.returncode, 1)
+        self.assertEqual(json.loads(res_sub_rebound.stdout)["error"], "worker_context_unverified")
+
+    def test_cw21_multi_role_pane_single_sided_follow_and_rebind(self) -> None:
+        # CW-21 (P2-1 / RV034 B-1): When a pane is bound to both local and global roles,
+        # and pane id changes (e.g. w15:p2 -> w15:p9) with same session/terminal,
+        # handoff to the first role successfully auto-follows to w15:p9 (Case K).
+        # However, the other role's binding remains on the old pane id (w15:p2).
+        # Subsequent handoff to the other role sees w15:p9 in other_bound_panes,
+        # so it safely stops with worker_pane_closed_or_missing.
+        # After explicitly rebinding with `role set`, handoff succeeds.
+        _run_cli("role", "set", "メイン", "w15:p1", env=self.env, cwd=self.repo_a)
+        _run_cli("role", "set", "レビュワー", "w15:p2", env=self.env, cwd=self.repo_a)
+        _run_cli("role", "set", "調査担当", "w15:p2", "--global", env=self.env, cwd=self.repo_a)
+
+        # Pane rearrangement: w15:p2 is replaced by w15:p9 with same terminal_id and session_id
+        state = json.loads(self.herdr_state_file.read_text(encoding="utf-8"))
+        for p in state["panes"]:
+            if p["pane_id"] == "w15:p2":
+                p["pane_id"] = "w15:p9"
+        self._update_panes(state["panes"])
+
+        # 1. Handoff to 'レビュワー': Condition A (session match) succeeds and auto-tracks to w15:p9
+        res_h1 = _run_cli(
+            "handoff",
+            "--mode",
+            "async",
+            "--to",
+            "レビュワー",
+            "--instruction",
+            "review task after pane move",
+            env=self.env,
+            cwd=self.repo_a,
+        )
+        self.assertEqual(res_h1.returncode, 0, res_h1.stdout)
+        h1_data = json.loads(res_h1.stdout)
+        self.assertEqual(h1_data["command"], "handoff")
+        prompts = self.prompt_log.read_text(encoding="utf-8").strip().splitlines()
+        self.assertEqual(prompts[-1].split("|")[0], "w15:p9")
+
+        # Verify local binding for 'レビュワー' was updated to w15:p9
+        show_local = _run_cli("role", "show", env=self.env, cwd=self.repo_a)
+        self.assertEqual(json.loads(show_local.stdout)["roles"]["レビュワー"], "w15:p9")
+
+        # 2. Handoff to '調査担当': Old pane w15:p2 is closed, and w15:p9 is already bound to 'レビュワー'
+        # (in other_bound_panes), so it safely stops with worker_pane_closed_or_missing.
+        res_h2 = _run_cli(
+            "handoff",
+            "--mode",
+            "async",
+            "--to",
+            "調査担当",
+            "--scope",
+            "global",
+            "--instruction",
+            "investigate task after pane move",
+            env=self.env,
+            cwd=self.repo_a,
+        )
+        self.assertEqual(res_h2.returncode, 1)
+        err_h2 = json.loads(res_h2.stdout)
+        self.assertEqual(err_h2["error"], "worker_pane_closed_or_missing")
+
+        # 3. Explicitly rebind '調査担当' to w15:p9 per §5.2 procedure
+        res_rebind = _run_cli(
+            "role",
+            "set",
+            "調査担当",
+            "w15:p9",
+            "--global",
+            env=self.env,
+            cwd=self.repo_a,
+        )
+        self.assertEqual(res_rebind.returncode, 0, res_rebind.stdout)
+        show_global = _run_cli("role", "show", "--global", env=self.env, cwd=self.repo_a)
+        self.assertEqual(json.loads(show_global.stdout)["roles"]["調査担当"], "w15:p9")
+
+        # 4. Subsequent handoff to '調査担当' now succeeds!
+        res_h3 = _run_cli(
+            "handoff",
+            "--mode",
+            "async",
+            "--to",
+            "調査担当",
+            "--scope",
+            "global",
+            "--instruction",
+            "investigate task after rebind",
+            env=self.env,
+            cwd=self.repo_a,
+        )
+        self.assertEqual(res_h3.returncode, 0, res_h3.stdout)
+        h3_data = json.loads(res_h3.stdout)
+        self.assertEqual(h3_data["command"], "handoff")
+        prompts2 = self.prompt_log.read_text(encoding="utf-8").strip().splitlines()
+        self.assertEqual(prompts2[-1].split("|")[0], "w15:p9")
 
 
 if __name__ == "__main__":

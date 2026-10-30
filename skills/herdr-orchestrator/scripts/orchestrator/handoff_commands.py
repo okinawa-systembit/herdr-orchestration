@@ -179,6 +179,9 @@ def _verify_or_track_bound_worker(
         for r_name, p_id in s_doc.get("roles", {}).items():
             if s_id == chosen_scope_id and r_name == canonical_worker_role:
                 continue
+            if p_id == bound_pane_id:
+                # 同一ペインに登録された他スコープの兼任ロールは別ペインからの侵入ではないため除外
+                continue
             other_bound_panes.add(p_id)
             m = s_doc.get("targets", {}).get(r_name)
             if isinstance(m, dict):

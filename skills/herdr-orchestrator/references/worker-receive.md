@@ -10,13 +10,15 @@ prompt だけを信頼しない。Registry を正本とする。
 2. `herdr-orchestrator task-status <task.id>` を実行し JSON を読む。
 3. **受信者・ロールの本人確認（`recipient_verification`）**:
    - 出力 JSON の `recipient_verification.verified == true` かつ `recipient_verification.caller_role_in_task == "worker"` であることを最初に確認する。
-   - **`verified == false` または `caller_role_in_task != "worker"` の場合**: 誤配送またはロール再バインド後の別タスク通知であるため、**タスクの作業および `result-submit` を一切行わず、自分のチャット画面（現在のペイン）で人間に「別ロール／別タスク宛ての通知（`task.id` / 理由: `recipient_verification.reason`）を受信したため作業を停止した」旨を報告して即座に終了する**。
+   - （同一ペインがローカルとグローバルで別ロールを兼任している場合でも、現在のペインが持つ登録ロール群に宛先 `worker.role` が含まれていれば `verified == true` となります。）
+   - **`verified == false` または `caller_role_in_task != "worker"` の場合**:
+     - 誤配送またはロール再バインド後の別タスク通知であるため、**タスクの作業および `result-submit` を一切行わず、自分のチャット画面（現在のペイン）で人間に「別ロール／別タスク宛ての通知（`task.id` / 理由: `recipient_verification.reason`）を受信したため作業を停止した」旨を報告して即座に終了する**。
 4. `dispatch.status` の扱い:
    - `pending` → 同一 `task.id` で `task-status` を **bounded 再 poll**（最大 10 回、初回 1 秒・上限 30 秒の指数バックオフ）。`sent` / `uncertain` になったら 5 へ。
    - `sent` / `uncertain` → 5 へ（task / result が当該 role の作業開始を許可するか確認）。
    - `failed` / `skipped` → 作業しない（summary / 人間報告）。
    - 4a 上限到達で `pending` のまま → 作業開始しない。`dispatch_pending_timeout` を報告し、`task-status` 監視・reconcile・人間判断を待つ。
-5. `worker.cwd`（または同一 worktree タスクでは `context.worktree.path`）が自分の環境（`foreground_cwd`）と一致することを確認（不一致なら作業しない）。
+5. `worker.cwd`（または同一 worktree タスクでは `context.worktree.path`）が自分の環境（`foreground_cwd`）と一致（同一 worktree 内サブディレクトリであれば worktree 親和照合）することを確認（不一致なら作業しない）。
 6. 5 まで成功したら `task.instruction`（Registry 正本）に従って作業する。
 
 ## 結果登録

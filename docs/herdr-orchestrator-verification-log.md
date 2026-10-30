@@ -43,6 +43,16 @@ Inbox: 段階0–8 GO (2026-10-06 10:29)
 
 - （例: §11.4 実機 TOCTOU、特定 Herdr バージョンでの prompt stalled）
 
+## 実機知見（Herdr CLI 挙動）
+
+- **Herdr 0.9.5 での `herdr pane rename` の構文制約（Issue #74 / RV028）**:
+  - `Usage: herdr pane rename [OPTIONS] <PANE_ID> [LABEL]...` であり、位置引数 `<PANE_ID>` が最優先で解釈される。
+  - `--` を付与して `pane rename -- <pane_id> <label>` と呼ぶと、`--` が PANE_ID と見なされて `pane "--" not found` で失敗する。
+  - 同様に `--clear` を先頭に置いて `pane rename --clear -- <pane_id>` と呼ぶと、`--clear` が PANE_ID と見なされて失敗する。
+  - ラベル設定は `herdr pane rename <pane_id> <label>`、クリアは `herdr pane rename <pane_id> --clear` が実機仕様。
+  - PANE_ID 後の引数で特別扱いされるのは `--clear` のみ（`--help` / `-h` / `-x` はラベル扱い。0.9.5 実測）。Orchestrator 側では将来のオプション追加や誤認防止の予防措置として、先頭の `--` を自動除去して設定する。
+  - 将来 Herdr のバージョン更新やサブコマンド構文改訂時に再確認を推奨。
+
 ## 移行（§19）
 
 | Phase                | 完了 | メモ                                                          |

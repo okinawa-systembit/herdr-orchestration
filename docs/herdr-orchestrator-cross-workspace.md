@@ -74,7 +74,7 @@ Issue #72 により、`herdr agent rename` 依存を廃止し `pane_id` を正�
 | **エージェント単体再起動（update等）** | 同じ `pane_id`・同じ `cwd`・同じ `agent` 種別であり、かつ `terminal_id` が登録時と同一（同じペイン内でのエージェント再起動）または `agent_session_id` が一致する場合は、確認や再登録なしで透過配送（指紋も最新値に更新）                            |
 | **ペイン閉鎖・Herdr 全再起動時の追従** | 旧 `pane_id` 消滅時、他ロールにバインド済みのペインを除外した上で、① `agent_session_id` 一致の 1 ペイン、または ② 1 フォルダ 1 ロール構成で `cwd` + `agent` 一致の 1 ペインに特定できるときのみ自動更新して配送（UI ラベルは判定に一切使わない）    |
 | **複数候補・不一致時の動作**           | 候補が 0 個（未起動）、2 個以上（同一ディレクトリの複数ワークスペース展開等）、同一フォルダ複数ロール構成での新ターミナル・新セッション起動、または `cwd` 変更時は送信せず停止し、人間向け識別情報で報告                                            |
-| **Herdr UI ペイン表示名の自動連動**    | `role set` 時の表示名（`display_name`）を `herdr pane rename -- <pane_id> <display_name>` で Herdr UI 上のペインラベルに反映。**UI ラベルは人間向け表示専用であり、照合や自動追従ロジックには一切含めない**                                         |
+| **Herdr UI ペイン表示名の自動連動**    | `role set` 時の表示名（`display_name`）を `herdr pane rename <pane_id> <display_name>` で Herdr UI 上のペインラベルに反映。**UI ラベルは人間向け表示専用であり、照合や自動追従ロジックには一切含めない**                                            |
 | **人間向けのペイン表現**               | **`ワークスペース #2「todo-mcp」の『TODO管理』（Claude Code / w16:p1）`** のように、人間が画面左サイドバーとヘッダーで見て即座に判別できる**ワークスペース名＋ロール表示名**を主役にした表記に統一する                                              |
 | **Result 提出の柔軟化**                | 別ワークスペースの専任エージェント等がファイルを作らず回答できるよう、`--result-ref` 省略時は `--summary`（非空）のみでの `result-submit`（`succeeded` / `failed`）を許可                                                                           |
 
@@ -155,13 +155,13 @@ Role Binding は `${XDG_STATE_HOME:-~/.local/state}/herdr-orchestrator/roles/` �
 
 `role set` 実行時、単に `pane_id` 文字列だけを保存するのではなく、`herdr pane list` / `herdr workspace list` / `herdr tab list`（または `herdr agent get`）から取得した**登録時点のペイン指紋（ターゲットメタデータ）**と**人間向けの表示名（`display_name`）**をあわせて保存する。
 
-さらに、`HERDR_ENV=1` 環境下では **`herdr pane rename -- <pane_id> <display_name>` をベストエフォートで自動実行し、Herdr の画面（UI）上のペイン表示名も人間向け名称に同期する**。
+さらに、`HERDR_ENV=1` 環境下では **`herdr pane rename <pane_id> <display_name>` をベストエフォートで自動実行し、Herdr の画面（UI）上のペイン表示名も人間向け名称に同期する**。
 
 - **`display_name` の決定規則と UI 専用原則（重要）**:
   1. `--label <text>` オプションが明示指定された場合はその文字列（前後空白除去、最大 64 文字、制御文字不可）を使用する。
   2. 省略された場合は、ユーザーが `role set` に渡したロール引数（例: `role set レビュワー` なら `"レビュワー"`、`role set TODO管理` なら `"TODO管理"`、`role set reviewer` なら `"reviewer"`）をそのまま `display_name` とする。
   3. **【厳守】UI 表示名（`display_name` および Herdr の `pane.label`）は人間向けの視覚的目印・チャット報告専用であり、Worker 解決・生存照合・自動追従の判定ロジックには一切使用しない。**
-     - `herdr pane rename` 呼び出し時は、表示名が `-` で始まる場合のオプション誤認を防ぐため、必ず `herdr pane rename -- <pane_id> <display_name>`（クリア時は `herdr pane rename --clear -- <pane_id>`）の形式で呼び出す。
+     - herdr 0.9.5 の `pane rename` は `--` を引数終端として扱わずラベルに含めてしまうため `--` は付けない。設定は `herdr pane rename <pane_id> <display_name>`、クリアは `herdr pane rename <pane_id> --clear` の形式で呼び出す。また、`display_name` は Herdr CLI のオプション引数（`--clear` や `--help` 等）との誤認を防ぐため、先頭の `--` を自動的に除去して設定する（除去後に空文字となる場合は不正な入力として拒否される）。
 
 #### 保存 JSON 構造と旧形式ファイルの配送前停止（RV019 B-1 対応）
 
@@ -330,6 +330,13 @@ flowchart TD
    - 条件 A または条件 B を満たしたときのみ、対象スコープの Role Binding を新しい `pane_id`・`terminal_id`・`agent_session_id` に自動更新して配送する。
    - それ以外（候補 0 個、候補 2 個以上、または同一フォルダ複数ロール構成で新規セッションになった場合）は、推測で自動追従せず停止し、候補ペインをワークスペース名付きで提示して人間に確認する（ケース L）。
 
+3. **同一ペイン兼任ロールにおける片側追従時の挙動と再設定（P2-1 / RV034 B-1）**:
+   - 同一ペインにローカルロール（例: `レビュワー`）とグローバルロール（例: `調査担当`）が登録されている兼任構成において、Herdr 再起動やペイン番号再編が発生し、一方のロール宛てに `handoff` が行われて自動追従（ケース K）が成立した場合、そのロールの Role Binding のみが新しい `pane_id` に自動更新される。
+   - このとき、もう一方の未更新ロールの Role Binding は旧 `pane_id` を指したままとなる。その後、もう一方の未更新ロール宛てに `handoff` を行った場合：
+     - 新しい `pane_id` は既に先に追従したロールにバインドされているため、`other_bound_panes` の除外制約により候補ペインから無条件に除外される。
+     - したがって、同一セッション（`agent_session_id`）であっても自動追従は行われず、ケース L（候補 0 個 / `worker_pane_closed_or_missing`）として安全に停止する。
+   - **運用手順**: 片側追従によって兼任ロールの片方が `worker_pane_closed_or_missing` で停止した場合は、対象ペイン（または任意ペイン）で `herdr-orchestrator role set <role> <new_pane_id> [--global]` を再実行し、最新のペインへ明示的に再バインドする。
+
 ---
 
 <a id="sec-6"></a>
@@ -462,14 +469,14 @@ Task Registry（`schema_version: 1` 拡張）の `worker` オブジェクトに 
 
 Requester の `context.worktree.path` と Worker の `worker.cwd` は異なっていてよい（クロスワークスペース対応）。各コマンドでは、**Task Registry に保存された不変の記録（in-flight 正本）** を基準として以下のように照合する（なお、タスク実行途中に人間が対象ペインを明示的に別ロールへ `role set` で上書きした場合は、安全側（fail-closed）として不一致扱いで停止する。N-4 対応）。
 
-| フェーズ / コマンド                  | 呼び出し元（`HERDR_PANE_ID`）の分類  | 照合する内容                                                                                                                                           | 判定結果・不一致時の動作                                                                                                                                 |
-| ------------------------------------ | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **1. `assert_handoff_continuable`**  | Requester                            | 解決済み `worker.pane_id` が promptable（`idle`/`done`）であり、かつ現在の Worker の `cwd` が `worker.cwd` と一致していること                          | 不一致なら `handoff_not_continuable` でプロンプト送信前に安全停止                                                                                        |
-| **2. `task-status` / `task-result`** | `caller == worker.pane_id` の場合    | **`caller_role_in_task = "worker"`**: 現在の `cwd` が `worker.cwd` と一致し、かつそのペインが `worker.role` 以外の別ロールに再バインドされていないこと | 一致なら `verified = true`（Worker として作業可）。不一致なら `verified = false`（`STOP_AND_REPORT_TO_HUMAN`）を返し、**受信側チャットに報告して停止**   |
-| **3. `task-status` / `task-result`** | `caller == requester.pane_id` の場合 | **`caller_role_in_task = "requester"`**: 現在の `cwd` が `context.worktree.path` と一致していること                                                    | 一致なら **`verified = true`（Requester として結果確認・続行可。停止しない！）**。不一致なら `verified = false` を返し、**受信側チャットに報告して停止** |
-| **4. `task-status` / `task-result`** | 上記以外のペインの場合               | **`caller_role_in_task = "other"`**: このペインは当タスクの `worker` でも `requester` でもない                                                         | `verified = false`（もしプロンプトを受けて実行した場合は誤配送であるため、**作業を行わずチャットに報告して停止**。人間の手動調査時は参照のみ可）         |
-| **5. `result-submit <task.id>`**     | Worker                               | 呼び出し元ペインが `worker.pane_id`（または `worker.agent_name`）であり、かつ現在の `cwd` が `worker.cwd` と一致していること                           | 不一致なら `worker_context_unverified` / `worker_agent_mismatch` で結果書き込みを拒否し、**Worker チャットに報告して停止**                               |
-| **6. `completion`（非同期通知）**    | Worker                               | `requester.pane_id` が promptable（`idle`/`done`）であり、かつ現在の Requester の `cwd` が `context.worktree.path` と一致していること                  | 不一致なら `skipped`（`reason: "requester_context_mismatch"`）として誤通知を抑止                                                                         |
+| フェーズ / コマンド                  | 呼び出し元（`HERDR_PANE_ID`）の分類  | 照合する内容                                                                                                                                                                                                                                               | 判定結果・不一致時の動作                                                                                                                                                                                 |
+| ------------------------------------ | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **1. `assert_handoff_continuable`**  | Requester                            | 解決済み `worker.pane_id` が promptable（`idle`/`done`）であり、かつ現在の Worker の `cwd` が `worker.cwd` と一致していること                                                                                                                              | 不一致なら `handoff_not_continuable` でプロンプト送信前に安全停止                                                                                                                                        |
+| **2. `task-status` / `task-result`** | `caller == worker.pane_id` の場合    | **`caller_role_in_task = "worker"`**: 現在の `cwd` が `worker.cwd` と一致（または同一 worktree 内）し、かつそのペインの登録ロール群（ローカルまたはグローバル）に `worker.role` が含まれていること（未登録または無関係ロールに再バインドされた場合を除く） | 一致なら `verified = true`（Worker として作業可。兼任ペインでも宛先ロールが含まれていれば作業許可）。不一致なら `verified = false`（`STOP_AND_REPORT_TO_HUMAN`）を返し、**受信側チャットに報告して停止** |
+| **3. `task-status` / `task-result`** | `caller == requester.pane_id` の場合 | **`caller_role_in_task = "requester"`**: 現在の `cwd` が `context.worktree.path` と一致していること                                                                                                                                                        | 一致なら **`verified = true`（Requester として結果確認・続行可。停止しない！）**。不一致なら `verified = false` を返し、**受信側チャットに報告して停止**                                                 |
+| **4. `task-status` / `task-result`** | 上記以外のペインの場合               | **`caller_role_in_task = "other"`**: このペインは当タスクの `worker` でも `requester` でもない                                                                                                                                                             | `verified = false`（もしプロンプトを受けて実行した場合は誤配送であるため、**作業を行わずチャットに報告して停止**。人間の手動調査時は参照のみ可）                                                         |
+| **5. `result-submit <task.id>`**     | Worker                               | 呼び出し元ペインが `worker.pane_id`（または `worker.agent_name`）であり、かつ現在の `cwd` が `worker.cwd` と一致していること                                                                                                                               | 不一致なら `worker_context_unverified` / `worker_agent_mismatch` で結果書き込みを拒否し、**Worker チャットに報告して停止**                                                                               |
+| **6. `completion`（非同期通知）**    | Worker                               | `requester.pane_id` が promptable（`idle`/`done`）であり、かつ現在の Requester の `cwd` が `context.worktree.path` と一致していること                                                                                                                      | 不一致なら `skipped`（`reason: "requester_context_mismatch"`）として誤通知を抑止                                                                                                                         |
 
 > [!IMPORTANT]
 > **RV018 B-2 の解消**:
@@ -504,10 +511,17 @@ Requester の `context.worktree.path` と Worker の `worker.cwd` は異なっ�
 }
 ```
 
+- **`recipient_verification.reason` の理由コード一覧**:
+  - `recipient_role_or_cwd_mismatch`: 対象タスクの `worker` として照合されたが、現在の `cwd` またはロール名がタスク記録と不一致（同一 worktree 親和照合も不一致）。
+  - `caller_not_task_participant`: 呼び出し元ペインが当タスクの `worker` でも `requester` でもない無関係なペイン（`caller_role_in_task = "other"`）。
+  - `caller_live_agent_unavailable`: Herdr 環境外での実行、または呼び出し元ペインでエージェント情報（`cwd` 等）が取得できない。
+  - `requester_cwd_mismatch`: Requester ペインとして照合されたが、現在の `cwd` がタスクの `context.worktree.path` と一致しない。
+
 - **受信側エージェントの行動規則（`worker-receive.md` / `requester-receive.md` に規定）**:
-  - タスク依頼プロンプトを受けたエージェント（Worker）は、`recipient_verification.verified == true` かつ `caller_role_in_task == "worker"` であることを確認してから作業を開始する。
+  - タスク依頼プロンプトを受けたエージェント（Worker）は、`recipient_verification.verified == true` かつ `caller_role_in_task == "worker"` であることを確認してから作業を開始する（同一ペインがローカルとグローバルで別ロールを兼任している場合でも、ペインの登録ロール群に今回のタスクの `worker.role` が含まれていれば `verified: true` となり、そのまま作業を着手できる）。
   - 完了通知プロンプトを受けたエージェント（Requester）は、`recipient_verification.verified == true` かつ `caller_role_in_task == "requester"` であることを確認してから結果読み取り・後続処理を行う。
-  - `verified == false`（または期待する `caller_role_in_task` と異なる）であった場合、受け取ったエージェントは**タスクの指示に基づく作業やファイル編集・コマンド実行を一切行わず、自身のチャット画面に以下のメッセージを出して即座に停止する**：
+  - **`verified == false`（または期待する `caller_role_in_task` と異なる）の場合**:
+    - 受け取ったエージェントは**タスクの指示に基づく作業やファイル編集・コマンド実行を一切行わず、自身のチャット画面に以下のメッセージを出して即座に停止する**（fail-closed の例外を作らず一貫した安全停止を保証する）：
 
   > **【受信側ペインのチャット報告例】**
   > 「⚠️ **宛先不一致のため作業を停止しました**
@@ -594,16 +608,16 @@ herdr-orchestrator result-submit task_xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx \
 
 ### 9.1 実装ファイル
 
-| ファイル                                                                | 変更内容                                                                                                                                              |
-| ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `skills/herdr-orchestrator/scripts/orchestrator/role_bindings.py`       | グローバル対応（`global.json`）、日本語・カスタムロール名検証、ペイン指紋メタデータ（`terminal_id` 含む `targets`）の保存・取得、単一候補追従         |
-| `skills/herdr-orchestrator/scripts/orchestrator/live_agent.py`          | `herdr workspace list` / `tab list` / `pane list` を統合したワークスペース名主体の UI ロケーション情報取得、`herdr pane rename --` 連動、事前確認判定 |
-| `skills/herdr-orchestrator/scripts/orchestrator/handoff_commands.py`    | ローカル/グローバル解決と同名重複時確認（`--scope` 対応）、Non-Git `dir_<hash16>` 対応、未登録 Requester の `"unbound"` 設定、`worker.cwd` 必須記録   |
-| `skills/herdr-orchestrator/scripts/orchestrator/result_commands.py`     | `task-status` / `task-result` への `recipient_verification`（`worker` / `requester` / `other` 判別）付与、`result-submit` での `worker.cwd` 照合      |
-| `skills/herdr-orchestrator/scripts/orchestrator/completion_commands.py` | Requester の `context.worktree.path` と `requester.pane_id` の自己照合維持                                                                            |
-| `skills/herdr-orchestrator/scripts/orchestrator/registry/schema.py`     | カスタムロール名・`"unbound"` 許容、`context.repository.identity` での `dir_<hash16>` 許容、`worker.cwd`（新規作成時必須・旧タスク読込時任意）検証    |
-| `skills/herdr-orchestrator/scripts/orchestrator/registry/operations.py` | `assert_handoff_continuable` での `worker.cwd` 照合、`update_result` での `--result-ref` 省略（`--summary` 単独提出）許容                             |
-| `skills/herdr-orchestrator/scripts/orchestrator/public_cli.py`          | `role set [<pane_id>] [--pane] [--label] [--global]`、`role show [--global]`、`role clear [--global]`、`handoff --to / --type / --scope` 対応         |
+| ファイル                                                                | 変更内容                                                                                                                                            |
+| ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `skills/herdr-orchestrator/scripts/orchestrator/role_bindings.py`       | グローバル対応（`global.json`）、日本語・カスタムロール名検証、ペイン指紋メタデータ（`terminal_id` 含む `targets`）の保存・取得、単一候補追従       |
+| `skills/herdr-orchestrator/scripts/orchestrator/live_agent.py`          | `herdr workspace list` / `tab list` / `pane list` を統合したワークスペース名主体の UI ロケーション情報取得、`herdr pane rename` 連動、事前確認判定  |
+| `skills/herdr-orchestrator/scripts/orchestrator/handoff_commands.py`    | ローカル/グローバル解決と同名重複時確認（`--scope` 対応）、Non-Git `dir_<hash16>` 対応、未登録 Requester の `"unbound"` 設定、`worker.cwd` 必須記録 |
+| `skills/herdr-orchestrator/scripts/orchestrator/result_commands.py`     | `task-status` / `task-result` への `recipient_verification`（`worker` / `requester` / `other` 判別）付与、`result-submit` での `worker.cwd` 照合    |
+| `skills/herdr-orchestrator/scripts/orchestrator/completion_commands.py` | Requester の `context.worktree.path` と `requester.pane_id` の自己照合維持                                                                          |
+| `skills/herdr-orchestrator/scripts/orchestrator/registry/schema.py`     | カスタムロール名・`"unbound"` 許容、`context.repository.identity` での `dir_<hash16>` 許容、`worker.cwd`（新規作成時必須・旧タスク読込時任意）検証  |
+| `skills/herdr-orchestrator/scripts/orchestrator/registry/operations.py` | `assert_handoff_continuable` での `worker.cwd` 照合、`update_result` での `--result-ref` 省略（`--summary` 単独提出）許容                           |
+| `skills/herdr-orchestrator/scripts/orchestrator/public_cli.py`          | `role set [<pane_id>] [--pane] [--label] [--global]`、`role show [--global]`、`role clear [--global]`、`handoff --to / --type / --scope` 対応       |
 
 <a id="sec-9-2"></a>
 
@@ -628,21 +642,28 @@ herdr-orchestrator result-submit task_xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx \
 
 ## 10. テスト計画
 
-| ID     | テスト項目                                                               | 期待される動作                                                                                                                                                  |
-| ------ | ------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| CW-01  | カレントペイン省略でのローカル・グローバル登録と UI ラベル連動           | `role set レビュワー` / `role set TODO管理 --global` で `$HERDR_PANE_ID`・指紋（`terminal_id` 含む）・`display_name` が保存され `pane rename` が呼ばれる        |
-| CW-02  | 日本語ロール名の登録と NFKC・小文字化正規化                              | `レビュワー` がそのまま `レビュワー` として保存され、`ＴＯＤＯ管理` が NFKC・小文字化により `todo管理` として登録・解決される                                   |
-| CW-03  | ローカルとグローバルの片方登録時の解決と、両方同名登録時の確認停止       | 片方のみならそちらが解決され、両方に同名ロール（例: `調査`）がある場合は `worker_role_scope_ambiguous`（ワークスペース名付き）で停止し `--scope` で解決できる   |
-| CW-04  | 別ワークスペース・Non-Git フォルダへの `handoff`（未バインド依頼元含む） | 未バインドの依頼元（`requester.role = "unbound"`）や Non-Git フォルダから別ワークスペースの Worker へ正常に `handoff` でき、`worker.cwd` が記録される           |
-| CW-05  | 別ワークスペースからの `--summary` 単独 `result-submit`                  | `--result-ref` なし・`--summary` のみで別ワークスペースの Worker が正常に結果提出・完了通知できる                                                               |
-| CW-06  | 同一ペイン（同一 `terminal_id`）でのエージェント `exit` → 再起動後の配送 | 同じ `pane_id`・同じ `terminal_id`・同じ `cwd`・同じ `agent` 種別で再起動した場合、新セッションでも再登録なしで透過配送でき指紋が更新される                     |
-| CW-07  | ペイン閉鎖・全再起動後の単一候補への自動追従（セッション一致 / 1ロール） | 条件 A（`agent_session_id` 一致）または条件 B（1 フォルダ 1 ロール構成で `cwd`+`agent` 単一一致）のとき新 `pane_id` へ自動更新して配送                          |
-| CW-08  | 同一ディレクトリ複数ワークスペース展開時の複数候補停止                   | 旧 `pane_id` 消滅時、同じ `cwd`・同じ `agent` のペインが 2 個以上あれば推測配送せずワークスペース名付き候補一覧で停止                                           |
-| CW-09  | 登録ペインの別ディレクトリ移動（`cwd` 変更）検知                         | 登録時と異なるディレクトリに移動していた場合、`worker_context_changed`（ワークスペース名付き）で停止する                                                        |
-| CW-10  | 登録ペインのエージェント未起動（シェル状態）検知                         | 対象ペインでエージェントが終了していた場合、`worker_agent_not_running`（ワークスペース名付き）で停止する                                                        |
-| CW-11  | 同じ `cwd`・同じ `agent` 種別で 2 ロール定義がある状態での片方再起動     | 一方のロールだけ新規セッションで再起動したとき、他ロールへの自動追従（誤爆）が起きず安全に停止する（RV017 B-1 回帰）                                            |
-| CW-12a | 古い `pane_id` に別ロールの既知セッションが入った場合の検知              | ケース G で別ロールの `expected_session_id` を検知し、`worker_context_changed` で停止する（RV017 B-1 回帰）                                                     |
-| CW-12b | 全再起動後に新規セッション・同種 `agent`・同一 `cwd` で `pane_id` 重複   | 複数ロール定義がある `cwd` で `terminal_id` も `agent_session_id` も変わった場合、ケース G で `worker_context_changed` として停止する（RV018 B-1 回帰）         |
-| CW-13a | 受信側（Worker / 無関係ペイン）での宛先不一致検知                        | 受け取ったペインの `cwd` またはロールが宛先と異なる場合、`recipient_verification.verified=false` を返し誤動作を阻止する（RV017 B-2 回帰）                       |
-| CW-13b | Requester 自身による `task-status` / `task-result` 実行時の正常通過      | `caller == requester.pane_id` かつ `cwd == context.worktree.path` の場合、`caller_role_in_task="requester"`, `verified=true` となり停止しない（RV018 B-2 回帰） |
-| CW-14  | 旧形式 Role Binding（`targets` 指紋なし）の配送前検知・即時停止          | `targets[<role>]` が無い旧形式ファイルのまま `handoff` を実行した際、依頼側の配送前解決で `role_binding_outdated` となり送信前に停止する（RV019 B-1 回帰）      |
+| ID     | テスト項目                                                                     | 期待される動作                                                                                                                                                                                                                                                                                          |
+| ------ | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| CW-01  | カレントペイン省略でのローカル・グローバル登録と UI ラベル連動                 | `role set レビュワー` / `role set TODO管理 --global` で `$HERDR_PANE_ID`・指紋（`terminal_id` 含む）・`display_name` が保存され `pane rename` が呼ばれる                                                                                                                                                |
+| CW-02  | 日本語ロール名の登録と NFKC・小文字化正規化                                    | `レビュワー` がそのまま `レビュワー` として保存され、`ＴＯＤＯ管理` が NFKC・小文字化により `todo管理` として登録・解決される                                                                                                                                                                           |
+| CW-03  | ローカルとグローバルの片方登録時の解決と、両方同名登録時の確認停止             | 片方のみならそちらが解決され、両方に同名ロール（例: `調査`）がある場合は `worker_role_scope_ambiguous`（ワークスペース名付き）で停止し `--scope` で解決できる                                                                                                                                           |
+| CW-04  | 別ワークスペース・Non-Git フォルダへの `handoff`（未バインド依頼元含む）       | 未バインドの依頼元（`requester.role = "unbound"`）や Non-Git フォルダから別ワークスペースの Worker へ正常に `handoff` でき、`worker.cwd` が記録される                                                                                                                                                   |
+| CW-05  | 別ワークスペースからの `--summary` 単独 `result-submit`                        | `--result-ref` なし・`--summary` のみで別ワークスペースの Worker が正常に結果提出・完了通知できる                                                                                                                                                                                                       |
+| CW-06  | 同一ペイン（同一 `terminal_id`）でのエージェント `exit` → 再起動後の配送       | 同じ `pane_id`・同じ `terminal_id`・同じ `cwd`・同じ `agent` 種別で再起動した場合、新セッションでも再登録なしで透過配送でき指紋が更新される                                                                                                                                                             |
+| CW-07  | ペイン閉鎖・全再起動後の単一候補への自動追従（セッション一致 / 1ロール）       | 条件 A（`agent_session_id` 一致）または条件 B（1 フォルダ 1 ロール構成で `cwd`+`agent` 単一一致）のとき新 `pane_id` へ自動更新して配送                                                                                                                                                                  |
+| CW-08  | 同一ディレクトリ複数ワークスペース展開時の複数候補停止                         | 旧 `pane_id` 消滅時、同じ `cwd`・同じ `agent` のペインが 2 個以上あれば推測配送せずワークスペース名付き候補一覧で停止                                                                                                                                                                                   |
+| CW-09  | 登録ペインの別ディレクトリ移動（`cwd` 変更）検知                               | 登録時と異なるディレクトリに移動していた場合、`worker_context_changed`（ワークスペース名付き）で停止する                                                                                                                                                                                                |
+| CW-10  | 登録ペインのエージェント未起動（シェル状態）検知                               | 対象ペインでエージェントが終了していた場合、`worker_agent_not_running`（ワークスペース名付き）で停止する                                                                                                                                                                                                |
+| CW-11  | 同じ `cwd`・同じ `agent` 種別で 2 ロール定義がある状態での片方再起動           | 一方のロールだけ新規セッションで再起動したとき、他ロールへの自動追従（誤爆）が起きず安全に停止する（RV017 B-1 回帰）                                                                                                                                                                                    |
+| CW-12a | 古い `pane_id` に別ロールの既知セッションが入った場合の検知                    | ケース G で別ロールの `expected_session_id` を検知し、`worker_context_changed` で停止する（RV017 B-1 回帰）                                                                                                                                                                                             |
+| CW-12b | 全再起動後に新規セッション・同種 `agent`・同一 `cwd` で `pane_id` 重複         | 複数ロール定義がある `cwd` で `terminal_id` も `agent_session_id` も変わった場合、ケース G で `worker_context_changed` として停止する（RV018 B-1 回帰）                                                                                                                                                 |
+| CW-13a | 受信側（Worker / 無関係ペイン）での宛先不一致検知                              | 受け取ったペインの `cwd` またはロールが宛先と異なる場合、`recipient_verification.verified=false` を返し誤動作を阻止する（RV017 B-2 回帰）                                                                                                                                                               |
+| CW-13b | Requester 自身による `task-status` / `task-result` 実行時の正常通過            | `caller == requester.pane_id` かつ `cwd == context.worktree.path` の場合、`caller_role_in_task="requester"`, `verified=true` となり停止しない（RV018 B-2 回帰）                                                                                                                                         |
+| CW-14  | 旧形式 Role Binding（`targets` 指紋なし）の配送前検知・即時停止                | `targets[<role>]` が無い旧形式ファイルのまま `handoff` を実行した際、依頼側の配送前解決で `role_binding_outdated` となり送信前に停止する（RV019 B-1 回帰）                                                                                                                                              |
+| CW-15  | `role set` 時の `HERDR_ENV` 必須検証およびエージェント未起動（シェル状態）拒否 | `HERDR_ENV` 未設定時に `herdr_env_required`、エージェント未起動ペインに対して `role_target_agent_not_running` で拒否する（RV020 N-1 回帰）                                                                                                                                                              |
+| CW-16  | 補助指紋の null 同士・空文字同士を一致とみなさない（`_non_empty_str_match`）   | `terminal_id` や `agent_session_id` が null または空文字同士の場合、一致とみなさず条件 A / ケース G で誤追従しない（RV020 N-1 / RV021 N-1 回帰）                                                                                                                                                        |
+| CW-17  | ロール設定・解除時の表示名先頭 `--` 自動除去および空文字拒否                   | `role set` や `--label` で `--clear` 等が指定された場合に先頭 `--` を除去して `clear` として安全に設定し、`--` 単独（空文字化）は `invalid_input` で拒否する                                                                                                                                            |
+| CW-18  | 未登録ロール指定時および Pattern A 解決失敗時の `available_roles` 付与         | 未登録ロール指定時（`worker_role_not_bound`）や Pattern A 解決失敗時（`worker_unavailable`）に有効なロール一覧（`available_roles`）を含めて案内する                                                                                                                                                     |
+| CW-19  | Role Binding 更新時の CAS（Compare-And-Swap）競合検出                          | 追従処理中の並行更新を検出し、競合時は `worker_context_changed` として安全に停止する                                                                                                                                                                                                                    |
+| CW-20  | 同一ペインのローカル/グローバル別ロール兼任時の照合検証および提出許可          | 同一ペインにローカル（`レビュワー`）とグローバル（`調査担当`）が登録されている場合、タスク受信時に登録ロール群に含まれていればローカル宛て・グローバル宛てともに `verified: true` で作業着手可能であり、`result-submit` も正常受理される。無関係な別ロール宛ての場合は `verified: false` で安全停止する |
+| CW-21  | 同一ペイン兼任ロールの片側追従後の安全停止と再設定                             | 兼任ペインの片方ロール追従後、もう一方のロール宛て handoff はセッション一致時でも `worker_pane_closed_or_missing` で安全停止し、`role set` で新ペインに再バインドした後は正常配送できる                                                                                                                 |
