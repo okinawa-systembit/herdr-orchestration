@@ -26,7 +26,7 @@
 | `task-result <task_id>`                                   | Requester による結果確定データの取得・成果物パス解決                                                                   | 必須               |
 | `resume-task` / `reset-completion` / `recover-completion` | completion 状態の再試行・復旧                                                                                          | 必須               |
 | `reconcile-dispatch`                                      | 未確定 dispatch の整合性復旧                                                                                           | 必須               |
-| `update`                                                  | 配布環境の最新化（Release Tarball 取得・展開、`--force`, `--version`）                                                 | 免除（ペイン外可） |
+| `update`                                                  | 【未実装・将来仕様】配布環境の最新化（現行版の更新は `install.sh` を再実行。README『アップデート』参照）               | 免除（ペイン外可） |
 
 ※ Task Registry の JSON ファイル直接編集は禁止されています。すべての操作は本 CLI を介してアトミックに行われます。
 
@@ -149,6 +149,13 @@ Task Registry 内のタスクを読み取り専用で一覧表示します。PC 
 herdr-orchestrator task-list --worktree "$(git rev-parse --show-toplevel)"
 ```
 
+- `--worktree <path>`: 対象 worktree 絶対パスで絞り込み。
+- `--repository <uuid>`: 対象リポジトリ identity UUID で絞り込み。
+- `--type <type>`: タスク種別で絞り込み。
+- `--status <status>`: タスクステータスで絞り込み（`cancelled`, `created`, `failed`, `in_progress`, `succeeded`, `unknown`。複数指定時は OR）。
+- `--limit <int>`: 返却するタスクの最大件数（1〜1000、既定値: 100）。
+- `--json`: JSON 出力を明示（指定の有無に関わらず常に JSON 出力）。
+
 #### クラッシュ再起動後の状態確認手順
 
 1. `herdr-orchestrator task-list --worktree "$(git rev-parse --show-toplevel)"` を実行する（`HERDR_ENV=1` ペイン内）。
@@ -181,6 +188,19 @@ Requester Agent が Worker の提出結果を取得します。
 ```bash
 herdr-orchestrator task-result <task_id>
 ```
+
+### 5.5 未確定 dispatch の復旧 (`reconcile-dispatch`)
+
+プロンプト送信タイムアウト等で dispatch の成否が不明（`dispatch.status: uncertain`）となったタスクを安全に復旧します（詳細は [04-handoff-and-requester.md](../../../docs/herdr-orchestrator/04-handoff-and-requester.md#sec-7-6) を参照）。
+
+```bash
+herdr-orchestrator reconcile-dispatch <task_id> \
+  --dispatch-outcome failed \
+  --dispatch-reason "Worker ペインがビジー状態でタイムアウト"
+```
+
+- `--dispatch-outcome uncertain|failed`: dispatch 確定結果のステータス。
+- `--dispatch-reason <text>`: dispatch 結果の理由または説明。
 
 ---
 
