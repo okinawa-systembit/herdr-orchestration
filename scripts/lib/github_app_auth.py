@@ -92,8 +92,14 @@ def resolve_repo_root(start_dir: Path | None = None) -> Path:
                     )
 
                 if proc_common.returncode == 0:
-                    common_dir = proc_common.stdout.strip()
-                    if common_dir:
+                    lines = [
+                        line.strip()
+                        for line in proc_common.stdout.splitlines()
+                        if line.strip()
+                        and not line.strip().startswith("--path-format")
+                    ]
+                    if lines:
+                        common_dir = lines[-1]
                         common_path = Path(common_dir)
                         if not common_path.is_absolute():
                             common_path = (base / common_path).resolve()
