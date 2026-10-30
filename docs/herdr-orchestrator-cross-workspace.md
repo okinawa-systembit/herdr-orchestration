@@ -225,13 +225,13 @@ Role Binding は `${XDG_STATE_HOME:-~/.local/state}/herdr-orchestrator/roles/` �
 ### 4.3 CLI インターフェース（`role` サブコマンド）
 
 ```bash
-# 1. カレントペイン（$HERDR_PANE_ID）をローカルロールとして登録（UIラベルも「レビュワー」に設定）
+# 1. カレントペイン（$HERDR_PANE_ID）をローカルロールとして登録（人間が手動実行する場合。エージェント自動実行時は --pane 明示必須）
 herdr-orchestrator role set レビュワー
-herdr-orchestrator role set reviewer --label "レビュワー"
+herdr-orchestrator role set reviewer --pane w15:p2 --label "レビュワー"
 
-# 2. カレントペイン（$HERDR_PANE_ID）をグローバルロールとして登録（UIラベルも「ログ調査」等に設定）
+# 2. カレントペイン（$HERDR_PANE_ID）をグローバルロールとして登録（人間が手動実行する場合。エージェント自動実行時は --pane 明示必須）
 herdr-orchestrator role set チケット管理 --global
-herdr-orchestrator role set ログ調査 --global
+herdr-orchestrator role set ログ調査 --pane w16:p1 --label "ログ調査" --global
 
 # 3. ペインIDを明示して登録（位置引数または --pane のどちらでも指定可能）
 herdr-orchestrator role set チケット管理 w16:p1 --global
@@ -560,13 +560,13 @@ Requester の `context.worktree.path` と Worker の `worker.cwd` は異なっ�
 
 - **同一ワークスペース内のレビュワーペインで**:
   > 「あなたをこのリポジトリの `レビュワー` として登録して」
-  > （エージェントが内部で `herdr-orchestrator role set レビュワー` を実行）
+  > （エージェントが内部で自ペインを特定し、`herdr-orchestrator role set レビュワー --pane <自ペイン> --label "レビュワー"` を実行）
 - **別ワークスペースの社内ツール（チケット管理）専任ペインで**:
   > 「あなたをグローバルの `チケット管理` ロールとして登録して」
-  > （エージェントが内部で `herdr-orchestrator role set チケット管理 --global` を実行）
+  > （エージェントが内部で自ペインを特定し、`herdr-orchestrator role set チケット管理 --pane <自ペイン> --label "チケット管理 (共通)" --global` を実行）
 - **Git 無しの一時調査フォルダのペインで**:
   > 「あなたをグローバルの `ログ調査` として登録して」
-  > （エージェントが内部で `herdr-orchestrator role set ログ調査 --global` を実行）
+  > （エージェントが内部で自ペインを特定し、`herdr-orchestrator role set ログ調査 --pane <自ペイン> --label "ログ調査 (共通)" --global` を実行）
 
 <a id="sec-8-2"></a>
 

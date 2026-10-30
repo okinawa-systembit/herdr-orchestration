@@ -25,7 +25,7 @@
   - `--scope` 未指定時にローカルとグローバルの両方に同名ロールが登録されている場合、CLI は自動選択せず `worker_role_scope_ambiguous` で停止する。
   - エージェントは出力 JSON の `local_candidate.display_summary` と `global_candidate.display_summary`（**ワークスペース番号・ワークスペース名・ロール表示名・エージェント種別**）を人間に提示し、どちらへ依頼するか確認した上で `--scope local` または `--scope global` を付けて再実行する。
 - **旧形式 Role Binding の検出（`role_binding_outdated`）**:
-  - `targets` 指紋を持たない旧形式（v0.3.1 以前）の Role Binding が検出された場合、プロンプト送信前に `role_binding_outdated` で停止する。人間に報告し、対象ペインで `herdr-orchestrator role set <role>` を再実行するよう案内する。
+  - `targets` 指紋を持たない旧形式（v0.3.1 以前）の Role Binding が検出された場合、プロンプト送信前に `role_binding_outdated` で停止する。人間に報告し、対象ペインで `herdr-orchestrator role set <role> --pane <pane_id> --label "<表示名>"` を再実行するよう案内する（依頼元ペインに誤登録しないよう注意）。
 - **ペイン状態変更・閉鎖時の単一候補自動追従と確認停止**:
   - 同一ペインでのエージェント再起動や、ペイン閉鎖後の単一候補ペインへの自動追従が安全条件を満たす場合は、CLI が自動で追従・指紋更新して配送する。
   - 別フォルダへの `cd`、別エージェント種別への変更、または複数候補が存在して特定できない場合（`role_target_context_changed`, `role_target_pane_closed_multiple_candidates`, `role_target_pane_not_found`）は配送前に停止する。出力 JSON の `candidates`（ワークスペース名主体の表示）を人間に提示して確認を仰ぐこと。

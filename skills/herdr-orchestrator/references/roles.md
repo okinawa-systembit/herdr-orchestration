@@ -51,5 +51,5 @@ herdr-orchestrator role show --global
 ```
 
 - 対象ペインでエージェントが起動していない場合は `role_target_agent_not_running` で拒否される。
-- 旧バージョン（v0.3.1 以前）の `targets` 指紋を持たない Role Binding はサポートされず、`handoff` 実行時に配送前エラー `role_binding_outdated` で停止する（`role show` や `doctor` でも `outdated` として検出される）。再登録（`herdr-orchestrator role set <role>`）を実行すること。
+- 旧バージョン（v0.3.1 以前）の `targets` 指紋を持たない Role Binding はサポートされず、`handoff` 実行時に配送前エラー `role_binding_outdated` で停止する（`role show` や `doctor` でも `outdated` として検出される）。対象ペインで再登録（`herdr-orchestrator role set <role> --pane <pane_id> --label "<表示名>"`）を実行すること。
 - Role Binding が未設定の標準4ロール（`design`, `reviewer`, `implementer`, `orchestrator`）では、同一 Git worktree 内の Pattern A 命名（`r-<hash16>-<role>`）による解決へフォールバックする。
