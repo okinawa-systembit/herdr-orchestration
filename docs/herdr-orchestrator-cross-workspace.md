@@ -66,7 +66,7 @@ Issue #72 により、`herdr agent rename` 依存を廃止し `pane_id` を正�
 | -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Role Binding のスコープ**            | **ローカル（ワークスペース/リポジトリ単位）** と **グローバル（全ワークスペース共通 `--global`）** の 2 階層をサポート                                                                                                                              |
 | **解決規則と同名ロール衝突時の確認**   | ローカルとグローバルの**片方のみ**に登録されていればそちらを採用。**両方に同じロール名が登録されている場合**は勝手に決めず `worker_role_scope_ambiguous` で停止し、ワークスペース名を提示して人間に確認する（`--scope local\|global` で明示指定可） |
-| **カレントペイン自動登録**             | `herdr-orchestrator role set <role> [<pane_id>] [--pane <pane_id>] [--global]` において、ペイン指定省略時は `HERDR_PANE_ID` を使用                                                                                                                  |
+| **カレントペイン自動登録**             | `herdr-orchestrator role set <role> [<pane_id>] [--pane <pane_id>] [--global]` において、ペイン指定省略時は `HERDR_PANE_ID` を使用（人間が手動実行する場合。エージェント自動実行時は `--pane` 明示必須）                                            |
 | **日本語・カスタムロール名**           | 暗黙の同義語変換辞書は持たず、NFKC 正規化・ASCII 小文字化（`unicodedata.normalize("NFKC", val).strip().lower()`）のみを行い、登録された日本語・英数字ロール名（例: `調査`, `レビュワー`, `ログ調査`, `チケット管理`）をそのまま保存・照合する       |
 | **Requester–Worker 間の一致強制解除**  | Requester の worktree と Worker の worktree が同一であることを要求しない（クロスワークスペース配送の解禁）。ただし Task Registry には Requester の `context.worktree.path` と Worker の `worker.cwd` をそれぞれ必須記録し、各自の照合は維持する     |
 | **受信側での本人確認とチャット報告**   | 受信側が `task-status` / `task-result` / `result-submit` を実行した際、呼び出し元と Task の関係（`worker` / `requester` / `observer`）に応じて照合する。宛先不一致時は即停止し、**受け取った側のチャット画面に不一致を報告して停止**する            |
@@ -236,7 +236,7 @@ herdr-orchestrator role set ログ調査 --global
 # 3. ペインIDを明示して登録（位置引数または --pane のどちらでも指定可能。エージェント自動実行時はこちらを使用）
 herdr-orchestrator role set チケット管理 w16:p1 --label "チケット管理 (共通)" --global
 herdr-orchestrator role set reviewer --pane w15:p2 --label "レビュワー"
-herdr-orchestrator role set ログ調査 --pane w16:p1 --label "ログ調査 (共通)" --global
+herdr-orchestrator role set ログ調査 --pane w17:p1 --label "ログ調査 (共通)" --global
 
 # 4. 登録状況の表示（ローカル＋グローバルの両方、およびワークスペース名等のUI位置情報を表示）
 herdr-orchestrator role show
