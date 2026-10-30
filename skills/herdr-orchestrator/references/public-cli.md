@@ -1,34 +1,201 @@
-# Public CLI（固定 surface）
+# Herdr Orchestrator — CLI リファレンス（開発者・Agent 向け別紙）
 
 正本: [§6.5](../../../docs/herdr-orchestrator/03-task-registry.md#sec-6-5)、[§14.2](../../../docs/herdr-orchestrator/07-skill-and-implementation.md#sec-14-2)
 
-リポジトリ内入口:
+コマンドラインツール `herdr-orchestrator` の詳細なコマンド仕様、引数・オプション、およびターミナルからの直接操作手順です。日常の利用で AI Agent に自然言語で指示を出す場合は [README.md](../../../README.md) を参照してください。
 
-```text
-skills/herdr-orchestrator/scripts/herdr-orchestrator
+リポジトリ内入口: `skills/herdr-orchestrator/scripts/herdr-orchestrator`  
+インストール後リンク: `~/.local/bin/herdr-orchestrator`
+
+---
+
+## 1. コマンド一覧
+
+| コマンド                                                  | 説明                                                                                                                   | `HERDR_ENV=1` 制約 |
+| --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ------------------ |
+| `doctor`                                                  | 環境健全性診断、古い Role Binding 検出、stale dispatch 候補検出                                                        | 必須               |
+| `identity init`                                           | Git リポジトリ固有の UUID（Repository Identity）を初期化                                                               | 免除（ペイン外可） |
+| `identity show`                                           | 現在のリポジトリ固有 UUID を表示                                                                                       | 免除（ペイン外可） |
+| `role set <role> [<pane_id>]`                             | ロールとペインを紐づけ（`--global`, `--label <name>`, `--pane <pane_id>`）                                             | 必須               |
+| `role show`                                               | 登録済みロール一覧とペイン指紋メタデータを表示（`--global`）                                                           | 免除（ペイン外可） |
+| `role clear [<role>\|--all]`                              | ロール登録を解除（`--global`）                                                                                         | 免除（ペイン外可） |
+| `handoff`                                                 | タスクを作成して Worker へ委託（`--mode sync\|async`, `--to <role>`, `--instruction <text>`, `--scope local\|global`） | 必須               |
+| `task-status <task_id>`                                   | タスクの進行状態と受信者照合（`recipient_verification`）を確認                                                         | 必須               |
+| `task-list`                                               | Task Registry 内のタスク一覧を読み取り専用で取得（`--worktree`, `--status`, `--limit` 等）                             | 必須               |
+| `result-submit <task_id>`                                 | Worker によるタスク結果の提出（`--result-status succeeded\|failed`, `--result-ref <path>`, `--summary <text>`）        | 必須               |
+| `task-result <task_id>`                                   | Requester による結果確定データの取得・成果物パス解決                                                                   | 必須               |
+| `resume-task` / `reset-completion` / `recover-completion` | completion 状態の再試行・復旧                                                                                          | 必須               |
+| `reconcile-dispatch`                                      | 未確定 dispatch の整合性復旧                                                                                           | 必須               |
+| `update`                                                  | 配布環境の最新化（Release Tarball 取得・展開、`--force`, `--version`）                                                 | 免除（ペイン外可） |
+
+※ Task Registry の JSON ファイル直接編集は禁止されています。すべての操作は本 CLI を介してアトミックに行われます。
+
+---
+
+## 2. 初期セットアップと環境診断
+
+### 2.1 環境診断 (`doctor`)
+
+Herdr セッションペイン内で実行し、環境変数や古い設定ファイルの有無を確認します。
+
+```bash
+herdr-orchestrator doctor
 ```
 
-| コマンド                                                  | 用途                                                                                                                                                                                                                                                                            |
-| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `handoff`                                                 | sync / async 配送（`--mode`, `--worker-role`/`--to`, `--task-type`/`--type`, `--scope local\|global`, `--instruction`）                                                                                                                                                         |
-| `task-status` / `task-result`                             | Registry 読取（`HERDR_ENV=1` 下では `recipient_verification` による受信者・ロール照合結果を付与）                                                                                                                                                                               |
-| `task-list`                                               | Registry 一覧参照（読み取り専用。`--repository`, `--worktree`, `--type`, `--status`, `--limit`、[task-list 設計書](../../../docs/herdr-orchestrator-task-list.md)）                                                                                                             |
-| `result-submit`                                           | worker 結果登録（`--result-ref` または `--summary` 単独提出可。async では completion 連鎖の best-effort）                                                                                                                                                                       |
-| `resume-task` / `reset-completion` / `recover-completion` | completion 再試行・復旧                                                                                                                                                                                                                                                         |
-| `doctor`                                                  | 環境 + stale dispatch 候補 + 旧形式 Role Binding（`outdated_role_bindings`）検出                                                                                                                                                                                                |
-| `reconcile-dispatch`                                      | dispatch 復旧（§6.12）                                                                                                                                                                                                                                                          |
-| `identity`                                                | リポジトリ識別子 UUID の管理（`init`, `show`、[herdr-orchestrator-identity-uuid.md](../../../docs/herdr-orchestrator-identity-uuid.md#5-cli-仕様)）                                                                                                                             |
-| `role`                                                    | ローカル / グローバルの論理 role と `pane_id` の紐づけ管理（`set <role> [<pane_id>] [--pane <pane_id>] [--label <name>] [--global]`, `show [--global]`, `clear [<role>\|--all] [--global]`、[クロスワークスペース設計書](../../../docs/herdr-orchestrator-cross-workspace.md)） |
-| `update`                                                  | 配布環境の最新化（Release Tarball 取得・展開、`--force`, `--version`、[distribution-install.md](distribution-install.md)）                                                                                                                                                      |
+正常時は終了コード 0 で診断 JSON が出力されます。セッション外で実行した場合は `herdr_env: false` となり終了コード 1 が返ります。
 
-Registry JSON の直接編集は禁止。内部 writer は `scripts/task-registry.py`（Agent 非公開）。
-※ `update`、`identity`、および `role show` / `role clear` コマンドはセッション外メンテナンス・人間による手動実行を考慮し、`HERDR_ENV=1` の環境制約を免除する（ライブペインの指紋を取得する `role set` や `handoff` を含むその他のコマンドはすべて `HERDR_ENV=1` 必須）。
+### 2.2 リポジトリ識別子の初期化 (`identity init` / `identity show`)
 
-## クラッシュ再起動後の状態確認手順
+Git リポジトリ固有の UUID を生成・設定します（Git 管理ディレクトリ内で `role set` を実行した際にも自動的に初期化されます）。
 
-PC/WSL の再起動や異常終了後、残存タスクを確認する際は `task-list` を使用する（詳細は [task-list 設計書 §7.1](../../../docs/herdr-orchestrator-task-list.md#71-想定手順)）。
+```bash
+cd /path/to/repo
+herdr-orchestrator identity init
+herdr-orchestrator identity show
+```
 
-1. `herdr-orchestrator task-list --worktree "$(git rev-parse --show-toplevel)"` を実行。
+---
+
+## 3. ロール管理 (`role`)
+
+論理ロール名と Herdr の `pane_id`（例: `w15:p2`）を紐づけ、Herdr UI 上の表示名（ペインラベル）を連動させます。
+
+### 3.1 ロールの登録 (`role set`)
+
+```bash
+# 自ペインを「メイン」として登録（pane_id を省略すると現在の HERDR_PANE_ID を使用）
+herdr-orchestrator role set メイン
+
+# 特定のペイン（w15:p2）を「レビュワー」として登録
+herdr-orchestrator role set レビュワー w15:p2
+
+# 英語ロール名で登録し、Herdr UI 上の表示名を日本語にする場合
+herdr-orchestrator role set reviewer w15:p2 --label "レビュワー"
+
+# 別ワークスペースのペインをグローバル共通ロールとして登録する場合
+herdr-orchestrator role set 調査担当 w16:p1 --global
+```
+
+- `--global`: 全ワークスペース・全リポジトリ共通のロールとして登録します（`~/.local/state/herdr-orchestrator/roles/global.json` に保存）。
+- `--label <display_name>`: Herdr UI のペイン表示名（タブ上のラベル）を個別に指定します（先頭の `--` は自動除去されます）。
+
+### 3.2 登録内容の確認 (`role show`)
+
+```bash
+# ローカルロール一覧
+herdr-orchestrator role show
+
+# グローバルロール一覧
+herdr-orchestrator role show --global
+```
+
+### 3.3 ロールの解除 (`role clear`)
+
+```bash
+# 特定ロールを解除（Herdr UI ペイン名も --clear で復元）
+herdr-orchestrator role clear レビュワー
+
+# 全ロールを一括解除
+herdr-orchestrator role clear --all
+herdr-orchestrator role clear --all --global
+```
+
+---
+
+## 4. タスク委託 (`handoff`)
+
+Worker Agent へタスクを送信します。
+
+```bash
+# 1. 同期委託（Worker の完了まで待機して結果を受け取る）
+herdr-orchestrator handoff \
+  --mode sync \
+  --to レビュワー \
+  --task-type review \
+  --instruction "PR #56 のコードレビューを実施してください。"
+
+# 2. 非同期委託（即時復帰しタスク ID を取得する）
+herdr-orchestrator handoff \
+  --mode async \
+  --to 調査担当 \
+  --scope global \
+  --instruction "最新のサーバーエラーログを解析してください。"
+```
+
+- `--mode sync|async`: 同期（完了待機）または非同期（即時復帰）。
+- `--to <role>`（または `--worker-role <role>`）: 登録済みロール名を指定（日本語名可）。
+- `--scope local|global`: ローカルとグローバルで同名ロールが重複している場合にスコープを限定。
+- `--instruction <text>`: Worker Agent への指示本文。
+
+---
+
+## 5. タスク確認と結果操作
+
+### 5.1 タスク状態と受信者照合 (`task-status`)
+
+```bash
+herdr-orchestrator task-status <task_id>
+```
+
+出力 JSON の `recipient_verification` には、現在の呼び出し元ペインが対象タスクの正当な受信者（Worker / Requester）かどうかの照合結果が含まれます。`verified: false` の場合は誤配送防止のため作業を着手してはなりません。
+
+### 5.2 タスク一覧の参照とクラッシュ再起動後の状態確認手順 (`task-list`)
+
+Task Registry 内のタスクを読み取り専用で一覧表示します。PC や Herdr の再起動・異常終了後に残存タスクを確認する際にも使用します（詳細は [task-list 設計書 §7.1](../../../docs/herdr-orchestrator-task-list.md#71-想定手順)）。
+
+```bash
+herdr-orchestrator task-list --worktree "$(git rev-parse --show-toplevel)"
+```
+
+#### クラッシュ再起動後の状態確認手順
+
+1. `herdr-orchestrator task-list --worktree "$(git rev-parse --show-toplevel)"` を実行する（`HERDR_ENV=1` ペイン内）。
 2. `exit = 0` かつ `complete=true` で正常取得。`exit = 3` の場合は一部ファイルが破損（`anomalies` を人間に報告）。
 3. 各タスクの `overview.warnings` を必ず確認。`inconsistent_state_combination` が付与されている場合は、`overview.state` が `closed` であっても正常完了とみなさず、状態不整合として人間に報告する。
 4. `open` / `uncertain` や警告ありのタスクは `task-status <task-id>` で詳細を確認し、次の操作を判断する。
+
+### 5.3 結果の提出 (`result-submit`)
+
+作業を完了した Worker Agent が結果を登録します（`HERDR_ENV=1` かつ Worker ペインから実行）。
+
+```bash
+# 成果物ファイル（相対パス）と要約を提出
+herdr-orchestrator result-submit <task_id> \
+  --result-status succeeded \
+  --result-ref "docs/reviews/internal/<instance-id>/RV001.md" \
+  --summary "コードレビュー完了。指摘なし（GO）。"
+
+# 成果物ファイルを作らず、要約のみで提出（クロスワークスペース調査等、2000文字以内）
+herdr-orchestrator result-submit <task_id> \
+  --result-status succeeded \
+  --summary "調査完了。設定ファイルのタイムアウト値不足が原因でした。"
+```
+
+### 5.4 結果の読み取り (`task-result`)
+
+Requester Agent が Worker の提出結果を取得します。
+
+```bash
+herdr-orchestrator task-result <task_id>
+```
+
+---
+
+## 6. Codex Agent 実行承認設定 (`codex execpolicy`)
+
+Codex を利用する場合、自律実行の中断を防ぐために `~/.codex/rules/default.rules` へ許可ルールを追加します（テンプレート: `skills/herdr-orchestrator/install/codex-execpolicy-snippet.rules`）。
+
+```python
+# 読み取り・診断系（自動許可）
+prefix_rule(pattern=["herdr-orchestrator", ["doctor", "task-status", "task-result", "task-list"]], decision="allow")
+prefix_rule(pattern=["herdr-orchestrator", "identity", "show"], decision="allow")
+prefix_rule(pattern=["herdr-orchestrator", "role", "show"], decision="allow")
+
+# 結果提出（自動許可）
+prefix_rule(pattern=["herdr-orchestrator", "result-submit"], decision="allow")
+```
+
+> [!IMPORTANT]
+> **副作用を伴うコマンド（`role set`, `role clear`, `handoff`）の扱い**  
+> `role set` や `handoff` は Role Binding の書き換えや UI 表示名変更、相手ペインへのプロンプト送信などの環境変更（副作用）を伴うため、公式テンプレートでは意図的に自動許可（`allow`）から除外されており、Codex 側の通常承認プロンプト（Human-in-the-loop）が表示されます（方針の詳細は [install/README.md](../install/README.md#21-コマンド分類と許可方針) を参照）。  
+> ※ `role` コマンド全体を一括許可（`pattern=["herdr-orchestrator", "role"]`）すると、`role clear --all --global` まで無条件で自動実行されるリスクがあります。設定変更や委託は人間の承認を経て実行することが推奨されます。
