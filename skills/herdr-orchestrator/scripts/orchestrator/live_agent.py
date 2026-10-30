@@ -234,7 +234,7 @@ def check_cwd_affinity(pane_cwd: Path | str, current_cwd: Path | str) -> bool:
         return True
 
     try:
-        if c_cwd.is_relative_to(p_cwd) or p_cwd.is_relative_to(c_cwd):
+        if c_cwd.is_relative_to(p_cwd):
             return True
     except (OSError, ValueError):
         pass

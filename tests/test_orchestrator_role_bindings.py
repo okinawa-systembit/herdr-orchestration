@@ -1489,11 +1489,23 @@ raise SystemExit(99)
         self.assertTrue(check_cwd_affinity(self.repo_a, self.repo_a))
         self.assertTrue(check_cwd_affinity(str(self.repo_a), str(self.repo_a)))
 
-        # Subdirectory
+        # Subdirectory (command executed from subdirectory inside pane cwd)
         sub = self.repo_a / "subdir"
         sub.mkdir(exist_ok=True)
         self.assertTrue(check_cwd_affinity(self.repo_a, sub))
-        self.assertTrue(check_cwd_affinity(sub, self.repo_a))
+
+        # Ancestor directory (command executed from parent directory outside pane repo/cwd)
+        with tempfile.TemporaryDirectory() as outside_tmp:
+            outside_root = Path(outside_tmp)
+            standalone = outside_root / "nested" / "proj"
+            standalone.mkdir(parents=True)
+            self.assertFalse(check_cwd_affinity(standalone, outside_root))
+
+        # Same Git repository with separate git worktree
+        wt2 = self.repo_a.parent / "repo_a_wt2"
+        _git(self.repo_a, "worktree", "add", str(wt2), "-b", "branch_wt2")
+        self.assertTrue(check_cwd_affinity(self.repo_a, wt2))
+        self.assertTrue(check_cwd_affinity(wt2, self.repo_a))
 
         # Separate repository (different worktree)
         with tempfile.TemporaryDirectory() as other_tmp:
@@ -1510,6 +1522,7 @@ raise SystemExit(99)
         # with error 'env_pane_cwd_mismatch' and a guidance message to specify --pane.
         with tempfile.TemporaryDirectory() as other_tmp:
             other_repo = _init_repo(Path(other_tmp), "other_project")
+            get_or_create_repository_identity(other_repo)
             # self.env has HERDR_PANE_ID="w15:p1" whose fake cwd is self.repo_a
             # Running role set from other_repo without --pane should fail
             res = _run_cli("role", "set", "reviewer", env=self.env, cwd=other_repo)
@@ -1518,6 +1531,12 @@ raise SystemExit(99)
             self.assertEqual(data.get("error"), "env_pane_cwd_mismatch")
             self.assertIn("HERDR_PANE_ID", data.get("message", ""))
             self.assertIn("--pane <pane_id>", data.get("message", ""))
+
+            # P3-1: Assert that binding was NOT saved on rejection
+            show_res = _run_cli("role", "show", env=self.env, cwd=other_repo)
+            self.assertEqual(show_res.returncode, 0)
+            show_data = json.loads(show_res.stdout)
+            self.assertNotIn("reviewer", show_data.get("roles", {}))
 
             # But if --pane is explicitly passed, cross-workspace registration should be allowed
             res_opt = _run_cli(
