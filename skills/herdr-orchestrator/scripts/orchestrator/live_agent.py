@@ -367,21 +367,29 @@ def sync_herdr_pane_label(
     display_name: str | None = None,
     *,
     clear: bool = False,
-) -> None:
-    """Best-effort Herdr UI pane rename (`herdr pane rename <pane_id> <display_name>` / `herdr pane rename <pane_id> --clear`)."""
+) -> dict[str, Any]:
+    """Best-effort Herdr UI pane rename (`herdr pane rename <pane_id> <display_name>` / `herdr pane rename <pane_id> --clear`).
+
+    Returns a status dict:
+      {"synced": bool, "action": "rename" | "clear" | "skipped" | "failed", "label": str | None, "error": str | None}
+    """
     if os.environ.get("HERDR_ENV") != "1":
-        return
+        return {"synced": False, "action": "skipped", "label": None, "error": "HERDR_ENV_not_set"}
     try:
         if clear:
             run_herdr(["pane", "rename", pane_id, "--clear"])
+            return {"synced": True, "action": "clear", "label": None, "error": None}
         elif display_name:
             clean_name = display_name
             while clean_name.startswith("--"):
                 clean_name = clean_name[2:].strip()
             if clean_name:
                 run_herdr(["pane", "rename", pane_id, clean_name])
-    except HerdrCliError:
-        pass
+                return {"synced": True, "action": "rename", "label": clean_name, "error": None}
+            return {"synced": False, "action": "skipped", "label": None, "error": "empty_label_after_strip"}
+        return {"synced": False, "action": "skipped", "label": None, "error": "no_display_name"}
+    except HerdrCliError as exc:
+        return {"synced": False, "action": "failed", "label": display_name, "error": str(exc)}
 
 
 def inspect_pane_for_role_set(pane_id: str, *, display_name: str, bound_at: str) -> dict[str, Any]:

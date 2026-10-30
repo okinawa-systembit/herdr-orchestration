@@ -52,6 +52,9 @@ Inbox: 段階0–8 GO (2026-10-06 10:29)
   - ラベル設定は `herdr pane rename <pane_id> <label>`、クリアは `herdr pane rename <pane_id> --clear` が実機仕様。
   - PANE_ID 後の引数で特別扱いされるのは `--clear` のみ（`--help` / `-h` / `-x` はラベル扱い。0.9.5 実測）。Orchestrator 側では将来のオプション追加や誤認防止の予防措置として、先頭の `--` を自動除去して設定する。
   - 将来 Herdr のバージョン更新やサブコマンド構文改訂時に再確認を推奨。
+- **`role clear` 時の兼任ペイン残存ロール UI ラベル保護（Issue #79）**:
+  - ローカルとグローバルを兼任するペインで片側を `role clear` した場合、他スコープの残存ロール表示名を維持・再同期し、誤消去を防止（CW-22）。
+  - `sync_herdr_pane_label` の実行結果を辞書（`synced`, `action`, `label`, `error`）として返却し、`role set` / `role clear` の JSON 出力で連動状況を可視化。
 
 ## 移行（§19）
 
