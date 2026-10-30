@@ -1,6 +1,6 @@
 # 配布インストール・リリース・更新仕様
 
-開発時は [dev-local-install.md](dev-local-install.md) と `install/dev-local-install.sh` を使う。本書は **clone なしで導入・更新する配布環境** の正式仕様。パッケージマネージャ（npm/pip 等）は使わず、GitHub Releases の Release Tarball を活用した `curl | bash` インストールと、`herdr-orchestrator update` CLI による更新を提供する。
+開発時は [dev-local-install.md](dev-local-install.md) と `install/dev-local-install.sh` を使う。本書は **clone なしで導入・更新する配布環境** の正式仕様。パッケージマネージャ（npm/pip 等）は使わず、GitHub Releases の Release Tarball を活用した `curl | bash` インストールと、更新手順（現行版は `install.sh` 再実行、将来拡張として `herdr-orchestrator update` CLI 予定）を提供する。
 
 ※ **対象動作環境**: **WSL2（Ubuntu）** 限定。Windows ネイティブ環境および macOS への対応は不要。電源断、WSL 強制終了、SIGKILL からの自動復旧は保証対象外とし、通常のスクリプトエラーやシグナル中断に対する既存インストールの保護・復旧を保証する。
 
@@ -436,7 +436,10 @@ jobs:
 
 ---
 
-## 4. アップデート仕様（`herdr-orchestrator update`）
+## 4. アップデート仕様（将来仕様: `herdr-orchestrator update` / 現行: `install.sh` 再実行）
+
+> [!NOTE]
+> 現行版では `herdr-orchestrator update` コマンドは未実装です。配布環境の更新は、README に記載の通り `install.sh` を再実行してください。以下の仕様は将来の実装予定仕様です。
 
 ### 4.1 CLI 仕様
 
@@ -447,14 +450,14 @@ herdr-orchestrator update [--version <tag>] [--force] [--dry-run]
 ### 4.2 実行環境要件
 
 - **`HERDR_ENV=1` の免除**:
-  - `update` コマンドはエージェントセッション外や Herdr 未起動のターミナルから人間・管理者が実行することが想定されるため、通常の `handoff` や `task-status` 等と異なり、**`HERDR_ENV=1` の環境制約を免除**する。
+  - `update` コマンドはエージェントセッション外や Herdr 未起動のターミナルから人間・管理者が実行することが想定されるため、通常の `handoff` や `task-status` 等と異なり、**`HERDR_ENV=1` の環境制約を免除**する（現行の `install.sh` も同様に免除）。
 
 ### 4.3 更新ポリシー・排他制御と運用制約
 
 - **自動更新の禁止**:
   - タスク実行中の予期せぬ破壊や競合を防ぐため、バックグラウンドでの自動更新は行わない（[09-maintenance-and-roadmap.md §20.4](../../../docs/herdr-orchestrator/09-maintenance-and-roadmap.md#sec-20-4) の原則に準拠）。
 - **インストール・更新処理同士の排他制御**:
-  - `install.sh` と `herdr-orchestrator update` は同一のインストールロック（`~/.agents/skills/.herdr-orchestrator.install.lock` に対する `flock` 排他ロック）を使用し、複数インストーラや更新処理が同時並行で実行されることを防止する。
+  - `install.sh` と将来の `herdr-orchestrator update` は同一のインストールロック（`~/.agents/skills/.herdr-orchestrator.install.lock` に対する `flock` 排他ロック）を使用し、複数インストーラや更新処理が同時並行で実行されることを防止する。
   - 通常の Orchestrator CLI 処理（`handoff`、`result-submit`、`resume-task` 等）にはロック処理を追加せず、既存のタスク処理パイプラインへのオーバーヘッドや複雑性を排除する（`.maintenance.lock` は導入しない）。
 - **実行中タスクの事前確認とデフォルト拒否（Fail-Closed）**:
   - 更新処理の開始前に Task Registry を確認し、未完了タスク（`task.status` が `dispatched` または `in_progress`、あるいは `completion.status` が `processing`）が存在する場合、**デフォルトで更新を拒否して即座にエラー終了（exit 1）**する。
@@ -477,12 +480,12 @@ herdr-orchestrator update [--version <tag>] [--force] [--dry-run]
 
 ## 5. 開発用インストールとの対比
 
-| 項目                 | 開発用（`dev-local-install.sh`）       | 配布用（`install.sh` / `update`）                  |
-| :------------------- | :------------------------------------- | :------------------------------------------------- |
-| **入手元**           | ローカル checkout ツリー               | GitHub Release Tarball                             |
-| **前提条件**         | git リポジトリクローン済み             | curl, tar, python3, flock（git 不要、WSL2 Ubuntu） |
-| **配置先**           | `~/.agents/skills/herdr-orchestration` | `~/.agents/skills/herdr-orchestration`（同一）     |
-| **CLI リンク**       | `~/.local/bin/herdr-orchestrator`      | `~/.local/bin/herdr-orchestrator`（同一）          |
-| **切り替え・復旧**   | 手動再実行                             | ステージング切替 (各mv) + 自動ロールバック         |
-| **実行中タスク制御** | 開発者の責任                           | デフォルト更新拒否 (Fail-Closed) + 運用制約        |
-| **更新方法**         | `npm run install:orchestrator-dev`     | `herdr-orchestrator update`                        |
+| 項目                 | 開発用（`dev-local-install.sh`）       | 配布用（`install.sh` / 将来: `update`）                  |
+| :------------------- | :------------------------------------- | :------------------------------------------------------- |
+| **入手元**           | ローカル checkout ツリー               | GitHub Release Tarball                                   |
+| **前提条件**         | git リポジトリクローン済み             | curl, tar, python3, flock（git 不要、WSL2 Ubuntu）       |
+| **配置先**           | `~/.agents/skills/herdr-orchestration` | `~/.agents/skills/herdr-orchestration`（同一）           |
+| **CLI リンク**       | `~/.local/bin/herdr-orchestrator`      | `~/.local/bin/herdr-orchestrator`（同一）                |
+| **切り替え・復旧**   | 手動再実行                             | ステージング切替 (各mv) + 自動ロールバック               |
+| **実行中タスク制御** | 開発者の責任                           | デフォルト更新拒否 (Fail-Closed) + 運用制約              |
+| **更新方法**         | `npm run install:orchestrator-dev`     | `install.sh` 再実行（将来: `herdr-orchestrator update`） |

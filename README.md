@@ -83,7 +83,7 @@ curl -fsSL 'https://raw.githubusercontent.com/okinawa-systembit/herdr-orchestrat
 > ```
 >
 > ```text
-> あなたをこのリポジトリの「実装担当（implementer）」として登録して。
+> あなたをこのリポジトリの「実装担当」として登録して。
 > ```
 >
 > **別のペイン（相手）を登録する:**

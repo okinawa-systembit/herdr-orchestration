@@ -18,7 +18,7 @@
 - 対象変更範囲: <!-- staged / unstaged / untracked の別 -->
 - （任意）差分指紋: <!-- 再現性が必要な場合のみ、対象範囲に応じたハッシュ値等を記録 -->
 
-- レビュアーモデル: <!-- 例: Gemini 2.5 Flash, Claude 3.5 Sonnet, GPT-4o 等 -->
+- レビュワーモデル: <!-- 例: Gemini 2.5 Flash, Claude 3.5 Sonnet, GPT-4o 等 -->
 - 指摘内訳サマリ: 確認済み不具合 <!-- X -->件（Blocking <!-- B -->件 / Non-blocking <!-- NB -->件） / 未確認リスク <!-- Y -->件 / 改善提案 <!-- Z -->件
 
 ## 判定

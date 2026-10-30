@@ -157,7 +157,7 @@ Orchestrator 側で Herdr CLI の変更を追従実装しない。
 - sync / async policy
 - callback policy
 
-配布環境における更新は、ユーザーまたは管理者が明示的に `herdr-orchestrator update`（または最新インストーラ）を実行して GitHub Release Tarball を取得・置換する（詳細は [distribution-install.md](../../skills/herdr-orchestrator/references/distribution-install.md) 参照）。実行中タスクの破壊を防ぐためバックグラウンドでの自動更新は行わず、未完了タスクが存在する場合はデフォルトで更新を拒否する（`--force` でのみ強制可能）。通常のタスク処理パイプラインへの影響を避けるため共通メンテナンスロックは設けず、更新同士の排他ロックと未完了タスクの事前確認、および運用制約により安全性を確保する（更新と通常タスクの完全排他は保証しない）。更新時はステージング展開と安全な配置切替（`mv`）を用い、プロセス内異常時は既存環境へ自動ロールバックする（各 rename は原子的だが、切替全体の完全な原子性は保証しない）。また `update` 操作はセッション外メンテナンスを考慮し `HERDR_ENV=1` を免除する。開発環境では手元 checkout から `npm run install:orchestrator-dev` により反映する（[dev-local-install.md](../../skills/herdr-orchestrator/references/dev-local-install.md) 参照）。
+配布環境における更新は、ユーザーまたは管理者が明示的に最新インストーラ再実行（将来仕様として `herdr-orchestrator update` CLI 予定）を実行して GitHub Release Tarball を取得・置換する（詳細は [distribution-install.md](../../skills/herdr-orchestrator/references/distribution-install.md) 参照）。実行中タスクの破壊を防ぐためバックグラウンドでの自動更新は行わず、未完了タスクが存在する場合はデフォルトで更新を拒否する（`--force` でのみ強制可能）。通常のタスク処理パイプラインへの影響を避けるため共通メンテナンスロックは設けず、更新同士の排他ロックと未完了タスクの事前確認、および運用制約により安全性を確保する（更新と通常タスクの完全排他は保証しない）。更新時はステージング展開と安全な配置切替（`mv`）を用い、プロセス内異常時は既存環境へ自動ロールバックする（各 rename は原子的だが、切替全体の完全な原子性は保証しない）。また `install.sh`（および将来の `update` 操作）はセッション外メンテナンスを考慮し `HERDR_ENV=1` を免除する。開発環境では手元 checkout から `npm run install:orchestrator-dev` により反映する（[dev-local-install.md](../../skills/herdr-orchestrator/references/dev-local-install.md) 参照）。
 
 <a id="sec-21-update-repository"></a>
 

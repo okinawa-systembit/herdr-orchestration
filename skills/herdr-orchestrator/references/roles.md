@@ -19,7 +19,8 @@
 > [!NOTE]
 > **標準ロール名と日本語名の使い分け**:
 > `reviewer` と `レビュワー`、`implementer` と `実装者` はそれぞれ**別のロール名**として扱われます。
-> `repo-review` や `repo-workflow` などのリポジトリ標準ツールは英語の標準ロール名（`--worker-role reviewer`）で handoff を行うため、連携ツールを使用するワークスペースでは標準ロール名（`reviewer`, `implementer`）で登録し、UI 表示を日本語にしたい場合は `--label "レビュワー"` のように指定することを推奨します。
+> `repo-review` や `repo-workflow` などのリポジトリ標準ツールは英語の標準ロール名（`--worker-role reviewer`）で handoff を行うため、連携ツールを使用するワークスペースでは標準ロール名（`reviewer`, `implementer`）で登録し、UI 表示を日本語にしたい場合は `--label "レビュワー"` のように指定することを推奨します。  
+> ※ 同様に、`レビュワー` と `レビュアー` のような表記揺れ・送り仮名の違いも**完全に別のロール名**として区別されるため、登録時のロール名と完全一致で指定してください。
 
 ## Role と `pane_id` の紐づけ（Role Binding: ローカル / グローバル）
 

@@ -528,8 +528,8 @@ class CrossWorkspaceRoleBindingTests(unittest.TestCase):
         self.repo_b = _init_repo(self.root, "repo-b")
         self.nogit_dir = self.root / "nogit-logs"
         self.nogit_dir.mkdir()
-        self.todo_dir = self.root / "todo-mcp-workspace"
-        self.todo_dir.mkdir()
+        self.ticket_dir = self.root / "tickets-mcp-workspace"
+        self.ticket_dir.mkdir()
 
         self.state_home = self.root / "state"
         self.fake_bin = self.root / "bin"
@@ -541,7 +541,7 @@ class CrossWorkspaceRoleBindingTests(unittest.TestCase):
         self._write_herdr_state(
             workspaces=[
                 {"workspace_id": "w15", "label": "project-a-ws", "number": 1},
-                {"workspace_id": "w16", "label": "todo-ws", "number": 2},
+                {"workspace_id": "w16", "label": "tickets-ws", "number": 2},
                 {"workspace_id": "w17", "label": "logs-ws", "number": 3},
             ],
             tabs=[
@@ -577,8 +577,8 @@ class CrossWorkspaceRoleBindingTests(unittest.TestCase):
                     "terminal_id": "term_16_1",
                     "agent": "claude",
                     "agent_status": "idle",
-                    "agent_session": {"value": "sess_todo_1"},
-                    "foreground_cwd": str(self.todo_dir.resolve()),
+                    "agent_session": {"value": "sess_ticket_1"},
+                    "foreground_cwd": str(self.ticket_dir.resolve()),
                 },
                 {
                     "pane_id": "w17:p1",
@@ -680,7 +680,7 @@ raise SystemExit(99)
 
     def test_cw01_cw02_japanese_and_custom_roles_and_pane_rename(self) -> None:
         # CW-01 & CW-02: Implicit $HERDR_PANE_ID, Japanese role stored as-is ('レビュワー' -> 'レビュワー'),
-        # NFKC + lowercase normalization ('ＴＯＤＯ管理' -> 'todo管理'), and Herdr UI pane rename (display_name and --clear)
+        # NFKC + lowercase normalization ('ＴＩＣＫＥＴ管理' -> 'ticket管理'), and Herdr UI pane rename (display_name and --clear)
         rev_env = {**self.env, "HERDR_PANE_ID": "w15:p2"}
         r1 = _run_cli("role", "set", "レビュワー", env=rev_env, cwd=self.repo_a)
         self.assertEqual(r1.returncode, 0, r1.stdout + r1.stderr)
@@ -691,23 +691,23 @@ raise SystemExit(99)
         self.assertIn("ワークスペース #1「project-a-ws」の『レビュワー』", d1["target"]["display_summary"])
 
         # Global custom role registration using positional pane_id and full-width NFKC normalization
-        r2 = _run_cli("role", "set", "ＴＯＤＯ管理", "w16:p1", "--global", env=self.env, cwd=self.repo_a)
+        r2 = _run_cli("role", "set", "ＴＩＣＫＥＴ管理", "w16:p1", "--global", env=self.env, cwd=self.repo_a)
         self.assertEqual(r2.returncode, 0, r2.stdout + r2.stderr)
         d2 = json.loads(r2.stdout)
         self.assertEqual(d2["scope"], "global")
-        self.assertEqual(d2["role"], "todo管理")
-        self.assertEqual(d2["display_name"], "ＴＯＤＯ管理")
-        self.assertIn("ワークスペース #2「todo-ws」の『ＴＯＤＯ管理』", d2["target"]["display_summary"])
+        self.assertEqual(d2["role"], "ticket管理")
+        self.assertEqual(d2["display_name"], "ＴＩＣＫＥＴ管理")
+        self.assertIn("ワークスペース #2「tickets-ws」の『ＴＩＣＫＥＴ管理』", d2["target"]["display_summary"])
 
         # Clear global role -> triggers `herdr pane rename w16:p1 --clear`
-        r_clear = _run_cli("role", "clear", "todo管理", "--global", env=self.env, cwd=self.repo_a)
+        r_clear = _run_cli("role", "clear", "ticket管理", "--global", env=self.env, cwd=self.repo_a)
         self.assertEqual(r_clear.returncode, 0)
         renames = self.rename_log.read_text(encoding="utf-8").strip().splitlines()
         self.assertEqual(
             renames,
             [
                 "w15:p2 レビュワー",
-                "w16:p1 ＴＯＤＯ管理",
+                "w16:p1 ＴＩＣＫＥＴ管理",
                 "w16:p1 --clear",
             ],
         )
@@ -772,7 +772,7 @@ raise SystemExit(99)
 
     def test_cw04_cw05_cross_workspace_and_nongit_handoff_and_summary_only_submit(self) -> None:
         # CW-04 & CW-05: Unbound requester in Non-Git directory (w17:p1) sends handoff to global ticket role (w16:p1)
-        _run_cli("role", "set", "チケット管理", "w16:p1", "--global", env=self.env, cwd=self.todo_dir)
+        _run_cli("role", "set", "チケット管理", "w16:p1", "--global", env=self.env, cwd=self.ticket_dir)
 
         nogit_env = {**self.env, "HERDR_PANE_ID": "w17:p1"}
         res_h = _run_cli(
@@ -789,7 +789,7 @@ raise SystemExit(99)
         self.assertEqual(res_h.returncode, 0, res_h.stdout + res_h.stderr)
         task_id = json.loads(res_h.stdout)["task_id"]
 
-        # Verify task record: requester.role == 'unbound', context.repository.identity == 'dir_...', worker.cwd == todo_dir
+        # Verify task record: requester.role == 'unbound', context.repository.identity == 'dir_...', worker.cwd == ticket_dir
         st_res = _run_cli("task-status", task_id, env=nogit_env, cwd=self.nogit_dir)
         self.assertEqual(st_res.returncode, 0)
         st_json = json.loads(st_res.stdout)
@@ -799,24 +799,24 @@ raise SystemExit(99)
         task_doc = st_json["task"]
         self.assertEqual(task_doc["requester"]["role"], "unbound")
         self.assertTrue(task_doc["context"]["repository"]["identity"].startswith("dir_"))
-        self.assertEqual(task_doc["worker"]["cwd"], str(self.todo_dir.resolve()))
+        self.assertEqual(task_doc["worker"]["cwd"], str(self.ticket_dir.resolve()))
 
-        # Worker (w16:p1 in todo_dir) submits result with --summary only (no --result-ref)
-        todo_env = {**self.env, "HERDR_PANE_ID": "w16:p1"}
+        # Worker (w16:p1 in ticket_dir) submits result with --summary only (no --result-ref)
+        ticket_env = {**self.env, "HERDR_PANE_ID": "w16:p1"}
         sub_res = _run_cli(
             "result-submit",
             task_id,
             "--result-status",
             "succeeded",
             "--summary",
-            "未完了TODOは2件です: 1. 設計レビュー, 2. テスト追加",
-            env=todo_env,
-            cwd=self.todo_dir,
+            "未完了チケットは2件です: 1. 設計レビュー, 2. テスト追加",
+            env=ticket_env,
+            cwd=self.ticket_dir,
         )
         self.assertEqual(sub_res.returncode, 0, sub_res.stdout + sub_res.stderr)
         sub_json = json.loads(sub_res.stdout)
         self.assertIsNone(sub_json["result"]["ref"])
-        self.assertIn("未完了TODOは2件です", sub_json["result"]["summary"])
+        self.assertIn("未完了チケットは2件です", sub_json["result"]["summary"])
         self.assertEqual(sub_json["completion_chain"]["completion"]["status"], "sent")
 
     def test_cw06_same_pane_same_terminal_agent_restart_continues_transparently(self) -> None:
@@ -846,15 +846,15 @@ raise SystemExit(99)
 
     def test_cw07_auto_tracking_on_pane_close_or_restart(self) -> None:
         # CW-07 Condition A (session match) & Condition B (1-folder 1-role single cwd+agent match)
-        _run_cli("role", "set", "チケット管理", "w16:p1", "--global", env=self.env, cwd=self.todo_dir)
+        _run_cli("role", "set", "チケット管理", "w16:p1", "--global", env=self.env, cwd=self.ticket_dir)
 
-        # Simulate Herdr restart: w16:p1 is gone, replaced by w22:p1 with a new session in todo_dir (Condition B)
+        # Simulate Herdr restart: w16:p1 is gone, replaced by w22:p1 with a new session in ticket_dir (Condition B)
         state = json.loads(self.herdr_state_file.read_text(encoding="utf-8"))
         for p in state["panes"]:
             if p["pane_id"] == "w16:p1":
                 p["pane_id"] = "w22:p1"
                 p["terminal_id"] = "term_22_1"
-                p["agent_session"] = {"value": "sess_todo_new"}
+                p["agent_session"] = {"value": "sess_ticket_new"}
         self._update_panes(state["panes"])
 
         res = _run_cli(
@@ -877,7 +877,7 @@ raise SystemExit(99)
         self.assertEqual(json.loads(show_res.stdout)["roles"]["チケット管理"], "w22:p1")
 
     def test_cw08_cw09_cw10_stop_on_ambiguous_candidates_cwd_change_or_shell_state(self) -> None:
-        _run_cli("role", "set", "チケット管理", "w16:p1", "--global", env=self.env, cwd=self.todo_dir)
+        _run_cli("role", "set", "チケット管理", "w16:p1", "--global", env=self.env, cwd=self.ticket_dir)
 
         # CW-10: Agent exited to shell (agent=None, agent_status="none") -> worker_agent_not_running
         state = json.loads(self.herdr_state_file.read_text(encoding="utf-8"))
@@ -907,7 +907,7 @@ raise SystemExit(99)
         self.assertEqual(res_cwd.returncode, 1)
         self.assertEqual(json.loads(res_cwd.stdout)["error"], "worker_context_changed")
 
-        # CW-08: Old pane w16:p1 closed, and TWO panes (w20:p1, w21:p1) have todo_dir + claude -> worker_ambiguous_candidates
+        # CW-08: Old pane w16:p1 closed, and TWO panes (w20:p1, w21:p1) have ticket_dir + claude -> worker_ambiguous_candidates
         state["panes"] = [p for p in state["panes"] if p["pane_id"] != "w16:p1"] + [
             {
                 "pane_id": "w20:p1",
@@ -917,7 +917,7 @@ raise SystemExit(99)
                 "agent": "claude",
                 "agent_status": "idle",
                 "agent_session": {"value": "sess_new_1"},
-                "foreground_cwd": str(self.todo_dir.resolve()),
+                "foreground_cwd": str(self.ticket_dir.resolve()),
             },
             {
                 "pane_id": "w21:p1",
@@ -927,7 +927,7 @@ raise SystemExit(99)
                 "agent": "claude",
                 "agent_status": "idle",
                 "agent_session": {"value": "sess_new_2"},
-                "foreground_cwd": str(self.todo_dir.resolve()),
+                "foreground_cwd": str(self.ticket_dir.resolve()),
             },
         ]
         self._update_panes(state["panes"])
@@ -1023,7 +1023,7 @@ raise SystemExit(99)
 
         # 2. Unrelated pane (w16:p1) -> verified=False, caller_role_in_task="other", action_required="STOP_AND_REPORT_TO_HUMAN"
         other_env = {**self.env, "HERDR_PANE_ID": "w16:p1"}
-        st_other = json.loads(_run_cli("task-status", task_id, env=other_env, cwd=self.todo_dir).stdout)
+        st_other = json.loads(_run_cli("task-status", task_id, env=other_env, cwd=self.ticket_dir).stdout)
         self.assertFalse(st_other["recipient_verification"]["verified"])
         self.assertEqual(st_other["recipient_verification"]["caller_role_in_task"], "other")
         self.assertEqual(st_other["recipient_verification"]["action_required"], "STOP_AND_REPORT_TO_HUMAN")
@@ -1234,17 +1234,17 @@ raise SystemExit(99)
         self.assertEqual(res_sub_local.returncode, 0, res_sub_local.stdout)
         self.assertEqual(json.loads(res_sub_local.stdout)["task_id"], local_task_id)
 
-        # --- Case 3: Task for another pane ('todo管理' on w16:p1) queried from w15:p2 ---
-        res_set_other = _run_cli("role", "set", "todo管理", "w16:p1", env=self.env, cwd=self.repo_a)
+        # --- Case 3: Task for another pane ('チケット管理' on w16:p1) queried from w15:p2 ---
+        res_set_other = _run_cli("role", "set", "チケット管理", "w16:p1", env=self.env, cwd=self.repo_a)
         self.assertEqual(res_set_other.returncode, 0, res_set_other.stdout)
         res_h_other = _run_cli(
             "handoff",
             "--mode",
             "async",
             "--to",
-            "todo管理",
+            "チケット管理",
             "--instruction",
-            "manage todos",
+            "manage tickets",
             env=self.env,
             cwd=self.repo_a,
         )

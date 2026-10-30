@@ -108,7 +108,7 @@ requester Agent を自動的に再開する。
 - 大規模な要件・設計調査（worker: `design`）
 - worker 完了後に requester が後続処理を継続する workflow
 
-Role Binding により登録された日本語・カスタムロール（`調査`, `todo管理` 等）の非同期委譲でも同様に `resume_requester` を利用できる（[§4](02-roles-and-task-contract.md#sec-4)、[クロスワークスペース設計書](../herdr-orchestrator-cross-workspace.md)）。
+Role Binding により登録された日本語・カスタムロール（`調査`, `チケット管理` 等）の非同期委譲でも同様に `resume_requester` を利用できる（[§4](02-roles-and-task-contract.md#sec-4)、[クロスワークスペース設計書](../herdr-orchestrator-cross-workspace.md)）。
 
 再開手順:
 

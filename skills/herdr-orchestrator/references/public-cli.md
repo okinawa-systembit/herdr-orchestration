@@ -26,7 +26,7 @@
 | `task-result <task_id>`                                   | Requester による結果確定データの取得・成果物パス解決                                                                   | 必須               |
 | `resume-task` / `reset-completion` / `recover-completion` | completion 状態の再試行・復旧                                                                                          | 必須               |
 | `reconcile-dispatch`                                      | 未確定 dispatch の整合性復旧                                                                                           | 必須               |
-| `update`                                                  | 配布環境の最新化（Release Tarball 取得・展開、`--force`, `--version`）                                                 | 免除（ペイン外可） |
+| `update`                                                  | 【未実装・将来仕様】配布環境の最新化（現行版の更新は `install.sh` を再実行。README『アップデート』参照）               | 免除（ペイン外可） |
 
 ※ Task Registry の JSON ファイル直接編集は禁止されています。すべての操作は本 CLI を介してアトミックに行われます。
 
@@ -122,10 +122,12 @@ herdr-orchestrator handoff \
   --instruction "最新のサーバーエラーログを解析してください。"
 ```
 
-- `--mode sync|async`: 同期（完了待機）または非同期（即時復帰）。
+- `--mode sync|async`: 同期（完了待機）または非同期（即時復帰。既定値: `sync`）。
 - `--to <role>`（または `--worker-role <role>`）: 登録済みロール名を指定（日本語名可）。
+- `--task-type <type>`（または `--type <type>`）: タスクの種別（`review`, `research`, `implementation`, `general` 等。既定値: `general`）。
 - `--scope local|global`: ローカルとグローバルで同名ロールが重複している場合にスコープを限定。
 - `--instruction <text>`: Worker Agent への指示本文。
+- `--result-wait-timeout-sec <seconds>`: 同期（`--mode sync`）実行時の完了待機タイムアウト秒数（既定値: 1800 秒 / 30分）。
 
 ---
 
@@ -147,12 +149,20 @@ Task Registry 内のタスクを読み取り専用で一覧表示します。PC 
 herdr-orchestrator task-list --worktree "$(git rev-parse --show-toplevel)"
 ```
 
+- `--worktree <path>`: 対象 worktree 絶対パスで絞り込み。
+- `--repository <uuid>`: 対象リポジトリ identity UUID で絞り込み。
+- `--type <type>`: タスク種別で絞り込み。
+- `--status <status>`: タスクステータスで絞り込み（`cancelled`, `created`, `failed`, `in_progress`, `succeeded`, `unknown`。複数指定時は OR）。
+- `--limit <int>`: 返却するタスクの最大件数（1〜1000、既定値: 100）。
+- `--json`: JSON 出力を明示（指定の有無に関わらず常に JSON 出力）。
+
 #### クラッシュ再起動後の状態確認手順
 
 1. `herdr-orchestrator task-list --worktree "$(git rev-parse --show-toplevel)"` を実行する（`HERDR_ENV=1` ペイン内）。
 2. `exit = 0` かつ `complete=true` で正常取得。`exit = 3` の場合は一部ファイルが破損（`anomalies` を人間に報告）。
-3. 各タスクの `overview.warnings` を必ず確認。`inconsistent_state_combination` が付与されている場合は、`overview.state` が `closed` であっても正常完了とみなさず、状態不整合として人間に報告する。
-4. `open` / `uncertain` や警告ありのタスクは `task-status <task-id>` で詳細を確認し、次の操作を判断する。
+3. `truncated=true` の場合は最大件数で切り詰められているため、対象タスクが見当たらない場合でも `truncated=false` でない限り不存在と断定せず、`--limit` を増やすかフィルタ条件（`--status` 等）で絞り込んで再実行する。
+4. 各タスクの `overview.warnings` を必ず確認。`inconsistent_state_combination` が付与されている場合は、`overview.state` が `closed` であっても正常完了とみなさず、状態不整合として人間に報告する。
+5. `open` / `uncertain` や警告ありのタスクは `task-status <task-id>` で詳細を確認し、次の操作を判断する。
 
 ### 5.3 結果の提出 (`result-submit`)
 
@@ -178,6 +188,21 @@ Requester Agent が Worker の提出結果を取得します。
 ```bash
 herdr-orchestrator task-result <task_id>
 ```
+
+### 5.5 未確定 dispatch の復旧 (`reconcile-dispatch`)
+
+handoff の途中停止等により `dispatch.status: pending` のまま残ったタスクを、`uncertain` または `failed` に確定させて安全に復旧します（詳細は [03-task-registry.md](../../../docs/herdr-orchestrator/03-task-registry.md#sec-6-12) を参照）。
+
+```bash
+herdr-orchestrator reconcile-dispatch <task_id> \
+  --dispatch-outcome failed \
+  --dispatch-reason "Worker ペインがビジー状態でタイムアウト"
+```
+
+- `--dispatch-outcome uncertain|failed`: dispatch 確定結果のステータス（未指定時はプロンプト未開始シナリオで `action: await_human` を返却。プロンプト送信開始後は指定必須）。
+- `--dispatch-reason <text>`: dispatch 結果の理由または説明（`--dispatch-outcome failed` 指定時は必須）。
+
+※ `task.status: created` かつ `dispatch.status: pending` のタスクのみが対象です。
 
 ---
 
