@@ -199,8 +199,10 @@ herdr-orchestrator reconcile-dispatch <task_id> \
   --dispatch-reason "Worker ペインがビジー状態でタイムアウト"
 ```
 
-- `--dispatch-outcome uncertain|failed`: dispatch 確定結果のステータス（未指定時はプロンプト未開始シナリオで `action: await_human` を返却）。
+- `--dispatch-outcome uncertain|failed`: dispatch 確定結果のステータス（未指定時はプロンプト未開始シナリオで `action: await_human` を返却。プロンプト送信開始後は指定必須）。
 - `--dispatch-reason <text>`: dispatch 結果の理由または説明（`--dispatch-outcome failed` 指定時は必須）。
+
+※ `task.status: created` かつ `dispatch.status: pending` のタスクのみが対象です。
 
 ---
 
