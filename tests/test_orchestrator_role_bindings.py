@@ -1452,6 +1452,33 @@ raise SystemExit(99)
         renames_after_global = self.rename_log.read_text(encoding="utf-8").strip().splitlines()
         self.assertEqual(renames_after_global[-1], "w15:p2 --clear")
 
+    def test_cw23_role_clear_global_from_uninitialized_git_repo(self) -> None:
+        # CW-23 (Issue #79 / RV048 B-1): Clearing a global role from an uninitialized git repo (no identity)
+        # must succeed with exit 0 and clear the UI pane label without crashing on RepositoryIdentityError.
+        # 1. Bind w15:p2 to global role '調査担当'
+        r1 = _run_cli(
+            "role",
+            "set",
+            "調査担当",
+            "w15:p2",
+            "--label=調査担当",
+            "--global",
+            env=self.env,
+            cwd=self.repo_a,
+        )
+        self.assertEqual(r1.returncode, 0)
+        self.assertEqual(self.rename_log.read_text(encoding="utf-8").strip().splitlines()[-1], "w15:p2 調査担当")
+
+        # 2. In repo_b (git init done, but .git/herdr-identity not created yet), run `role clear 調査担当 --global`
+        r_clear = _run_cli("role", "clear", "調査担当", "--global", env=self.env, cwd=self.repo_b)
+        self.assertEqual(r_clear.returncode, 0, r_clear.stdout + r_clear.stderr)
+        d_clear = json.loads(r_clear.stdout)
+        self.assertEqual(d_clear["action"], "clear")
+        self.assertEqual(d_clear["scope"], "global")
+        self.assertIn("w15:p2", d_clear["label_sync"])
+        self.assertEqual(d_clear["label_sync"]["w15:p2"]["action"], "clear")
+        self.assertEqual(self.rename_log.read_text(encoding="utf-8").strip().splitlines()[-1], "w15:p2 --clear")
+
 
 if __name__ == "__main__":
     unittest.main()
