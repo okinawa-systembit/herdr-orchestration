@@ -227,15 +227,16 @@ Role Binding は `${XDG_STATE_HOME:-~/.local/state}/herdr-orchestrator/roles/` �
 ```bash
 # 1. カレントペイン（$HERDR_PANE_ID）をローカルロールとして登録（人間が手動実行する場合。エージェント自動実行時は --pane 明示必須）
 herdr-orchestrator role set レビュワー
-herdr-orchestrator role set reviewer --pane w15:p2 --label "レビュワー"
+herdr-orchestrator role set reviewer --label "レビュワー"
 
 # 2. カレントペイン（$HERDR_PANE_ID）をグローバルロールとして登録（人間が手動実行する場合。エージェント自動実行時は --pane 明示必須）
 herdr-orchestrator role set チケット管理 --global
-herdr-orchestrator role set ログ調査 --pane w16:p1 --label "ログ調査" --global
+herdr-orchestrator role set ログ調査 --global
 
-# 3. ペインIDを明示して登録（位置引数または --pane のどちらでも指定可能）
-herdr-orchestrator role set チケット管理 w16:p1 --global
+# 3. ペインIDを明示して登録（位置引数または --pane のどちらでも指定可能。エージェント自動実行時はこちらを使用）
+herdr-orchestrator role set チケット管理 w16:p1 --label "チケット管理 (共通)" --global
 herdr-orchestrator role set reviewer --pane w15:p2 --label "レビュワー"
+herdr-orchestrator role set ログ調査 --pane w16:p1 --label "ログ調査 (共通)" --global
 
 # 4. 登録状況の表示（ローカル＋グローバルの両方、およびワークスペース名等のUI位置情報を表示）
 herdr-orchestrator role show
