@@ -16,7 +16,12 @@ if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
 from orchestrator.identity import get_or_create_repository_identity, get_repository_identity
-from orchestrator.live_agent import LiveAgentError, _agent_from_herdr_payload, verify_live_agent_context
+from orchestrator.live_agent import (
+    LiveAgentError,
+    _agent_from_herdr_payload,
+    check_cwd_affinity,
+    verify_live_agent_context,
+)
 from orchestrator.naming import expected_agent_name
 from orchestrator.role_bindings import (
     RoleBindingError,
@@ -1478,6 +1483,59 @@ raise SystemExit(99)
         self.assertIn("w15:p2", d_clear["label_sync"])
         self.assertEqual(d_clear["label_sync"]["w15:p2"]["action"], "clear")
         self.assertEqual(self.rename_log.read_text(encoding="utf-8").strip().splitlines()[-1], "w15:p2 --clear")
+
+    def test_check_cwd_affinity_unit(self) -> None:
+        # Same directory
+        self.assertTrue(check_cwd_affinity(self.repo_a, self.repo_a))
+        self.assertTrue(check_cwd_affinity(str(self.repo_a), str(self.repo_a)))
+
+        # Subdirectory
+        sub = self.repo_a / "subdir"
+        sub.mkdir(exist_ok=True)
+        self.assertTrue(check_cwd_affinity(self.repo_a, sub))
+        self.assertTrue(check_cwd_affinity(sub, self.repo_a))
+
+        # Separate repository (different worktree)
+        with tempfile.TemporaryDirectory() as other_tmp:
+            other_repo = _init_repo(Path(other_tmp), "other")
+            self.assertFalse(check_cwd_affinity(self.repo_a, other_repo))
+
+        # Invalid or non-existent paths
+        self.assertFalse(check_cwd_affinity("/nonexistent/path/a", "/nonexistent/path/b"))
+
+    def test_role_set_implicit_herdr_pane_id_cwd_mismatch_safeguard(self) -> None:
+        # RV050 P2-1 / Issue #83:
+        # When HERDR_PANE_ID is resolved implicitly (no --pane or <pane_id> argument),
+        # if the pane's cwd does not match the command execution cwd, it must be rejected
+        # with error 'env_pane_cwd_mismatch' and a guidance message to specify --pane.
+        with tempfile.TemporaryDirectory() as other_tmp:
+            other_repo = _init_repo(Path(other_tmp), "other_project")
+            # self.env has HERDR_PANE_ID="w15:p1" whose fake cwd is self.repo_a
+            # Running role set from other_repo without --pane should fail
+            res = _run_cli("role", "set", "reviewer", env=self.env, cwd=other_repo)
+            self.assertEqual(res.returncode, 1)
+            data = json.loads(res.stdout)
+            self.assertEqual(data.get("error"), "env_pane_cwd_mismatch")
+            self.assertIn("HERDR_PANE_ID", data.get("message", ""))
+            self.assertIn("--pane <pane_id>", data.get("message", ""))
+
+            # But if --pane is explicitly passed, cross-workspace registration should be allowed
+            res_opt = _run_cli(
+                "role", "set", "reviewer", "--pane", "w15:p1", env=self.env, cwd=other_repo
+            )
+            self.assertEqual(res_opt.returncode, 0, res_opt.stdout + res_opt.stderr)
+            data_opt = json.loads(res_opt.stdout)
+            self.assertEqual(data_opt["role"], "reviewer")
+            self.assertEqual(data_opt["pane_id"], "w15:p1")
+
+            # Or if positional pane_id is explicitly passed, it should also be allowed
+            res_pos = _run_cli(
+                "role", "set", "implementer", "w15:p1", env=self.env, cwd=other_repo
+            )
+            self.assertEqual(res_pos.returncode, 0, res_pos.stdout + res_pos.stderr)
+            data_pos = json.loads(res_pos.stdout)
+            self.assertEqual(data_pos["role"], "implementer")
+            self.assertEqual(data_pos["pane_id"], "w15:p1")
 
 
 if __name__ == "__main__":

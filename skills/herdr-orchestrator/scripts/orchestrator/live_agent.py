@@ -7,7 +7,12 @@ from typing import Any
 
 from orchestrator.env import HerdrEnvError, require_herdr_env
 from orchestrator.herdr_cli import HerdrCliError, run_herdr
-from orchestrator.identity import RepositoryIdentityError, get_repository_identity, is_valid_uuid_v4
+from orchestrator.identity import (
+    RepositoryIdentityError,
+    get_repository_identity,
+    is_valid_uuid_v4,
+    resolve_git_common_dir,
+)
 from orchestrator.worktree import WorktreeError, resolve_worktree_root
 
 PROMPTABLE_AGENT_STATES = frozenset({"idle", "done"})
@@ -210,6 +215,39 @@ def is_path_within_worktree(candidate_cwd: Path, worktree_path: Path) -> bool:
         return candidate_cwd.resolve().is_relative_to(worktree_path.resolve())
     except (OSError, ValueError):
         return False
+
+
+def check_cwd_affinity(pane_cwd: Path | str, current_cwd: Path | str) -> bool:
+    """
+    Check if pane_cwd and current_cwd have directory affinity:
+    - Same directory (resolved)
+    - One is relative to the other (subdirectory)
+    - Same git common dir or git worktree root
+    """
+    try:
+        p_cwd = Path(pane_cwd).resolve()
+        c_cwd = Path(current_cwd).resolve()
+    except (OSError, ValueError):
+        return False
+
+    if p_cwd == c_cwd:
+        return True
+
+    try:
+        if c_cwd.is_relative_to(p_cwd) or p_cwd.is_relative_to(c_cwd):
+            return True
+    except (OSError, ValueError):
+        pass
+
+    try:
+        p_common = resolve_git_common_dir(p_cwd)
+        c_common = resolve_git_common_dir(c_cwd)
+        if p_common.resolve() == c_common.resolve():
+            return True
+    except Exception:
+        pass
+
+    return False
 
 
 def verify_live_party_cwd(

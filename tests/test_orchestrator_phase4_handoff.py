@@ -528,6 +528,36 @@ class Phase4HandoffTests(unittest.TestCase):
                 self.assertIn("cannot open handoff lock", data.get("message", ""))
                 self.assertIn("Permission denied on handoff lock", data.get("message", ""))
 
+    def test_handoff_worker_role_not_bound_message_includes_pane_guidance(self) -> None:
+        # RV053 P3-2 / Issue #83:
+        # worker_role_not_bound error message must instruct the user/agent to check
+        # the target pane and specify <pane_id> to avoid mistakenly binding to self caller pane.
+        import io as py_io
+        from contextlib import redirect_stdout, redirect_stderr
+        from unittest.mock import patch
+        from orchestrator import public_cli
+
+        stdout_buf = py_io.StringIO()
+        stderr_buf = py_io.StringIO()
+        with patch.dict(os.environ, self.env):
+            with redirect_stdout(stdout_buf), redirect_stderr(stderr_buf):
+                with self.assertRaises(SystemExit) as ctx:
+                    public_cli.main([
+                        "handoff",
+                        "--mode",
+                        "sync",
+                        "--worker-role",
+                        "unbound_custom_role",
+                        "--instruction",
+                        "test unbound role guidance",
+                    ])
+        self.assertEqual(ctx.exception.code, 1)
+        data = json.loads(stdout_buf.getvalue())
+        self.assertEqual(data.get("error"), "worker_role_not_bound")
+        msg = data.get("message", "")
+        self.assertIn("<pane_id>", msg)
+        self.assertIn("登録先ペインを確認し", msg)
+
 
 if __name__ == "__main__":
     unittest.main()
