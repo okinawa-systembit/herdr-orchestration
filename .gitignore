@@ -19,3 +19,8 @@ __pycache__/
 .inbox/
 docs/reviews/internal/
 
+# GitHub App 認証情報・環境変数ファイル
+.env.github-app
+.env.github
+*.pem
+
