@@ -76,7 +76,7 @@ herdr-orchestrator role set reviewer --pane w15:p2 --label "レビュワー"
 herdr-orchestrator role set 調査担当 --pane w16:p1 --label "調査担当" --global
 ```
 
-- `--pane <pane_id>`: 対象ペイン ID（位置引数 `<pane_id>` でも可）。省略時は環境変数 `HERDR_PANE_ID` を使用しますが、エージェントの常駐プロセス再利用等による環境変数残留を防ぐため、`herdr pane list` で CWD を確認して `--pane` を明示することを推奨します。
+- `--pane <pane_id>`: 対象ペイン ID（位置引数 `<pane_id>` でも可）。人間が手動実行する場合は省略（環境変数 `HERDR_PANE_ID` を使用）も可能ですが、エージェントが自動実行する場合は常駐プロセス再利用等による環境変数残留を防ぐため、`herdr pane list` で自ペイン（`agent_session` や CWD + agent 種別）を一意に特定し、必ず `--pane` を明示すること（SKILL.md で義務化されています）。一意に定まらない場合は推測せず人間に確認してください。
 - `--global`: 全ワークスペース・全リポジトリ共通のロールとして登録します（`~/.local/state/herdr-orchestrator/roles/global.json` に保存）。
 - `--label <display_name>`: Herdr UI のペイン表示名（タブ上のラベル）を個別に指定します（先頭の `--` は自動除去されます）。
 - 出力 JSON には `label_sync`（同期成否・アクション）および `target.label_synced`（同期成功フラグ）が含まれます。
