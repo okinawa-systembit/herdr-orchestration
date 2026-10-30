@@ -34,6 +34,7 @@ from orchestrator.identity import (
 )
 from orchestrator.live_agent import (
     LiveAgentError,
+    check_cwd_affinity,
     format_pane_display_summary,
     inspect_pane_for_role_set,
     sync_herdr_pane_label,
@@ -471,6 +472,7 @@ def _cmd_role(ns: argparse.Namespace) -> int:
                 message="conflicting positional pane_id and --pane values",
                 exit_code=1,
             )
+        is_implicit_pane = not (opt_pane or pos_pane)
         pane_id = (opt_pane or pos_pane or os.environ.get("HERDR_PANE_ID") or "").strip()
         if not pane_id:
             emit_command_error(
@@ -512,6 +514,20 @@ def _cmd_role(ns: argparse.Namespace) -> int:
                 message=str(exc),
                 exit_code=1,
             )
+
+        if is_implicit_pane:
+            pane_target_cwd = target_meta.get("cwd") or ""
+            if not check_cwd_affinity(pane_target_cwd, cwd):
+                emit_command_error(
+                    "env_pane_cwd_mismatch",
+                    retryable=False,
+                    message=(
+                        f"環境変数 HERDR_PANE_ID から解決されたペイン {valid_pane!r} の作業ディレクトリ ({pane_target_cwd}) が、"
+                        f"カレントディレクトリ ({cwd}) と一致しません。過去のセッションの環境変数が残留している可能性があります。"
+                        f"'--pane <pane_id>' を明示して実行してください。"
+                    ),
+                    exit_code=1,
+                )
 
         scope_id = _resolve_role_scope_id(cwd, is_global=is_global, create_if_missing=True)
         try:

@@ -250,6 +250,10 @@ herdr-orchestrator role clear reviewer
 
 - **位置引数 `<pane_id>` と `--pane` の両対応**:
   `herdr-orchestrator role set <role> [<pane_id>] [--pane <pane_id>] [--label <display_name>] [--global]` とし、位置引数 `<pane_id>` と `--pane` のどちらでも指定でき、両方省略された場合は環境変数 `HERDR_PANE_ID` を使用する。
+- **暗黙解決時の CWD 照合セーフガード（`env_pane_cwd_mismatch`）**:
+  位置引数 `<pane_id>` も `--pane` も省略されて環境変数 `HERDR_PANE_ID` から暗黙解決された場合のみ、対象ペインの作業ディレクトリ（`target_meta["cwd"]`）とコマンド実行時カレントディレクトリを照合（同一パス、サブディレクトリ、または同一 Git リポジトリの worktree affinity）する。食い違いがある場合は過去セッションの環境変数残留とみなし、エラーコード `env_pane_cwd_mismatch`（exit 1）で安全停止して `--pane <pane_id>` の明示案内を行う。明示指定時はクロスワークスペース登録を許容するため照合をスキップする。
+  - **照合範囲と同一 worktree 兼任構成における制約**:
+    本セーフガードが検出できるのは**別ディレクトリや別リポジトリ**のペイン ID が残っている場合のみである。同一 worktree 内で隣のペイン（別エージェント）の ID が残っている場合や、`result-submit` / `task-status` 等で同一 worktree 内の他方ペイン ID が残っている場合は作業ディレクトリ（CWD）が一致するため CLI 側の CWD 照合単体では区別できない（既知の構造的制約）。そのため、エージェントが `herdr pane list` から自ペイン（`agent_session` や CWD + agent 種別）を一意に特定して `--pane` を明示する手順（SKILL.md）が主要な防御となる。
 
 ---
 

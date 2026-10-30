@@ -76,7 +76,7 @@ herdr-orchestrator role set reviewer --pane w15:p2 --label "レビュワー"
 herdr-orchestrator role set 調査担当 --pane w16:p1 --label "調査担当" --global
 ```
 
-- `--pane <pane_id>`: 対象ペイン ID（位置引数 `<pane_id>` でも可）。人間が手動実行する場合は省略（環境変数 `HERDR_PANE_ID` を使用）も可能ですが、エージェントが自動実行する場合は常駐プロセス再利用等による環境変数残留を防ぐため、`herdr pane list` で自ペイン（`agent_session` や CWD + agent 種別）を一意に特定し、必ず `--pane` を明示すること（SKILL.md で義務化されています）。一意に定まらない場合は推測せず人間に確認してください。
+- `--pane <pane_id>`: 対象ペイン ID（位置引数 `<pane_id>` でも可）。人間が手動実行する場合は省略（環境変数 `HERDR_PANE_ID` を使用）も可能ですが、エージェントが自動実行する場合は常駐プロセス再利用等による環境変数残留を防ぐため、`herdr pane list` で自ペイン（`agent_session` や CWD + agent 種別）を一意に特定し、必ず `--pane` を明示すること（SKILL.md で義務化されています）。一意に定まらない場合は推測せず人間に確認してください。なお、万が一ペイン引数が省略されて環境変数 `HERDR_PANE_ID` から暗黙解決された場合、対象ペインの作業ディレクトリと実行時カレントディレクトリが照合され、不一致時はセーフガード（`env_pane_cwd_mismatch`）により安全停止します（※ ただし本セーフガードが検出できるのは**別ディレクトリや別リポジトリ**のペイン ID が残っている場合のみであり、同一 worktree 内で隣のペインの ID が残っている場合は作業ディレクトリが一致するため CLI 単体では検出できません。そのためエージェントによる自ペイン特定と `--pane` 明示手順が主要な防御となります）。
 - `--global`: 全ワークスペース・全リポジトリ共通のロールとして登録します（`~/.local/state/herdr-orchestrator/roles/global.json` に保存）。
 - `--label <display_name>`: Herdr UI のペイン表示名（タブ上のラベル）を個別に指定します（先頭の `--` は自動除去されます）。
 - 出力 JSON には `label_sync`（同期成否・アクション）および `target.label_synced`（同期成功フラグ）が含まれます。

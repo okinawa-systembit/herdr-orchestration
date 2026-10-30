@@ -723,14 +723,14 @@ def _resolve_parties(
             )
         raise HandoffCommandError(
             "worker_role_not_bound",
-            message=f"ロール『{canonical_worker_role}』は登録されていません。'herdr-orchestrator role set {canonical_worker_role} [--global]' で登録してください。",
+            message=f"ロール『{canonical_worker_role}』は登録されていません。登録先ペインを確認し、'herdr-orchestrator role set {canonical_worker_role} <pane_id> [--global]' で登録してください。",
             details=available_roles_detail,
         )
 
     if canonical_worker_role not in PATTERN_A_ROLES:
         raise HandoffCommandError(
             "worker_role_not_bound",
-            message=f"ロール『{canonical_worker_role}』は登録されていません。'herdr-orchestrator role set {canonical_worker_role} [--global]' で登録してください。",
+            message=f"ロール『{canonical_worker_role}』は登録されていません。登録先ペインを確認し、'herdr-orchestrator role set {canonical_worker_role} <pane_id> [--global]' で登録してください。",
             details=available_roles_detail,
         )
 
