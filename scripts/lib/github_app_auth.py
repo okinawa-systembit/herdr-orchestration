@@ -71,21 +71,46 @@ def resolve_repo_root(start_dir: Path | None = None) -> Path:
 
                 # linked worktree の場合、メインリポジトリ側の設定もフォールバック探索
                 proc_common = subprocess.run(
-                    ["git", "rev-parse", "--git-common-dir"],
+                    [
+                        "git",
+                        "rev-parse",
+                        "--path-format=absolute",
+                        "--git-common-dir",
+                    ],
                     cwd=base,
                     capture_output=True,
                     text=True,
                     check=False,
                 )
+                if proc_common.returncode != 0:
+                    proc_common = subprocess.run(
+                        ["git", "rev-parse", "--git-common-dir"],
+                        cwd=base,
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
+
                 if proc_common.returncode == 0:
                     common_dir = proc_common.stdout.strip()
                     if common_dir:
-                        common_path = (top_path / common_dir).resolve()
-                        main_root = common_path.parent
-                        if (main_root / ".env.github-app").is_file() or (
-                            main_root / ".env.github"
-                        ).is_file():
-                            return main_root
+                        common_path = Path(common_dir)
+                        if not common_path.is_absolute():
+                            common_path = (base / common_path).resolve()
+                        else:
+                            common_path = common_path.resolve()
+
+                        # linked worktree の場合のみメインリポジトリを探す (通常の checkout では top_path と同一)
+                        main_root = (
+                            common_path.parent
+                            if common_path.name == ".git"
+                            else common_path
+                        )
+                        if main_root != top_path:
+                            if (main_root / ".env.github-app").is_file() or (
+                                main_root / ".env.github"
+                            ).is_file():
+                                return main_root
 
                 return top_path
     except OSError:

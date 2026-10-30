@@ -575,6 +575,45 @@ class TestGitHubAppAuth(unittest.TestCase):
         resolved = resolve_repo_root(worktree_dir)
         self.assertEqual(resolved.resolve(), repo_dir.resolve())
 
+    def test_resolve_repo_root_does_not_escape_to_ancestor_on_subdirectory(self) -> None:
+        """設定のないリポジトリのサブディレクトリ実行時、リポジトリ外祖先の .env を拾わないこと (RV060 B-1)."""
+        # 祖先ディレクトリに別の .env.github-app を配置
+        ancestor_env = self.tmp_path / ".env.github-app"
+        ancestor_env.write_text("GITHUB_BOT_APP_ID=999\n", encoding="utf-8")
+
+        # 内部に別リポジトリを作成 (設定なし)
+        repo_dir = self.tmp_path / "repo_without_config"
+        repo_dir.mkdir()
+        subprocess.run(["git", "init"], cwd=repo_dir, capture_output=True, check=True)
+        subprocess.run(
+            ["git", "config", "user.email", "test@example.com"],
+            cwd=repo_dir,
+            capture_output=True,
+            check=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "Test User"],
+            cwd=repo_dir,
+            capture_output=True,
+            check=True,
+        )
+        (repo_dir / "README.md").write_text("test", encoding="utf-8")
+        subprocess.run(["git", "add", "."], cwd=repo_dir, capture_output=True, check=True)
+        subprocess.run(
+            ["git", "commit", "-m", "init"], cwd=repo_dir, capture_output=True, check=True
+        )
+
+        sub_deep = repo_dir / "sub" / "deep"
+        sub_deep.mkdir(parents=True)
+
+        # resolve_repo_root は repo_dir を返すこと (祖先の tmp_path ではなく)
+        resolved = resolve_repo_root(sub_deep)
+        self.assertEqual(resolved.resolve(), repo_dir.resolve())
+
+        # load_bot_config は None を返すこと (祖先の GITHUB_BOT_APP_ID=999 を誤読しない)
+        cfg = load_bot_config(sub_deep)
+        self.assertIsNone(cfg)
+
     def test_main_cli_error(self) -> None:
         """Bot 設定不備時、exit 1 で stderr にエラーメッセージを出力."""
         os.environ["GITHUB_BOT_APP_ID"] = "123"
