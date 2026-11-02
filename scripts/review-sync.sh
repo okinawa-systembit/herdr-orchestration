@@ -243,9 +243,15 @@ resolve_pr_number() {
   rm -f "${pr_err_tmp}"
   trap - RETURN EXIT
 
+  local python_bin="python3"
+  if [[ -x "${REPO_ROOT}/.venv/bin/python3" ]]; then
+    python_bin="${REPO_ROOT}/.venv/bin/python3"
+  fi
+
   local pr_num
-  pr_num="$(python3 -c "import sys, json; print(json.loads(sys.stdin.read()).get('number', ''))" <<< "${pr_json}" 2>/dev/null || true)"
-  if [[ -z "${pr_num}" ]]; then
+  pr_num="$("${python_bin}" -I -c "import sys, json; print(json.loads(sys.stdin.read()).get('number', ''))" <<< "${pr_json}" 2>/dev/null || true)"
+  pr_num="$(echo "${pr_num}" | tr -d '\r\n')"
+  if [[ -z "${pr_num}" || ! "${pr_num}" =~ ^[0-9]+$ ]]; then
     echo "エラー: PR 番号の取得に失敗しました。" >&2
     exit 1
   fi
