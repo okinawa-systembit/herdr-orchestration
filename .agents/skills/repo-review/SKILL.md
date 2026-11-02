@@ -296,7 +296,10 @@ GitHub を正本とするコードレビュー運用では、以下の手順で 
      gh pr review <pr_number> --comment -F review-result.md
      ```
    - ※ 運用ポリシーで許可されている場合のみ、Blocking 指摘時に `--request-changes` を使用可能。
-   - **安全制約**: AI エージェントによる `--approve` および `gh pr merge` は実行禁止。コード確認、正式なレビュー承認（Approve）、およびマージは人間が担当する。
+   - レビュー投稿は `scripts/review-sync.sh comment reviewer`（または `--body-file` 指定の `gh pr review --comment`）を使用する。
+   - **安全制約（承認とマージの分離）**:
+     1. **AI エージェントの禁止事項**: GitHub App (Bot) 認証下であっても、AI エージェントによる GitHub 公式の承認（`gh pr review --approve`）、変更要求（`--request-changes`）、およびマージ（`gh pr merge`）の実行は**厳格に禁止**する。レビューの合意形成は、常に `--comment` 投稿本文の先頭メタデータ（`- Status: Approved` または `- Status: Changes requested`）にて行う。
+     2. **自 PR 制限回避と人間の役割**: エージェントが Bot 主体として PR を作成・操作することにより、開発者本人の個人アカウントとの同一視（自 PR 制限: 422 エラー）が回避される。GitHub 公式の Approve（承認ボタンの押下）および PR のマージ操作は、エージェントの合意表明を確認した上で**人間の開発者のみが担当**する（詳細は [docs/reviews/GITHUB_APP_AND_REVIEW_POLICY.md](../../../docs/reviews/GITHUB_APP_AND_REVIEW_POLICY.md) 参照）。
 
 ### B. 初回 20 Scope レビュー手順
 
