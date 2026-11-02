@@ -1,7 +1,7 @@
 # Herdr Orchestrator Task 一覧参照コマンド `task-list` 設計書
 
 - **対象 Issue**: [#62 — Task Registry一覧参照コマンド task-list の追加](https://github.com/okinawa-systembit/herdr-orchestration/issues/62)
-- **ステータス**: 実装完了（[PR #63](https://github.com/okinawa-systembit/herdr-orchestration/pull/63) にてマージ済み）
+- **ステータス**: 実装完了（[PR #63](https://github.com/okinawa-systembit/herdr-orchestration/pull/63) / v0.3.0 にてマージ済み）
 - **関連 Issue**: [#61 — レビューSkillのPhase 1改善](https://github.com/okinawa-systembit/herdr-orchestration/issues/61)（クラッシュ後の状態確認で本コマンドを利用する想定）
 - **関連ドキュメント**:
   - [03-task-registry.md](herdr-orchestrator/03-task-registry.md#sec-6) (§6: Task Registry / Canonical Schema / 4軸状態遷移)
@@ -634,7 +634,7 @@ Registry 外の主体が非 atomic に直接書き込んだ途中のファイル
 | -------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [§6.3 状態遷移マトリクス](herdr-orchestrator/03-task-registry.md#sec-6-3)  | 本コマンドの診断用不変条件 I1〜I7（[§4.4](#44-派生分類-overviewstate)）の正本。将来の本節改訂時に task-list 側の I1〜I7 とテストを見直す旨の注記を追加（実装時）              |
 | [§6.5 Public CLI Contract](herdr-orchestrator/03-task-registry.md#sec-6-5) | 表に `task-list` 行を追加（入力: フィルタ・`limit`、副作用: none、出力: 一覧 JSON、終了コード: 0 / 1 / 2 / 3。exit 3 は部分成功専用コードとして新設）。詳細は本設計書へリンク |
-| [設計書の目次](herdr-orchestrator-design.md)                               | 「機能設計・改訂案」に本設計書を追加                                                                                                                                          |
+| [設計書の目次](herdr-orchestrator-design.md)                               | 「機能設計・改訂案（現: 個別機能設計書）」に本設計書を追加                                                                                                                    |
 | `skills/herdr-orchestrator/SKILL.md` / `references/public-cli.md`          | 読み取り系コマンドとして `task-list` を追記。クラッシュ後の確認手順に [§7.1](#71-想定手順) を要約して記載                                                                     |
 | `skills/herdr-orchestrator/install/codex-execpolicy-snippet.rules`         | 読み取り系 allow ルール（`doctor` / `task-status` / `task-result`）に `task-list` を追加                                                                                      |
 | `README.md`                                                                | コマンド一覧に `task-list` を追加                                                                                                                                             |
