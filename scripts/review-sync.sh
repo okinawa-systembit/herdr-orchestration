@@ -10,6 +10,33 @@ set -euo pipefail
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 DRAFT_DIR="${REPO_ROOT}/.input/review"
 SENT_DIR="${DRAFT_DIR}/sent"
+TMP_DIR="${REPO_ROOT}/.input/tmp"
+mkdir -p "${DRAFT_DIR}" "${SENT_DIR}" "${TMP_DIR}"
+
+create_temp_file() {
+  local prefix="${1:-temp}"
+  mktemp "${TMP_DIR}/${prefix}.XXXXXX"
+}
+
+format_markdown_file() {
+  local target_file="${1}"
+  if [[ ! -f "${target_file}" ]]; then
+    return 0
+  fi
+
+  local prettier_bin=""
+  if [[ -x "${REPO_ROOT}/node_modules/.bin/prettier" ]]; then
+    prettier_bin="${REPO_ROOT}/node_modules/.bin/prettier"
+  elif command -v prettier >/dev/null 2>&1; then
+    prettier_bin="prettier"
+  elif command -v npx >/dev/null 2>&1; then
+    prettier_bin="npx --no-install prettier"
+  fi
+
+  if [[ -n "${prettier_bin}" ]]; then
+    ${prettier_bin} --write --parser markdown "${target_file}" >/dev/null 2>&1 || true
+  fi
+}
 
 # ---------------------------------------------------------------------------
 # 1. 改ざん検知ガードレール
@@ -130,14 +157,18 @@ esac
 if [[ -n "${ROLE}" ]]; then
   DRAFT_FILE="${DRAFT_DIR}/${ROLE}-draft.md"
 fi
-mkdir -p "${DRAFT_DIR}" "${SENT_DIR}"
+mkdir -p "${DRAFT_DIR}" "${SENT_DIR}" "${TMP_DIR}"
 
 # ---------------------------------------------------------------------------
 # 3. GitHub 認証情報の解決
 # ---------------------------------------------------------------------------
 load_github_auth() {
   local err_file
-  err_file="$(mktemp /tmp/review-auth-err.XXXXXX)"
+  if command -v create_temp_file >/dev/null 2>&1; then
+    err_file="$(create_temp_file "review-auth-err")"
+  else
+    err_file="$(mktemp /tmp/review-auth-err.XXXXXX 2>/dev/null || mktemp)"
+  fi
   trap 'rm -f "${err_file}"' RETURN EXIT
 
   local python_bin="python3"
@@ -219,6 +250,14 @@ do_check() {
     exit 1
   fi
 
+  # コードブロック (```) の開閉不一致（閉じ忘れ）の検査
+  local code_block_count
+  code_block_count="$(grep -c -E "^[[:space:]]*\`\`\`" "${target_file}" || true)"
+  if (( code_block_count % 2 != 0 )); then
+    echo "エラー: ドラフトファイル内でコードブロック（\`\`\`）が閉じられていません（開閉の数が一致しません: ${code_block_count} 個）。" >&2
+    exit 1
+  fi
+
   # メタデータ部の抽出（最初の見出し '## ' より前のヘッダー部分）
   local metadata
   metadata="$(awk '/^## /{exit} {print}' "${target_file}")"
@@ -271,7 +310,7 @@ do_check() {
 # PR 番号の自動解決
 resolve_pr_number() {
   local pr_json pr_err_tmp
-  pr_err_tmp="$(mktemp /tmp/review-pr-err.XXXXXX)"
+  pr_err_tmp="$(create_temp_file "review-pr-err")"
   trap 'rm -f "${pr_err_tmp}"' RETURN EXIT
 
   if ! pr_json="$(gh pr view --json number,url 2>"${pr_err_tmp}")"; then
@@ -305,6 +344,9 @@ submit_comment() {
   local is_issue="$1"
   local target_id="$2"
 
+  # 送信前にドラフトの自動 Markdown 整形 (Prettier) を実行
+  format_markdown_file "${DRAFT_FILE}"
+
   # 送信前に check を自動実行
   do_check "${DRAFT_FILE}" >/dev/null
 
@@ -320,7 +362,7 @@ submit_comment() {
 
   # 送信用一時ファイルの作成（マーカー付与）
   local temp_body
-  temp_body="$(mktemp /tmp/review-body.XXXXXX)"
+  temp_body="$(create_temp_file "review-body")"
   trap 'rm -f "${temp_body}"' EXIT
 
   cat <<EOF > "${temp_body}"
@@ -373,9 +415,9 @@ pull_content() {
   fi
 
   local comments_tmp inlines_tmp gh_err_tmp
-  comments_tmp="$(mktemp /tmp/review-comments.XXXXXX)"
-  inlines_tmp="$(mktemp /tmp/review-inlines.XXXXXX)"
-  gh_err_tmp="$(mktemp /tmp/review-gh-err.XXXXXX)"
+  comments_tmp="$(create_temp_file "review-comments")"
+  inlines_tmp="$(create_temp_file "review-inlines")"
+  gh_err_tmp="$(create_temp_file "review-gh-err")"
   trap 'rm -f "${comments_tmp}" "${inlines_tmp}" "${gh_err_tmp}"' RETURN EXIT
 
   if [[ "${is_issue}" == "1" ]]; then
@@ -429,6 +471,37 @@ pull_content() {
   trap - RETURN EXIT
 }
 
+create_pull_request() {
+  if [[ "${BOT_AUTH_ACTIVE:-0}" -ne 1 ]]; then
+    echo "警告: GitHub App 設定が存在しません。個人認証で PR を作成すると、自 PR 制限により自分自身での Approve ができなくなります。" >&2
+  fi
+
+  # --body 引数が存在する場合、一時ファイル経由で Markdown 自動整形を適用
+  local args=()
+  local i=1
+  while [[ $i -le $# ]]; do
+    local arg="${!i}"
+    if [[ "${arg}" == "--body" ]] && [[ $((i + 1)) -le $# ]]; then
+      i=$((i + 1))
+      local body_val="${!i}"
+      local body_tmp
+      body_tmp="$(create_temp_file "pr-body")"
+      echo "${body_val}" > "${body_tmp}"
+      format_markdown_file "${body_tmp}"
+      args+=("--body-file" "${body_tmp}")
+    elif [[ "${arg}" == "--body-file" ]] && [[ $((i + 1)) -le $# ]]; then
+      i=$((i + 1))
+      local body_file_val="${!i}"
+      format_markdown_file "${body_file_val}"
+      args+=("--body-file" "${body_file_val}")
+    else
+      args+=("${arg}")
+    fi
+    i=$((i + 1))
+  done
+  gh pr create "${args[@]}"
+}
+
 # ---------------------------------------------------------------------------
 # 5. ディスパッチ
 # ---------------------------------------------------------------------------
@@ -451,9 +524,6 @@ case "${SUBCOMMAND}" in
     pull_content 1 "${ISSUE_NUMBER}"
     ;;
   pr-create)
-    if [[ "${BOT_AUTH_ACTIVE:-0}" -ne 1 ]]; then
-      echo "警告: GitHub App 設定が存在しません。個人認証で PR を作成すると、自 PR 制限により自分自身での Approve ができなくなります。" >&2
-    fi
-    gh pr create "$@"
+    create_pull_request "$@"
     ;;
 esac

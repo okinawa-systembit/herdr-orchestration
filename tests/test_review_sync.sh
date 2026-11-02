@@ -503,6 +503,30 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Test 12f: check - コードブロック未閉じ（開閉奇数個）のドラフトで停止
+# ---------------------------------------------------------------------------
+TEST_ENV=$(setup_mock_env "t12f")
+DRAFT_PATH="${TEST_ENV}/worktree/.input/review/reviewer-draft.md"
+
+cat <<'EOF' > "${DRAFT_PATH}"
+# Draft
+- Role: reviewer
+- Round: 1
+- Status: Approved
+## Summary
+```markdown
+コードブロックが閉じられていない本文
+EOF
+
+cd "${TEST_ENV}/worktree"
+ERR_OUTPUT=$(PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh check reviewer 2>&1 || true)
+if [[ "${ERR_OUTPUT}" == *"コードブロック（\`\`\`）が閉じられていません"* ]]; then
+  pass "Reject draft with unclosed code block"
+else
+  fail "Reject draft with unclosed code block" "Output: ${ERR_OUTPUT}"
+fi
+
+# ---------------------------------------------------------------------------
 # Test 13: comment - マーカー付与と sent/ への退避
 # ---------------------------------------------------------------------------
 TEST_ENV=$(setup_mock_env "t13")
@@ -956,7 +980,7 @@ EOF
 MOCK_LOG="${TEST_ENV}/gh.log"
 OUTPUT=$(env -u GH_TOKEN -u GITHUB_TOKEN MOCK_GH_LOG="${MOCK_LOG}" PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh pr-create --title "Test PR" --body "Test Body" 2>&1 || true)
 
-if grep -q "mock-pr-create: GH_TOKEN=ghs_mock_bot_token_for_pr_create args=pr create --title Test PR --body Test Body" "${MOCK_LOG}" 2>/dev/null; then
+if grep -q "mock-pr-create: GH_TOKEN=ghs_mock_bot_token_for_pr_create args=pr create --title Test PR --body" "${MOCK_LOG}" 2>/dev/null; then
   pass "pr-create sets GH_TOKEN to bot token and forwards arguments to gh pr create"
 else
   fail "pr-create sets GH_TOKEN to bot token" "Log: $(cat "${MOCK_LOG}" 2>/dev/null || echo 'no log'), Output: ${OUTPUT}"
@@ -990,6 +1014,28 @@ if (cd "${SCRIPT_DIR}" && python3 -m unittest tests/test_github_app_auth.py test
   pass "Python modules unit tests passed (github_app_auth, pull_review)"
 else
   fail "Python modules unit tests" "unittest failed on tests/test_github_app_auth.py / tests/test_pull_review.py"
+fi
+
+# ---------------------------------------------------------------------------
+# Test 26: pr-create - --body を .input/tmp/ 経由で自動整形し --body-file へ変換
+# ---------------------------------------------------------------------------
+TEST_ENV=$(setup_mock_env "t26")
+cd "${TEST_ENV}/worktree"
+
+cat <<'EOF' > "${TEST_ENV}/worktree/scripts/lib/github_app_auth.py"
+import sys
+sys.exit(0)
+EOF
+
+MOCK_LOG="${TEST_ENV}/gh.log"
+OUTPUT=$(env -u GH_TOKEN -u GITHUB_TOKEN MOCK_GH_LOG="${MOCK_LOG}" PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh pr-create --title "Format PR" --body "## Title
+- item 1
+- item 2" 2>&1 || true)
+
+if grep -q "mock-pr-create: GH_TOKEN=none args=pr create --title Format PR --body-file ${TEST_ENV}/worktree/.input/tmp/pr-body." "${MOCK_LOG}" 2>/dev/null; then
+  pass "pr-create formats body via .input/tmp/ temporary file"
+else
+  fail "pr-create formats body via .input/tmp/ temporary file" "Log: $(cat "${MOCK_LOG}" 2>/dev/null || true)"
 fi
 
 echo "=========================================="
