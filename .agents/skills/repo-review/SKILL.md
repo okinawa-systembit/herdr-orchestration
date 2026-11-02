@@ -57,14 +57,21 @@ description: >-
 - **正本**: **GitHub（Pull Request, Issues, Reviews）**。
 - **運用原則**: 明示的に GitHub 管理対象として依頼された場合のみ適用し、同一レビュー情報をリポジトリ内台帳と二重管理しない。
 
-| レビュー種別               | 正本（Source of Truth） | 格納場所・管理単位                           | 連携インターフェース               |
-| -------------------------- | ----------------------- | -------------------------------------------- | ---------------------------------- |
-| **Herdr 内部レビュー**     | **ローカル Markdown**   | `docs/reviews/internal/<instance-id>/RV*.md` | `herdr-orchestrator result-submit` |
-| **通常 PR レビュー**       | **GitHub Pull Request** | PR 会話タイムライン / Files Changed          | `gh pr review --comment`           |
-| **初回 20 Scope レビュー** | **GitHub Issues**       | Scope 単位の個別 Issue（`#101` 等）          | `gh issue comment`                 |
-| **継続追跡する指摘**       | **GitHub Issues**       | 指摘単位の個別 Issue（`#105` 等）            | `gh issue create`                  |
+| レビュー種別                 | 正本（Source of Truth）               | 格納場所・管理単位                                                           | 連携インターフェース                                  |
+| ---------------------------- | ------------------------------------- | ---------------------------------------------------------------------------- | ----------------------------------------------------- |
+| **Herdr 内部レビュー**       | **ローカル Markdown**                 | `docs/reviews/internal/<instance-id>/RV*.md`                                 | `herdr-orchestrator result-submit`                    |
+| **通常 PR レビュー**         | **GitHub Pull Request**               | PR 会話タイムライン / Files Changed                                          | `gh pr review --comment`                              |
+| **ワイドレビュー（総点検）** | **ローカル Markdown / Finding Issue** | `docs/reviews/internal/<instance-id>/RV*.md`（発見事項は GitHub Issue 起票） | `herdr-orchestrator result-submit` / `review-finding` |
+| **初回 20 Scope レビュー**   | **GitHub Issues**                     | Scope 単位の個別 Issue（`#101` 等）                                          | `gh issue comment`                                    |
+| **継続追跡する指摘**         | **GitHub Issues**                     | 指摘単位の個別 Issue（`#105` 等）                                            | `gh issue create`                                     |
 
 ※ いずれのレビュー種別であっても、適用する**レビュー品質基準（2段階レビュー、指摘分類、重大度判定、反証確認、未実施検証明記）は完全に共通**である。
+
+### 3. ワイドレビュー（総点検 / 全体点検 / 総チェック）
+
+- **対象**: リリース前、マイルストーン完了時、またはユーザーから「ワイドレビュー」「総点検」「全体点検」「総チェック」の指示があった場合。
+- **目的**: 単一 PR の合否判定とは独立して、リポジトリ全体の設計書ステータス、目次、CLI usage、リンク、Issue、作業領域を横断点検する（チェックリスト A-1〜A-8 は [references.md#wide-review](references.md#wide-review) 参照）。
+- **判定と成果物**: PR の合否判定をブロックせず、内部レビュー記録 RVNNN.md を保存し、検出された問題は [review-finding](../review-finding/SKILL.md) スキルの手順に従って Finding Issue を起票する。
 
 ---
 
@@ -111,6 +118,18 @@ herdr-orchestrator task-result <task.id>
 ```
 
 6. `result.status` / `result.ref` を確認してから人間へ報告。再依頼は新 task として実施。
+
+※ **ワイドレビュー（総点検 / 全体点検 / 総チェック）を依頼する場合**:  
+ユーザーから「ワイドレビュー」「総点検」「全体点検」「総チェック」の指示を受けた場合は、以下のように `--tier WIDE` で依頼書を作成し、A-1〜A-8 の点検を指示する：
+
+```bash
+REQ_FILE=$(scripts/repo-review-helper request-create --tier WIDE --summary "リポジトリ全体の総点検（ワイドレビュー）を実施します。")
+herdr-orchestrator handoff \
+  --mode sync \
+  --to レビュワー \
+  --task-type review \
+  --instruction "Read $REQ_FILE and execute WIDE review (A-1 to A-8 per repo-review references.md). Save record via repo-review-helper record-save. Summarize findings and list any finding issue candidates. DO NOT close or modify any GitHub issue."
+```
 
 handoff 失敗時: stderr を人間へ。blind 再送しない（設計 §9）。
 

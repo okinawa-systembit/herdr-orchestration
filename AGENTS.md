@@ -29,13 +29,17 @@ Herdr Orchestrator の設計書は、関連するテーマごとに複数のフ�
 - [07-skill-and-implementation.md](docs/herdr-orchestrator/07-skill-and-implementation.md#sec-13): 実装境界、Skill 構成、承認、中央管理（§13–16）
 - [08-adoption-and-verification.md](docs/herdr-orchestrator/08-adoption-and-verification.md#sec-17): 導入、動作確認、repository 移行（§17–19）
 - [09-maintenance-and-roadmap.md](docs/herdr-orchestrator/09-maintenance-and-roadmap.md#sec-20): Herdr のバージョン方針、更新、制約、今後の検証、将来構成（§20–24）
-- [herdr-orchestrator-identity-uuid.md](docs/herdr-orchestrator-identity-uuid.md): Repository Identity UUID化 設計書（Issue #50 実装済み）
-- [herdr-orchestrator-task-list.md](docs/herdr-orchestrator-task-list.md): Task 一覧参照コマンド `task-list` 設計書（Issue #62 実装済み）
-- [herdr-orchestrator-cross-workspace.md](docs/herdr-orchestrator-cross-workspace.md): ワークスペース跨ぎ配送・グローバルロール・日本語ロール名・ペイン自動追従 設計書（Issue #74 実装済み）
+- [herdr-orchestrator-identity-uuid.md](docs/herdr-orchestrator-identity-uuid.md): Repository Identity UUID化 設計書（Issue #50）
+- [herdr-orchestrator-task-list.md](docs/herdr-orchestrator-task-list.md): Task 一覧参照コマンド `task-list` 設計書（Issue #62）
+- [herdr-orchestrator-cross-workspace.md](docs/herdr-orchestrator-cross-workspace.md): ワークスペース跨ぎ配送・グローバルロール・日本語ロール名・ペイン自動追従 設計書（Issue #74）
 
 ### 文書の編集ルール
 
 - 設計書の Markdown を作成・変更・修正したら、作業完了前に必ず `npm run format:md` と `npm run check:md` を通す（手順は [.agents/skills/design-doc-markdown-format/SKILL.md](.agents/skills/design-doc-markdown-format/SKILL.md)）。
+- **個別設計書のステータス管理と正本**:
+  - 各個別設計書（`docs/herdr-orchestrator-*.md`）のヘッダーにある `- **ステータス**:` 行をステータスの唯一の正本とする（`AGENTS.md` や目次でステータスを重複保持しない）。
+  - ステータス値は次の 5 語彙に限定する: `設計中` / `設計承認` / `実装中` / `実装完了（PR #NN / vX.Y.Z にてマージ済み）` / `廃止`。
+  - 実装 PR をマージする際、PR が `Closes #N` / `Fixes #N` を含む場合は、該当 Issue を対象とする設計書のステータスを `実装完了（PR #NN / vX.Y.Z にてマージ済み）` へ更新することを必須とする（差分外波及チェック D-1）。
 - 既存参照との対応を保つため、章番号は維持する。章・節のアンカーには `sec-N` / `sec-N-M` 形式を使い、見出し変更時もアンカーを維持する。
 - ファイル構成、章の配置、章タイトルを変更した場合は、設計書の目次も更新する。
 - 章・節を参照するときは、章番号だけで済ませず、該当箇所への Markdown リンクを付ける。

@@ -2,7 +2,8 @@
   "scripts": {
     "lint:md": "markdownlint-cli2",
     "format:md": "prettier --write --ignore-path .prettierignore '**/*.md'",
-    "check:md": "prettier --check --ignore-path .prettierignore '**/*.md' && markdownlint-cli2",
+    "check:md": "prettier --check --ignore-path .prettierignore '**/*.md' && markdownlint-cli2 && python3 scripts/check_docs_status.py",
+    "check:docs-status": "python3 scripts/check_docs_status.py",
     "test:orchestrator": "PYTHONPATH=skills/herdr-orchestrator/scripts python3 -m unittest discover -s tests -p 'test_*.py'",
     "install:orchestrator-dev": "bash skills/herdr-orchestrator/install/dev-local-install.sh",
     "install:orchestrator-skill": "bash skills/herdr-orchestrator/install/setup.sh",

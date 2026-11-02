@@ -20,11 +20,13 @@
 | 8    | [導入・動作確認・Repository 移行](herdr-orchestrator/08-adoption-and-verification.md#sec-17)             | 17–19  | 導入・動作確認・Repository 移行              |
 | 9    | [バージョン管理・更新運用・禁止事項・将来構成](herdr-orchestrator/09-maintenance-and-roadmap.md#sec-20)  | 20–24  | バージョン管理・更新運用・禁止事項・将来構成 |
 
-## 個別機能設計書（実装完了）
+## 個別機能設計書
 
-- [Repository Identity UUID化 設計書 (Issue #50)](herdr-orchestrator-identity-uuid.md): リモート origin 未設定のローカルリポジトリへの対応および UUID v4 移行（PR #52 / v0.2.0 にて実装完了）
-- [Task 一覧参照コマンド `task-list` 設計書 (Issue #62)](herdr-orchestrator-task-list.md): Task Registry に残存する task を読み取り専用で一覧取得する公開 CLI（PR #63 / v0.3.0 にて実装完了）
-- [ワークスペース跨ぎ配送・グローバルロール・日本語ロール名・ペイン自動追従 設計書 (Issue #74)](herdr-orchestrator-cross-workspace.md): 別ワークスペース専任エージェント連携、Non-Git 対応、日本語ロール名、ペイン自動追従と人間向け UI 識別表示（PR #75 / v0.4.0 にて実装完了）
+各機能の個別設計書。ステータスおよび実装実績の正本は各設計書のヘッダーを参照。
+
+- [Repository Identity UUID化 設計書 (Issue #50)](herdr-orchestrator-identity-uuid.md): リモート origin 未設定のローカルリポジトリへの対応および UUID v4 移行
+- [Task 一覧参照コマンド `task-list` 設計書 (Issue #62)](herdr-orchestrator-task-list.md): Task Registry に残存する task を読み取り専用で一覧取得する公開 CLI
+- [ワークスペース跨ぎ配送・グローバルロール・日本語ロール名・ペイン自動追従 設計書 (Issue #74)](herdr-orchestrator-cross-workspace.md): 別ワークスペース専任エージェント連携、Non-Git 対応、日本語ロール名、ペイン自動追従と人間向け UI 識別表示
 
 ## 基本方針
 

@@ -1024,6 +1024,49 @@ class TestCliIntegration(unittest.TestCase):
         ])
         self.assertEqual(code2, 2)
 
+    @patch("repo_review_helper.cli.check_active_review_tasks")
+    def test_request_create_tier_instructions(self, mock_check):
+        """Test request-create generates appropriate instructions for STANDARD, DEEP, and WIDE."""
+        mock_check.return_value = TaskCheckResult(
+            can_safely_initialize=True,
+            has_active_tasks=False,
+            uncertain=False,
+        )
+        wt_str = str(self.worktree)
+        cli_main(["init", "--worktree", wt_str])
+
+        inbox_dir = self.worktree / ".inbox"
+
+        # 1. STANDARD tier: should include D-1 to D-3
+        code = cli_main([
+            "request-create",
+            "--worktree", wt_str,
+            "--tier", "STANDARD",
+            "--summary", "Standard review request",
+        ])
+        self.assertEqual(code, 0)
+        req_files = sorted(inbox_dir.glob("review-request.*.md"))
+        self.assertEqual(len(req_files), 1)
+        req_text = req_files[0].read_text(encoding="utf-8")
+        self.assertIn("差分外波及確認（D-1〜D-3）", req_text)
+        self.assertIn("D-1", req_text)
+        self.assertNotIn("ワイドレビュー", req_text)
+
+        # 2. WIDE tier: should include A-1 to A-8
+        code = cli_main([
+            "request-create",
+            "--worktree", wt_str,
+            "--tier", "WIDE",
+            "--summary", "Wide inspection request",
+        ])
+        self.assertEqual(code, 0)
+        req_files = sorted(inbox_dir.glob("review-request.*.md"), key=lambda p: p.stat().st_mtime)
+        self.assertEqual(len(req_files), 2)
+        wide_text = req_files[-1].read_text(encoding="utf-8")
+        self.assertIn("ワイドレビュー（総点検 / 全体点検 / 総チェック）確認事項", wide_text)
+        self.assertIn("A-1", wide_text)
+        self.assertIn("A-8", wide_text)
+
 
 if __name__ == "__main__":
     unittest.main()
