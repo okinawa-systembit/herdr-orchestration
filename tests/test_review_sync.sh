@@ -381,6 +381,128 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Test 12a: check - reviewee のドラフトに未記入目印が残っている場合は停止
+# ---------------------------------------------------------------------------
+TEST_ENV=$(setup_mock_env "t12a")
+DRAFT_PATH="${TEST_ENV}/worktree/.input/review/reviewee-draft.md"
+
+cat <<'EOF' > "${DRAFT_PATH}"
+# Draft
+- Role: reviewee
+- Round: 1
+## Findings
+### P1-1 Title
+- Decision: <accept | reject | defer>
+- レビューイ評価: 同意
+EOF
+
+cd "${TEST_ENV}/worktree"
+ERR_OUTPUT=$(PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh check reviewee 2>&1 || true)
+if [[ "${ERR_OUTPUT}" == *"reviewee のドラフトに未記入の項目が残っています"* ]]; then
+  pass "Reject reviewee draft with placeholder Decision"
+else
+  fail "Reject reviewee draft with placeholder Decision" "Output: ${ERR_OUTPUT}"
+fi
+
+# ---------------------------------------------------------------------------
+# Test 12b: check - reviewee のドラフトに不正な Decision 値がある場合は停止
+# ---------------------------------------------------------------------------
+TEST_ENV=$(setup_mock_env "t12b")
+DRAFT_PATH="${TEST_ENV}/worktree/.input/review/reviewee-draft.md"
+
+cat <<'EOF' > "${DRAFT_PATH}"
+# Draft
+- Role: reviewee
+- Round: 1
+## Findings
+### P1-1 Title
+- Decision: invalid_decision
+- レビューイ評価: 同意
+EOF
+
+cd "${TEST_ENV}/worktree"
+ERR_OUTPUT=$(PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh check reviewee 2>&1 || true)
+if [[ "${ERR_OUTPUT}" == *"不正な Decision 値が含まれています"* ]]; then
+  pass "Reject reviewee draft with invalid Decision value"
+else
+  fail "Reject reviewee draft with invalid Decision value" "Output: ${ERR_OUTPUT}"
+fi
+
+# ---------------------------------------------------------------------------
+# Test 12c: check - レビュワー本文中の説明文に目印文字列があっても欄記入済みなら通過 (RV080 P2-1)
+# ---------------------------------------------------------------------------
+TEST_ENV=$(setup_mock_env "t12c")
+DRAFT_PATH="${TEST_ENV}/worktree/.input/review/reviewee-draft.md"
+
+cat <<'EOF' > "${DRAFT_PATH}"
+# Draft
+- Role: reviewee
+- Round: 1
+## Findings
+### P2-1 レビュワーによる指摘
+本文中で「初期値を <accept | reject | defer> のような目印にする」と書かれている例
+- Decision: accept
+- レビューイ評価: 同意
+- 対応内容 / 理由: 修正完了
+EOF
+
+cd "${TEST_ENV}/worktree"
+OUT=$(PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh check reviewee)
+if [[ "${OUT}" == *"OK: check passed (reviewee)"* ]]; then
+  pass "Pass reviewee draft when placeholder text is only in body description (RV080 P2-1)"
+else
+  fail "Pass reviewee draft when placeholder text is only in body description" "Output: ${OUT}"
+fi
+
+# ---------------------------------------------------------------------------
+# Test 12d: check - バッククォート付きの Decision 値 (`accept` 等) を許容 (RV080 P3-1)
+# ---------------------------------------------------------------------------
+TEST_ENV=$(setup_mock_env "t12d")
+DRAFT_PATH="${TEST_ENV}/worktree/.input/review/reviewee-draft.md"
+
+cat <<'EOF' > "${DRAFT_PATH}"
+# Draft
+- Role: reviewee
+- Round: 1
+## Findings
+### P1-1 Title
+- Decision: `accept`
+- レビューイ評価: `同意`
+EOF
+
+cd "${TEST_ENV}/worktree"
+OUT=$(PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh check reviewee)
+if [[ "${OUT}" == *"OK: check passed (reviewee)"* ]]; then
+  pass "Pass reviewee draft with backquoted Decision value (RV080 P3-1)"
+else
+  fail "Pass reviewee draft with backquoted Decision value" "Output: ${OUT}"
+fi
+
+# ---------------------------------------------------------------------------
+# Test 12e: check - レビューイ評価が空欄の場合は停止 (RV080 P3-1)
+# ---------------------------------------------------------------------------
+TEST_ENV=$(setup_mock_env "t12e")
+DRAFT_PATH="${TEST_ENV}/worktree/.input/review/reviewee-draft.md"
+
+cat <<'EOF' > "${DRAFT_PATH}"
+# Draft
+- Role: reviewee
+- Round: 1
+## Findings
+### P1-1 Title
+- Decision: accept
+- レビューイ評価:
+EOF
+
+cd "${TEST_ENV}/worktree"
+ERR_OUTPUT=$(PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh check reviewee 2>&1 || true)
+if [[ "${ERR_OUTPUT}" == *"空欄のレビューイ評価行が含まれています"* ]]; then
+  pass "Reject reviewee draft with empty evaluation (RV080 P3-1)"
+else
+  fail "Reject reviewee draft with empty evaluation" "Output: ${ERR_OUTPUT}"
+fi
+
+# ---------------------------------------------------------------------------
 # Test 13: comment - マーカー付与と sent/ への退避
 # ---------------------------------------------------------------------------
 TEST_ENV=$(setup_mock_env "t13")

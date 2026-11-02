@@ -235,6 +235,34 @@ do_check() {
       echo "エラー: reviewee のドラフトのメタデータ部に判定 Status: 行を含めることはできません。Finding 内の Status のみ更新してください。" >&2
       exit 1
     fi
+
+    # 未記入の Decision 目印またはレビューイ評価目印が残っている場合は停止
+    local uncompleted_lines
+    uncompleted_lines="$(grep -n -E "^[[:space:]]*-?[[:space:]]*(Decision|レビューイ評価):[[:space:]]*<" "${target_file}" || true)"
+    if [[ -n "${uncompleted_lines}" ]]; then
+      echo "エラー: reviewee のドラフトに未記入の項目が残っています:" >&2
+      echo "${uncompleted_lines}" >&2
+      exit 1
+    fi
+
+    # 不正な Decision 値（accept|reject|defer 以外の指定、または空欄）の検査
+    # ※ バッククォート囲み（`accept` 等）も許容する
+    local invalid_decision_lines
+    invalid_decision_lines="$(grep -n -E "^[[:space:]]*-?[[:space:]]*Decision:" "${target_file}" | grep -E -v "^[0-9]+:[[:space:]]*-?[[:space:]]*Decision:[[:space:]]*\`?(accept|reject|defer)\`?([[:space:]]|$)" || true)"
+    if [[ -n "${invalid_decision_lines}" ]]; then
+      echo "エラー: reviewee のドラフトに不正な Decision 値が含まれています（値は accept, reject, defer のいずれかを指定してください）:" >&2
+      echo "${invalid_decision_lines}" >&2
+      exit 1
+    fi
+
+    # 空欄のレビューイ評価の検査
+    local empty_eval_lines
+    empty_eval_lines="$(grep -n -E "^[[:space:]]*-?[[:space:]]*レビューイ評価:[[:space:]]*$" "${target_file}" || true)"
+    if [[ -n "${empty_eval_lines}" ]]; then
+      echo "エラー: reviewee のドラフトに空欄のレビューイ評価行が含まれています:" >&2
+      echo "${empty_eval_lines}" >&2
+      exit 1
+    fi
   fi
 
   echo "OK: check passed (${ROLE})"
