@@ -832,7 +832,7 @@ sys.exit(0)
 EOF
 
 MOCK_LOG="${TEST_ENV}/gh.log"
-OUTPUT=$(MOCK_GH_LOG="${MOCK_LOG}" PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh pr-create --title "Test PR" --body "Test Body" 2>&1 || true)
+OUTPUT=$(env -u GH_TOKEN -u GITHUB_TOKEN MOCK_GH_LOG="${MOCK_LOG}" PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh pr-create --title "Test PR" --body "Test Body" 2>&1 || true)
 
 if grep -q "mock-pr-create: GH_TOKEN=ghs_mock_bot_token_for_pr_create args=pr create --title Test PR --body Test Body" "${MOCK_LOG}" 2>/dev/null; then
   pass "pr-create sets GH_TOKEN to bot token and forwards arguments to gh pr create"
@@ -853,7 +853,7 @@ sys.exit(0)
 EOF
 
 MOCK_LOG="${TEST_ENV}/gh.log"
-OUTPUT=$(MOCK_GH_LOG="${MOCK_LOG}" PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh pr-create --title "Personal PR" 2>&1 || true)
+OUTPUT=$(env -u GH_TOKEN -u GITHUB_TOKEN MOCK_GH_LOG="${MOCK_LOG}" PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh pr-create --title "Personal PR" 2>&1 || true)
 
 if [[ "${OUTPUT}" == *"警告: GitHub App 設定が存在しません"* ]] && grep -q "mock-pr-create: GH_TOKEN=none args=pr create --title Personal PR" "${MOCK_LOG}" 2>/dev/null; then
   pass "pr-create warns when GitHub App config is absent and falls back to personal auth"
