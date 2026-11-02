@@ -48,7 +48,7 @@ class TestPullReview(unittest.TestCase):
         content = self.target_file.read_text(encoding="utf-8")
         self.assertIn("# Review Draft: PR #101", content)
         self.assertIn("- Role: reviewer", content)
-        self.assertIn("- Round: 2", content)
+        self.assertIn("- Round: 1", content)
         self.assertIn("- PR: #101", content)
         self.assertIn("- Status: Changes requested", content)
         self.assertIn("## Findings", content)
@@ -180,6 +180,40 @@ class TestPullReview(unittest.TestCase):
         self.assertIn("## Human & Inline Comments", content)
         self.assertIn("quoting: <!-- review-sync role=reviewer round=7 -->", content)
         self.assertIn("(@another_user)", content)
+
+    def test_consecutive_pull_increments_round_based_on_own_marker(self) -> None:
+        """相手の返信がないまま同一ロールが連続 pull した場合の Round 繰り上げ (RV074 P3-2)."""
+        comments_data = {
+            "comments": [],
+            "reviews": [
+                {
+                    "body": (
+                        "<!-- review-sync role=reviewer round=1 -->\n"
+                        "# レビュー結果\n\n"
+                        "- Role: reviewer\n"
+                        "- Round: 1\n"
+                        "- Status: Changes requested\n\n"
+                    ),
+                    "submittedAt": "2026-10-30T10:00:00Z",
+                    "author": {"login": "reviewer_bot"},
+                }
+            ],
+        }
+
+        # reviewer が相手 (reviewee) の返信なしで再度 pull した場合
+        parse_and_generate_draft(
+            target_file=self.target_file,
+            role="reviewer",
+            opposite_role="reviewee",
+            is_issue=False,
+            target_id="101",
+            comments_reviews_data=comments_data,
+            inline_comments_data=[],
+        )
+
+        content = self.target_file.read_text(encoding="utf-8")
+        self.assertIn("- Role: reviewer", content)
+        self.assertIn("- Round: 2", content)
 
     def test_cli_main_success(self) -> None:
         """CLI エントリポイントの正常動作検証."""

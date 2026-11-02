@@ -82,6 +82,10 @@ def parse_and_generate_draft(
     opposite_marker_pattern = re.compile(
         rf"^\s*<!--\s*review-sync\s+role={re.escape(opposite_role)}\s+round=([0-9]+)\s*-->"
     )
+    # 自身ロールの正規マーカー (本文の先頭に配置されていること)
+    own_marker_pattern = re.compile(
+        rf"^\s*<!--\s*review-sync\s+role={re.escape(role)}\s+round=([0-9]+)\s*-->"
+    )
     # 任意の review-sync 正規マーカー (先頭行に配置されているもの)
     any_marker_pattern = re.compile(
         r"^\s*<!--\s*review-sync\s+role=(?:reviewer|reviewee)\s+round=[0-9]+\s*-->"
@@ -89,21 +93,37 @@ def parse_and_generate_draft(
 
     latest_opposite_body = ""
     latest_round = 1
+    has_opposite_marker = False
+    max_own_round = 0
     human_comments: list[str] = []
 
     for item in all_items:
         body = item["body"]
-        m = opposite_marker_pattern.match(body)
-        if m:
+        m_opp = opposite_marker_pattern.match(body)
+        m_own = own_marker_pattern.match(body)
+        if m_opp:
             latest_opposite_body = body
-            latest_round = int(m.group(1))
+            latest_round = int(m_opp.group(1))
+            has_opposite_marker = True
+        elif m_own:
+            r = int(m_own.group(1))
+            if r > max_own_round:
+                max_own_round = r
         elif not any_marker_pattern.match(body):
             # 先頭に正規マーカーを持たないコメント（人間コメント、インラインコメント、本文中でのマーカー引用等）
             if body.strip():
                 author_str = f" (@{item['author']})" if item.get("author") else ""
                 human_comments.append(f"{body.strip()}{author_str}")
 
-    next_round = latest_round if role == "reviewee" else latest_round + 1
+    if has_opposite_marker:
+        base_round = latest_round if role == "reviewee" else latest_round + 1
+    else:
+        base_round = 1
+
+    if max_own_round > 0:
+        next_round = max(base_round, max_own_round + 1)
+    else:
+        next_round = base_round
 
     target_file.parent.mkdir(parents=True, exist_ok=True)
     with target_file.open("w", encoding="utf-8") as f:
