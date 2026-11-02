@@ -1,7 +1,7 @@
 # Herdr Orchestrator Repository Identity UUID化 設計書
 
 - **対象 Issue**: [#50 — リモート origin 未設定のローカルリポジトリへの対応](https://github.com/okinawa-systembit/herdr-orchestration/issues/50)
-- **ステータス**: 実装前設計案
+- **ステータス**: 実装完了（[PR #52](https://github.com/okinawa-systembit/herdr-orchestration/pull/52) / v0.2.0 にてマージ済み）
 - **関連ドキュメント**:
   - [02-roles-and-task-contract.md](herdr-orchestrator/02-roles-and-task-contract.md#sec-4) (§4: Agent 命名規則)
   - [06-results-and-workflows.md](herdr-orchestrator/06-results-and-workflows.md#sec-11-0) (§11.0: Worktree Root 解決と repository identity)

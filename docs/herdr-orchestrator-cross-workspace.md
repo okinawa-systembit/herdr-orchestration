@@ -1,7 +1,7 @@
 # Herdr Orchestrator ワークスペース跨ぎ配送・グローバルロール・日本語ロール名・ペイン自動追従 設計書
 
 - **対象 Issue**: [#74 — ワークスペース跨ぎ配送・グローバルロール・日本語ロール名・ペイン自動追従への対応](https://github.com/okinawa-systembit/herdr-orchestration/issues/74)
-- **ステータス**: 設計案（実装前）
+- **ステータス**: 実装完了（[PR #75](https://github.com/okinawa-systembit/herdr-orchestration/pull/75) / v0.4.0 にてマージ済み）
 - **関連 Issue**: [#72 — herdr agent rename 依存を廃止し pane_id ベースの Role Binding 管理へ移行](https://github.com/okinawa-systembit/herdr-orchestration/issues/72)
 - **関連ドキュメント**:
   - [02-roles-and-task-contract.md](herdr-orchestrator/02-roles-and-task-contract.md#sec-4) (§4: 論理 Role と Routing Identity)
