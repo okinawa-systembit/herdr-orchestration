@@ -29,9 +29,9 @@ Herdr Orchestrator の設計書は、関連するテーマごとに複数のフ�
 - [07-skill-and-implementation.md](docs/herdr-orchestrator/07-skill-and-implementation.md#sec-13): 実装境界、Skill 構成、承認、中央管理（§13–16）
 - [08-adoption-and-verification.md](docs/herdr-orchestrator/08-adoption-and-verification.md#sec-17): 導入、動作確認、repository 移行（§17–19）
 - [09-maintenance-and-roadmap.md](docs/herdr-orchestrator/09-maintenance-and-roadmap.md#sec-20): Herdr のバージョン方針、更新、制約、今後の検証、将来構成（§20–24）
-- [herdr-orchestrator-identity-uuid.md](docs/herdr-orchestrator-identity-uuid.md): Repository Identity UUID化 設計書（Issue #50 対応案）
-- [herdr-orchestrator-task-list.md](docs/herdr-orchestrator-task-list.md): Task 一覧参照コマンド `task-list` 設計書（Issue #62 対応案）
-- [herdr-orchestrator-cross-workspace.md](docs/herdr-orchestrator-cross-workspace.md): ワークスペース跨ぎ配送・グローバルロール・日本語ロール名・ペイン自動追従 設計書（Issue #74 対応案）
+- [herdr-orchestrator-identity-uuid.md](docs/herdr-orchestrator-identity-uuid.md): Repository Identity UUID化 設計書（Issue #50 実装済み）
+- [herdr-orchestrator-task-list.md](docs/herdr-orchestrator-task-list.md): Task 一覧参照コマンド `task-list` 設計書（Issue #62 実装済み）
+- [herdr-orchestrator-cross-workspace.md](docs/herdr-orchestrator-cross-workspace.md): ワークスペース跨ぎ配送・グローバルロール・日本語ロール名・ペイン自動追従 設計書（Issue #74 実装済み）
 
 ### 文書の編集ルール
 
