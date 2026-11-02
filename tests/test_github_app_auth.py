@@ -491,6 +491,34 @@ class TestGitHubAppAuth(unittest.TestCase):
         self.assertEqual(res.token, "ghs_mocked_token")
         self.assertIsNone(res.error)
 
+    def test_obtain_token_with_relative_key_path_resolved_from_root(self) -> None:
+        """秘密鍵に相対パスが指定された場合、リポジトリルート基準で解決されること (RV063 P3-2)."""
+        # ルート直下に鍵ファイルを作成
+        key_file = self.tmp_path / "relative_bot.pem"
+        key_file.write_bytes(self.test_rsa_pem)
+
+        # サブディレクトリを作成
+        sub_dir = self.tmp_path / "deep" / "sub"
+        sub_dir.mkdir(parents=True)
+
+        # 設定ファイルで相対パスを指定
+        env_file = self.tmp_path / ".env.github-app"
+        env_file.write_text(
+            "GITHUB_BOT_APP_ID=123\n"
+            "GITHUB_BOT_INSTALL_ID=456\n"
+            "GITHUB_APP_PRIVATE_KEY_PATH=./relative_bot.pem\n",
+            encoding="utf-8",
+        )
+
+        with patch("scripts.lib.github_app_auth.fetch_installation_token") as mock_fetch:
+            mock_fetch.return_value = "ghs_relative_key_token"
+            # サブディレクトリから obtain_token を実行
+            res = obtain_token(sub_dir)
+
+        self.assertEqual(res.mode, "bot")
+        self.assertEqual(res.token, "ghs_relative_key_token")
+        self.assertIsNone(res.error)
+
     def test_main_cli_personal(self) -> None:
         """設定なし時、exit 0 で stderr にメッセージ出力、stdout は空."""
         with patch("sys.argv", ["github_app_auth.py", str(self.tmp_path)]):
