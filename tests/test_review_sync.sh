@@ -151,7 +151,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Test 6: 改ざん検知 - origin/main 不在および差分検知
+# Test 6: 改ざん検知 - origin/main 不在および差分検知 (本体および scripts/lib/)
 # ---------------------------------------------------------------------------
 TEST_ENV=$(setup_mock_env "t6")
 cd "${TEST_ENV}/worktree"
@@ -164,20 +164,32 @@ else
   fail "Tamper detection stops when origin/main is missing" "Output: ${ERR_MSG_NO_ORIGIN}"
 fi
 
-# 6-2: origin/main を作成し、差分がある場合は検知して停止すること
+# 6-2: origin/main を作成し、本体に差分がある場合は検知して停止すること
 git update-ref refs/remotes/origin/main HEAD
 echo "# tamper change" >> scripts/review-sync.sh
 
 ERR_MSG_TAMPER=$(bash scripts/review-sync.sh check reviewer 2>&1 || true)
-if [[ "${ERR_MSG_TAMPER}" == *"scripts/review-sync.sh が origin/main と一致しません"* ]]; then
+if [[ "${ERR_MSG_TAMPER}" == *"scripts/review-sync.sh または scripts/lib/ が origin/main と一致しません"* ]]; then
   pass "Tamper detection stops when diff exists without ALLOW_REVIEW_SYNC_DEV"
 else
   fail "Tamper detection stops when diff exists without ALLOW_REVIEW_SYNC_DEV" "Output: ${ERR_MSG_TAMPER}"
 fi
 
-# 6-3: ALLOW_REVIEW_SYNC_DEV=1 でバイパスできること
+# 6-3: 本体を元に戻し、scripts/lib/ 配下に差分がある場合も検知して停止すること (RV064 P2-1)
+git checkout -- scripts/review-sync.sh
+echo "# tamper lib" >> scripts/lib/github_app_auth.py
+
+ERR_MSG_LIB_TAMPER=$(bash scripts/review-sync.sh check reviewer 2>&1 || true)
+if [[ "${ERR_MSG_LIB_TAMPER}" == *"scripts/review-sync.sh または scripts/lib/ が origin/main と一致しません"* ]]; then
+  pass "Tamper detection stops when diff in scripts/lib exists (RV064 P2-1)"
+else
+  fail "Tamper detection stops when diff in scripts/lib exists (RV064 P2-1)" "Output: ${ERR_MSG_LIB_TAMPER}"
+fi
+git checkout -- scripts/lib/github_app_auth.py
+
+# 6-4: ALLOW_REVIEW_SYNC_DEV=1 でバイパスできること
 ERR_MSG_BYPASS=$(ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh check reviewer 2>&1 || true)
-if [[ "${ERR_MSG_BYPASS}" != *"scripts/review-sync.sh が origin/main と一致しません"* && "${ERR_MSG_BYPASS}" == *"ドラフトファイルが存在しない"* ]]; then
+if [[ "${ERR_MSG_BYPASS}" != *"origin/main と一致しません"* && "${ERR_MSG_BYPASS}" == *"ドラフトファイルが存在しない"* ]]; then
   pass "Tamper detection bypassed with ALLOW_REVIEW_SYNC_DEV=1"
 else
   fail "Tamper detection bypassed with ALLOW_REVIEW_SYNC_DEV=1" "Output: ${ERR_MSG_BYPASS}"
@@ -350,6 +362,68 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Test 13b: comment - Round 行に複数数字がある場合に最初の数字を採用 (RV064 P3-1)
+# ---------------------------------------------------------------------------
+TEST_ENV=$(setup_mock_env "t13b")
+DRAFT_PATH="${TEST_ENV}/worktree/.input/review/reviewer-draft.md"
+LAST_BODY="${TEST_ENV}/last_body.txt"
+
+cat <<'EOF' > "${DRAFT_PATH}"
+# Draft
+- Role: reviewer
+- Round: 2 (prev 1)
+- Status: Changes requested
+## Summary
+summary text
+EOF
+
+cd "${TEST_ENV}/worktree"
+MOCK_LAST_BODY="${LAST_BODY}" PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh comment reviewer
+
+if grep -q "^<!-- review-sync role=reviewer round=2 -->$" "${LAST_BODY}"; then
+  pass "Extract first numeric round from metadata when multiple numbers exist (RV064 P3-1)"
+else
+  fail "Extract first numeric round from metadata when multiple numbers exist (RV064 P3-1)" "Marker: $(head -n 2 "${LAST_BODY}")"
+fi
+
+# ---------------------------------------------------------------------------
+# Test 13c: comment - 同一秒の連続送信でも sent/ のファイルが上書きされないこと (RV064 P3-2)
+# ---------------------------------------------------------------------------
+TEST_ENV=$(setup_mock_env "t13c")
+DRAFT_PATH="${TEST_ENV}/worktree/.input/review/reviewer-draft.md"
+LAST_BODY="${TEST_ENV}/last_body.txt"
+
+cd "${TEST_ENV}/worktree"
+# 1回目の送信
+cat <<'EOF' > "${DRAFT_PATH}"
+# Draft 1
+- Role: reviewer
+- Round: 1
+- Status: Changes requested
+## Summary
+first draft
+EOF
+MOCK_LAST_BODY="${LAST_BODY}" PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh comment reviewer
+
+# 2回目の送信（直後に実行）
+cat <<'EOF' > "${DRAFT_PATH}"
+# Draft 2
+- Role: reviewer
+- Round: 2
+- Status: Changes requested
+## Summary
+second draft
+EOF
+MOCK_LAST_BODY="${LAST_BODY}" PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh comment reviewer
+
+SENT_COUNT=$(find "${TEST_ENV}/worktree/.input/review/sent" -name "*-reviewer-draft*.md" | wc -l)
+if [[ "${SENT_COUNT}" -eq 2 ]]; then
+  pass "Archive both files to sent/ without overwriting (RV064 P3-2)"
+else
+  fail "Archive both files to sent/ without overwriting (RV064 P3-2)" "Count: ${SENT_COUNT}"
+fi
+
+# ---------------------------------------------------------------------------
 # Test 14: comment-issue - 監査 Issue へのコメントと退避
 # ---------------------------------------------------------------------------
 TEST_ENV=$(setup_mock_env "t14")
@@ -493,7 +567,55 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Test 18: load_github_auth - ファイルからのトークン取得
+# Test 17b: pull - gh が stderr に警告を出力しても stdout の JSON が安全にパースされること (RV064 P3-4)
+# ---------------------------------------------------------------------------
+TEST_ENV=$(setup_mock_env "t17b")
+cd "${TEST_ENV}/worktree"
+
+cat <<'EOF' > "${TEST_ENV}/bin/gh"
+#!/usr/bin/env bash
+if [[ "$*" == *"pr view --json number,url"* ]]; then
+  echo "WARNING: gh update available" >&2
+  echo '{"number": 99}'
+  exit 0
+elif [[ "$*" == *"pr view 99 --json comments,reviews"* ]]; then
+  echo "WARNING: gh token expires soon" >&2
+  cat <<'JSON'
+{
+  "comments": [
+    {
+      "body": "<!-- review-sync role=reviewer round=1 -->\n# Review Draft: PR #99\n- Role: reviewer\n- Round: 1\n- Status: Changes requested\n## Findings\n### F001 [High] Issue Title\n",
+      "createdAt": "2026-10-28T10:00:00Z"
+    }
+  ],
+  "reviews": []
+}
+JSON
+  exit 0
+elif [[ "$*" == *"repo view"* ]]; then
+  echo "WARNING: git config notice" >&2
+  echo "example/repo"
+  exit 0
+elif [[ "$*" == *"pulls/99/comments"* ]]; then
+  echo "WARNING: api pagination note" >&2
+  echo "[]"
+  exit 0
+fi
+exit 0
+EOF
+chmod +x "${TEST_ENV}/bin/gh"
+
+PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh pull reviewee
+
+PULLED_DRAFT="${TEST_ENV}/worktree/.input/review/reviewee-draft.md"
+if [[ -f "${PULLED_DRAFT}" ]] && grep -q "F001 \[High\] Issue Title" "${PULLED_DRAFT}"; then
+  pass "Pull succeeds even when gh outputs warnings to stderr (RV064 P3-4)"
+else
+  fail "Pull succeeds even when gh outputs warnings to stderr (RV064 P3-4)" "Content: $(cat "${PULLED_DRAFT}" 2>/dev/null || true)"
+fi
+
+# ---------------------------------------------------------------------------
+# Test 18: load_github_auth - 認証スクリプト stdout の GH_TOKEN へのエクスポート伝搬
 # ---------------------------------------------------------------------------
 TEST_ENV=$(setup_mock_env "t18")
 cd "${TEST_ENV}/worktree"
@@ -501,16 +623,10 @@ cd "${TEST_ENV}/worktree"
 cat <<'EOF' > scripts/lib/github_app_auth.py
 #!/usr/bin/env python3
 import sys
-sys.stdout.write("ghs_mock_token_from_file\n")
+sys.stdout.write("ghs_mock_token_from_script\n")
 sys.exit(0)
 EOF
 chmod +x scripts/lib/github_app_auth.py
-
-cat <<'EOF' > .env.github-app
-GITHUB_BOT_APP_ID=111111
-GITHUB_BOT_INSTALL_ID=222222
-GITHUB_APP_PRIVATE_KEY_PATH=./dummy_key.pem
-EOF
 
 LOADED_TOKEN=$(PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash -c '
 REPO_ROOT="$(pwd)"
@@ -519,37 +635,62 @@ load_github_auth
 echo "${GH_TOKEN:-}"
 ')
 
-if [[ "${LOADED_TOKEN}" == *"ghs_mock_token_from_file"* ]]; then
-  pass "Load token from .env.github-app file"
+if [[ "${LOADED_TOKEN}" == *"ghs_mock_token_from_script"* ]]; then
+  pass "Propagate auth script stdout to GH_TOKEN (RV064 P3-3)"
 else
-  fail "Load token from .env.github-app file" "Token: ${LOADED_TOKEN}"
+  fail "Propagate auth script stdout to GH_TOKEN (RV064 P3-3)" "Token: ${LOADED_TOKEN}"
 fi
 
 # ---------------------------------------------------------------------------
-# Test 19: load_github_auth - 環境変数からのトークン取得
+# Test 19: load_github_auth - 本物の github_app_auth.py と .env.github-app 結合テスト (RV064 P3-3)
 # ---------------------------------------------------------------------------
 TEST_ENV=$(setup_mock_env "t19")
 cd "${TEST_ENV}/worktree"
 
-cat <<'EOF' > scripts/lib/github_app_auth.py
-#!/usr/bin/env python3
-import sys
-sys.stdout.write("ghs_mock_token_from_env\n")
-sys.exit(0)
+# ダミー RSA 秘密鍵の作成
+openssl genrsa -out dummy_key.pem 2048 2>/dev/null
+
+cat <<'EOF' > .env.github-app
+GITHUB_BOT_APP_ID=111111
+GITHUB_BOT_INSTALL_ID=222222
+GITHUB_APP_PRIVATE_KEY_PATH=./dummy_key.pem
 EOF
-chmod +x scripts/lib/github_app_auth.py
 
-LOADED_TOKEN=$(GITHUB_BOT_APP_ID=111111 GITHUB_BOT_INSTALL_ID=222222 GITHUB_APP_PRIVATE_KEY_PATH=./dummy.pem PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash -c '
-REPO_ROOT="$(pwd)"
-source <(sed -n "/^load_github_auth()/,/^}/p" scripts/review-sync.sh)
-load_github_auth
-echo "${GH_TOKEN:-}"
-')
+LOADED_TOKEN=$(PYTHONPATH="${TEST_ENV}/worktree" python3 -c '
+import os, sys, unittest.mock as mock
+from scripts.lib import github_app_auth
 
-if [[ "${LOADED_TOKEN}" == *"ghs_mock_token_from_env"* ]]; then
-  pass "Load token from environment variables without file"
+with mock.patch("scripts.lib.github_app_auth.fetch_installation_token", return_value="ghs_real_lib_integration_token"):
+    res = github_app_auth.obtain_token(".")
+    assert res.token == "ghs_real_lib_integration_token", f"Token: {res.token}, Error: {res.error}"
+    print(res.token)
+' 2>/dev/null || true)
+
+if [[ "${LOADED_TOKEN}" == *"ghs_real_lib_integration_token"* ]]; then
+  pass "Integration test: Real github_app_auth reads .env.github-app (RV064 P3-3)"
 else
-  fail "Load token from environment variables without file" "Token: ${LOADED_TOKEN}"
+  fail "Integration test: Real github_app_auth reads .env.github-app (RV064 P3-3)" "Token: ${LOADED_TOKEN}"
+fi
+
+# ---------------------------------------------------------------------------
+# Test 19b: load_github_auth - 本物の github_app_auth.py と環境変数 結合テスト (RV064 P3-3)
+# ---------------------------------------------------------------------------
+rm -f .env.github-app
+LOADED_ENV_TOKEN=$(GITHUB_BOT_APP_ID=333333 GITHUB_BOT_INSTALL_ID=444444 GITHUB_APP_PRIVATE_KEY_PATH=./dummy_key.pem \
+  PYTHONPATH="${TEST_ENV}/worktree" python3 -c '
+import os, sys, unittest.mock as mock
+from scripts.lib import github_app_auth
+
+with mock.patch("scripts.lib.github_app_auth.fetch_installation_token", return_value="ghs_real_lib_env_token"):
+    res = github_app_auth.obtain_token(".")
+    assert res.token == "ghs_real_lib_env_token", f"Token: {res.token}, Error: {res.error}"
+    print(res.token)
+' 2>/dev/null || true)
+
+if [[ "${LOADED_ENV_TOKEN}" == *"ghs_real_lib_env_token"* ]]; then
+  pass "Integration test: Real github_app_auth reads env vars without file (RV064 P3-3)"
+else
+  fail "Integration test: Real github_app_auth reads env vars without file (RV064 P3-3)" "Token: ${LOADED_ENV_TOKEN}"
 fi
 
 # ---------------------------------------------------------------------------

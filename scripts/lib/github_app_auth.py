@@ -42,7 +42,7 @@ def b64url(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).decode("utf-8").rstrip("=")
 
 
-def resolve_repo_root(start_dir: Path | None = None) -> Path:
+def resolve_repo_root(start_dir: Path | str | None = None) -> Path:
     """カレントディレクトリまたは指定パスからリポジトリルートを解決する.
 
     1. git rev-parse --show-toplevel を試行
@@ -50,7 +50,7 @@ def resolve_repo_root(start_dir: Path | None = None) -> Path:
     2. 失敗した場合は start_dir から親方向へ .git または .env.github-app/.env.github を探索
     3. 見つからなければ start_dir (または cwd) を返す
     """
-    base = (start_dir if start_dir is not None else Path.cwd()).resolve()
+    base = Path(start_dir).resolve() if start_dir is not None else Path.cwd().resolve()
 
     try:
         proc = subprocess.run(
@@ -168,7 +168,7 @@ def _parse_env_line(line: str) -> tuple[str, str] | None:
     return k, v
 
 
-def load_bot_config(repo_root: Path | None = None) -> BotConfig | None:
+def load_bot_config(repo_root: Path | str | None = None) -> BotConfig | None:
     """環境変数または設定ファイルから Bot 設定を読み込む.
 
     優先順位:
@@ -402,7 +402,7 @@ def fetch_installation_token(
     return token
 
 
-def obtain_token(repo_root: Path | None = None) -> AuthResult:
+def obtain_token(repo_root: Path | str | None = None) -> AuthResult:
     """Bot 設定があればトークンを取得し、なければ個人認証モードとする."""
     try:
         config = load_bot_config(repo_root)

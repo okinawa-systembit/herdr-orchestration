@@ -27,16 +27,18 @@ check_tamper() {
     exit 1
   fi
 
-  # origin/main に本スクリプトが存在しない場合 (新規導入ブランチ作業中)
-  if ! git -C "${REPO_ROOT}" cat-file -e origin/main:scripts/review-sync.sh >/dev/null 2>&1; then
-    echo "警告: origin/main に scripts/review-sync.sh がまだ存在しません (新規導入中)。" >&2
+  # origin/main に本スクリプトおよびライブラリが存在するか確認 (新規導入ブランチ作業中)
+  if ! git -C "${REPO_ROOT}" cat-file -e origin/main:scripts/review-sync.sh >/dev/null 2>&1 || \
+     ! git -C "${REPO_ROOT}" cat-file -e origin/main:scripts/lib/github_app_auth.py >/dev/null 2>&1 || \
+     ! git -C "${REPO_ROOT}" cat-file -e origin/main:scripts/lib/pull_review.py >/dev/null 2>&1; then
+    echo "警告: origin/main に scripts/review-sync.sh または scripts/lib/ がまだ存在しません (新規導入中)。" >&2
     echo "スクリプト開発・検証作業時は ALLOW_REVIEW_SYNC_DEV=1 を指定してください。" >&2
     exit 1
   fi
 
-  # origin/main との差分を検査 (REPO_ROOT 基準)
-  if ! git -C "${REPO_ROOT}" diff --quiet origin/main -- scripts/review-sync.sh 2>/dev/null; then
-    echo "エラー: scripts/review-sync.sh が origin/main と一致しません。" >&2
+  # origin/main との差分を検査 (本体および scripts/lib/ 配下)
+  if ! git -C "${REPO_ROOT}" diff --quiet origin/main -- scripts/review-sync.sh scripts/lib/ 2>/dev/null; then
+    echo "エラー: scripts/review-sync.sh または scripts/lib/ が origin/main と一致しません。" >&2
     echo "git fetch と rebase を確認するか、スクリプト開発作業時は ALLOW_REVIEW_SYNC_DEV=1 を指定してください。" >&2
     exit 1
   fi
@@ -216,13 +218,21 @@ do_check() {
 
 # PR 番号の自動解決
 resolve_pr_number() {
-  local pr_json
-  if ! pr_json="$(gh pr view --json number,url 2>&1)"; then
+  local pr_json pr_err_tmp
+  pr_err_tmp="$(mktemp /tmp/review-pr-err.XXXXXX)"
+  trap 'rm -f "${pr_err_tmp}"' RETURN EXIT
+
+  if ! pr_json="$(gh pr view --json number,url 2>"${pr_err_tmp}")"; then
     echo "エラー: 現在のブランチに対応する PR が見つかりません。" >&2
-    echo "${pr_json}" >&2
+    cat "${pr_err_tmp}" >&2
     echo "gh pr create --draft などで PR を作成してから実行してください。" >&2
+    rm -f "${pr_err_tmp}"
+    trap - RETURN EXIT
     exit 1
   fi
+  rm -f "${pr_err_tmp}"
+  trap - RETURN EXIT
+
   local pr_num
   pr_num="$(python3 -c "import sys, json; print(json.loads(sys.stdin.read()).get('number', ''))" <<< "${pr_json}" 2>/dev/null || true)"
   if [[ -z "${pr_num}" ]]; then
@@ -240,12 +250,14 @@ submit_comment() {
   # 送信前に check を自動実行
   do_check "${DRAFT_FILE}" >/dev/null
 
-  # ラウンド番号の抽出（ドラフト内に指定があれば利用、なければ 1）
+  # メタデータ部（最初の '## ' より前）からラウンド番号を抽出（ドラフト内に指定があれば利用、なければ 1）
+  local metadata
+  metadata="$(awk '/^## /{exit} {print}' "${DRAFT_FILE}")"
   local round=1
   local round_match
-  round_match="$(grep -E "^[[:space:]]*-?[[:space:]]*Round:[[:space:]]*[0-9]+" "${DRAFT_FILE}" | head -n 1 || true)"
+  round_match="$(echo "${metadata}" | grep -E "^[[:space:]]*-?[[:space:]]*Round:[[:space:]]*[0-9]+" | head -n 1 || true)"
   if [[ -n "${round_match}" ]]; then
-    round="$(echo "${round_match}" | grep -o '[0-9]\+')"
+    round="$(echo "${round_match}" | grep -o '[0-9]\+' | head -n 1)"
   fi
 
   # 送信用一時ファイルの作成（マーカー付与）
@@ -265,14 +277,22 @@ EOF
     gh pr review --comment --body-file "${temp_body}"
   fi
 
-  # 送信成功後の退避
+  # 送信成功後の退避 (同一秒送信時の上書き防止)
   local timestamp
-  timestamp="$(date +%Y%m%d-%H%M%S)"
-  mv "${DRAFT_FILE}" "${SENT_DIR}/${timestamp}-${ROLE}-draft.md"
+  timestamp="$(date +%Y%m%d-%H%M%S)-$$"
+  local dest="${SENT_DIR}/${timestamp}-${ROLE}-draft.md"
+  if [[ -e "${dest}" ]]; then
+    local seq=1
+    while [[ -e "${SENT_DIR}/${timestamp}-${ROLE}-draft.${seq}.md" ]]; do
+      seq=$((seq + 1))
+    done
+    dest="${SENT_DIR}/${timestamp}-${ROLE}-draft.${seq}.md"
+  fi
+  mv "${DRAFT_FILE}" "${dest}"
   rm -f "${temp_body}"
   trap - EXIT
 
-  echo "OK: 送信が完了し、ドラフトを ${SENT_DIR}/${timestamp}-${ROLE}-draft.md に退避しました。"
+  echo "OK: 送信が完了し、ドラフトを ${dest} に退避しました。"
 }
 
 # 取り込み処理共通
@@ -294,36 +314,37 @@ pull_content() {
     opposite_role="reviewer"
   fi
 
-  local comments_tmp inlines_tmp
+  local comments_tmp inlines_tmp gh_err_tmp
   comments_tmp="$(mktemp /tmp/review-comments.XXXXXX)"
   inlines_tmp="$(mktemp /tmp/review-inlines.XXXXXX)"
-  trap 'rm -f "${comments_tmp}" "${inlines_tmp}"' RETURN EXIT
+  gh_err_tmp="$(mktemp /tmp/review-gh-err.XXXXXX)"
+  trap 'rm -f "${comments_tmp}" "${inlines_tmp}" "${gh_err_tmp}"' RETURN EXIT
 
   if [[ "${is_issue}" == "1" ]]; then
-    if ! gh issue view "${target_id}" --json comments > "${comments_tmp}" 2>&1; then
+    if ! gh issue view "${target_id}" --json comments > "${comments_tmp}" 2>"${gh_err_tmp}"; then
       echo "エラー: Issue #${target_id} の取得に失敗しました:" >&2
-      cat "${comments_tmp}" >&2
+      cat "${gh_err_tmp}" >&2
       exit 1
     fi
     echo "[]" > "${inlines_tmp}"
   else
-    if ! gh pr view "${target_id}" --json comments,reviews > "${comments_tmp}" 2>&1; then
+    if ! gh pr view "${target_id}" --json comments,reviews > "${comments_tmp}" 2>"${gh_err_tmp}"; then
       echo "エラー: PR #${target_id} の取得に失敗しました:" >&2
-      cat "${comments_tmp}" >&2
+      cat "${gh_err_tmp}" >&2
       exit 1
     fi
 
     # インラインレビューコメントの取得
     local repo_slug
-    if ! repo_slug="$(gh repo view --json nameWithOwner -q .nameWithOwner 2>&1)"; then
+    if ! repo_slug="$(gh repo view --json nameWithOwner -q .nameWithOwner 2>"${gh_err_tmp}")"; then
       echo "エラー: リポジトリ情報の取得に失敗しました:" >&2
-      echo "${repo_slug}" >&2
+      cat "${gh_err_tmp}" >&2
       exit 1
     fi
 
-    if ! gh api --paginate --slurp "repos/${repo_slug}/pulls/${target_id}/comments" > "${inlines_tmp}" 2>&1; then
+    if ! gh api --paginate --slurp "repos/${repo_slug}/pulls/${target_id}/comments" > "${inlines_tmp}" 2>"${gh_err_tmp}"; then
       echo "エラー: PR #${target_id} のインラインコメント取得に失敗しました:" >&2
-      cat "${inlines_tmp}" >&2
+      cat "${gh_err_tmp}" >&2
       exit 1
     fi
   fi
@@ -346,7 +367,7 @@ pull_content() {
     exit 1
   fi
 
-  rm -f "${comments_tmp}" "${inlines_tmp}"
+  rm -f "${comments_tmp}" "${inlines_tmp}" "${gh_err_tmp}"
   trap - RETURN EXIT
 }
 

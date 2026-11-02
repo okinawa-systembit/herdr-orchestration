@@ -35,7 +35,7 @@ class TestReviewSync(unittest.TestCase):
             0,
             f"test_review_sync.sh が失敗しました (code: {proc.returncode}):\n{proc.stderr}\n{proc.stdout}",
         )
-        self.assertIn("Results: 28 passed, 0 failed", proc.stdout)
+        self.assertRegex(proc.stdout, r"Results: \d+ passed, 0 failed")
 
 
 if __name__ == "__main__":

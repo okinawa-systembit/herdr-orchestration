@@ -78,8 +78,13 @@ def parse_and_generate_draft(
     # ISO 8601 時刻文字列で昇順ソート (時系列順)
     all_items.sort(key=lambda x: str(x.get("created", "")))
 
-    marker_pattern = re.compile(
-        rf"<!--\s*review-sync\s+role={re.escape(opposite_role)}\s+round=([0-9]+)\s*-->"
+    # 相手ロールの正規マーカー (本文の先頭に配置されていること)
+    opposite_marker_pattern = re.compile(
+        rf"^\s*<!--\s*review-sync\s+role={re.escape(opposite_role)}\s+round=([0-9]+)\s*-->"
+    )
+    # 任意の review-sync 正規マーカー (先頭行に配置されているもの)
+    any_marker_pattern = re.compile(
+        r"^\s*<!--\s*review-sync\s+role=(?:reviewer|reviewee)\s+round=[0-9]+\s*-->"
     )
 
     latest_opposite_body = ""
@@ -88,11 +93,12 @@ def parse_and_generate_draft(
 
     for item in all_items:
         body = item["body"]
-        m = marker_pattern.search(body)
+        m = opposite_marker_pattern.match(body)
         if m:
             latest_opposite_body = body
             latest_round = int(m.group(1))
-        elif not body.startswith("<!-- review-sync"):
+        elif not any_marker_pattern.match(body):
+            # 先頭に正規マーカーを持たないコメント（人間コメント、インラインコメント、本文中でのマーカー引用等）
             if body.strip():
                 author_str = f" (@{item['author']})" if item.get("author") else ""
                 human_comments.append(f"{body.strip()}{author_str}")
@@ -102,7 +108,7 @@ def parse_and_generate_draft(
     target_file.parent.mkdir(parents=True, exist_ok=True)
     with target_file.open("w", encoding="utf-8") as f:
         if latest_opposite_body:
-            clean_body = marker_pattern.sub("", latest_opposite_body).strip()
+            clean_body = opposite_marker_pattern.sub("", latest_opposite_body).strip()
             lines = clean_body.split("\n")
             out_lines: list[str] = []
             for line_str in lines:

@@ -132,6 +132,55 @@ class TestPullReview(unittest.TestCase):
         self.assertIn("一般コメント (@human_user)", content)
         self.assertIn("[scripts/foo.sh:42] ここを修正してください", content)
 
+    def test_marker_in_middle_of_body_treated_as_human_comment(self) -> None:
+        """本文途中でマーカーが引用された投稿がドラフトを上書きせず人間コメントに分類されること (RV064 P2-2 回帰テスト)."""
+        comments_data = {
+            "comments": [
+                {
+                    "body": (
+                        "<!-- review-sync role=reviewer round=1 -->\n"
+                        "# 正規レビュアー指摘\n\n"
+                        "- Role: reviewer\n"
+                        "- Round: 1\n"
+                        "- Status: Changes requested\n\n"
+                        "## Findings\n\n"
+                        "F001: 正規の指摘内容\n"
+                    ),
+                    "createdAt": "2026-10-30T10:00:00Z",
+                    "author": {"login": "reviewer_bot"},
+                },
+                {
+                    "body": (
+                        "quoting: <!-- review-sync role=reviewer round=7 -->\n"
+                        "本文途中にマーカーが含まれる第三者コメント\n"
+                    ),
+                    "createdAt": "2026-10-30T10:05:00Z",
+                    "author": {"login": "another_user"},
+                },
+            ],
+            "reviews": [],
+        }
+
+        parse_and_generate_draft(
+            target_file=self.target_file,
+            role="reviewee",
+            opposite_role="reviewer",
+            is_issue=False,
+            target_id="101",
+            comments_reviews_data=comments_data,
+            inline_comments_data=[],
+        )
+
+        content = self.target_file.read_text(encoding="utf-8")
+        # 正規指摘の内容がドラフト本文として保持されていること (round=7 ではなく round=1 由来)
+        self.assertIn("- Role: reviewee", content)
+        self.assertIn("- Round: 1", content)
+        self.assertIn("F001: 正規の指摘内容", content)
+        # 本文途中にマーカーが含まれる投稿は Human & Inline Comments 側に隔離されること
+        self.assertIn("## Human & Inline Comments", content)
+        self.assertIn("quoting: <!-- review-sync role=reviewer round=7 -->", content)
+        self.assertIn("(@another_user)", content)
+
     def test_cli_main_success(self) -> None:
         """CLI エントリポイントの正常動作検証."""
         comments_json = self.tmp_path / "comments.json"
