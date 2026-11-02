@@ -19,7 +19,7 @@ GitHub App 自動認証基盤（Phase 1）および安全な連携ラッパー�
 先行レビュー（RV063 内部レビュー記録 §3 P2-1）において、親 Issue #85 の目的と現行スキル規約の間に以下の文言上の衝突が指摘された：
 
 1. **親 Issue #85 の目的の記述**:
-   - 「同一アカウント制約の解消: エージェントが Bot として動作することで、同個人アカウント運用における自 PR 制限（Approve 不可等）を回避可能にする。」
+   - 「同一アカウント制約の解消: エージェントが Bot として動作することで、同一個人アカウント運用における自 PR 制限（Approve 不可等）を回避可能にする。」
 2. **現行の `.agents/skills/repo-review/SKILL.md`（L299）の安全制約**:
    - 「AI エージェントによる `--approve` および `gh pr merge` は実行禁止。コード確認、正式なレビュー承認（Approve）、およびマージは人間が担当する。」
 
@@ -71,7 +71,8 @@ GitHub App 自動認証基盤（Phase 1）および安全な連携ラッパー�
 ### 2.3 ブランチ保護設定とコミット push 主体に関する留意事項
 
 ブランチ保護ルールで「Require approval of the most recent reviewable push」が有効化されている場合、最後にコミットを push した人物のアカウントによる Approve は無効（カウント対象外）となる。
-開発者が自アカウントで git push を行った場合、PR 作成者が Bot であっても人間の Approve が無効化される可能性があるため、CI/CD 運用や push の主体（Bot トークン経由の push または保護ルールの設定項目）に留意する。
+開発者が自アカウントで git push を行った場合、PR 作成者が Bot であってもその開発者による Approve が無効化される可能性がある。
+§3 の通り GitHub App の権限は `Contents: Read-only`（push 不可）であるため、本制約への対策としては「該当保護ルール項目の無効化」、または「コードを push した開発者とは別のレビュワーが Approve を担当する運用」を採用する。
 
 ---
 
@@ -105,14 +106,20 @@ Phase 2 で実装された `scripts/review-sync.sh` は、本規約に完全に�
 
 ### 4.1 Bot トークンを利用した PR 作成手順（参考運用）
 
-エージェントが Bot を主体として PR を作成する場合は、`github_app_auth.py` より発行された Installation Access Token を `GH_TOKEN` に設定して `gh pr create` を実行する：
+エージェントが Bot を主体として PR を作成する場合は、`github_app_auth.py` より発行された Installation Access Token を `GH_TOKEN` に設定して `gh pr create` を実行する。認証エラー時は個人認証へ暗黙にフォールバックさせず、直ちに停止する：
 
 ```bash
 # Bot トークンによる PR 作成 (PR 作成者を <app-slug>[bot] とする)
-token="$(python3 -I scripts/lib/github_app_auth.py)"
+token=""
+if ! token="$(python3 -I scripts/lib/github_app_auth.py)"; then
+  echo "エラー: Bot 認証に失敗しました。設定を確認してください。" >&2
+  exit 1
+fi
+
 if [[ -n "${token}" ]]; then
   GH_TOKEN="${token}" gh pr create --draft --title "..." --body "..."
 else
+  echo "警告: GitHub App 設定が存在しません。個人認証で PR を作成すると、自 PR 制限により自分自身での Approve ができなくなります。" >&2
   gh pr create --draft --title "..." --body "..."
 fi
 ```
@@ -154,6 +161,6 @@ fi
 親 Issue #85 の「目的 2」を以下の通り明確化し、誤解を解消する：
 
 - **改訂前**:
-  - `同一アカウント制約の解消: エージェントが Bot として動作することで、同個人アカウント運用における自 PR 制限（Approve 不可等）を回避可能にする。`
+  - `同一アカウント制約の解消: エージェントが Bot として動作することで、同一個人アカウント運用における自 PR 制限（Approve 不可等）を回避可能にする。`
 - **改訂後**:
   - `同一アカウント制約の解消: エージェントが Bot として PR 作成・操作を行うことで、PR 作成者と開発者本人の同一視を回避し、ブランチ保護ルール下において人間の開発者が自アカウントで安全に公式 Approve を実施可能にする（エージェント自身の Approve 禁止規約は堅持）。`
