@@ -225,6 +225,38 @@ def cmd_request_create(args: argparse.Namespace) -> int:
             tier = args.tier.upper()
             now_iso = datetime.now(timezone.utc).isoformat()
 
+            extra_instructions = ""
+            if tier == "WIDE":
+                extra_instructions = """
+## ワイドレビュー（総点検 / 全体点検 / 総チェック）確認事項
+
+リポジトリ全体を横断し、以下のチェックリスト（references.md §ワイドレビュー）を総点検してください:
+- [ ] A-1: 設計書ステータス形式の確認（npm run check:docs-status）と Issue/PR/タグ実績の突合
+- [ ] A-2: 単一正本と目次の整合性（AGENTS.md、目次に重複記述がないか）
+- [ ] A-3: CLI usage とドキュメント（--help、public-cli.md、SKILL、README）の一致
+- [ ] A-4: 相対リンクおよびアンカー（#anchor）の健全性
+- [ ] A-5: バージョン表記の整合性（package.json、SKILL、git tag）
+- [ ] A-6: GitHub Issue・PR の健全性（クローズ漏れ・放置 PR の点検）
+- [ ] A-7: ローカル作業領域の健全性（.inbox、.input の残存ファイル点検）
+- [ ] A-8: 放置 TODO・将来課題の棚卸し
+
+※ 発見された問題は Finding Issue 起票候補として整理し、サマリに記載してください（PR 合否はブロックしません）。
+"""
+            elif tier in ("STANDARD", "DEEP"):
+                extra_instructions = """
+## 差分外波及確認（D-1〜D-3）
+
+- [ ] D-1: PR やコミットが Closes #N を含む場合、該当設計書のステータスが「実装完了」に更新されているか
+- [ ] D-2: CLI コマンドやオプションを変更した場合、--help / ドキュメントと一致しているか
+- [ ] D-3: 文書の見出しや節名を変えた場合、旧い名前がリポジトリ内に残っていないか
+"""
+            elif tier == "LIGHT":
+                extra_instructions = """
+## 差分外波及確認（D-1）
+
+- [ ] D-1: PR やコミットが Closes #N を含む場合、該当設計書のステータスが「実装完了」に更新されているか
+"""
+
             content = f"""# レビュー依頼書 (Review Request)
 
 - **Tier**: {tier}
@@ -235,7 +267,7 @@ def cmd_request_create(args: argparse.Namespace) -> int:
 ## レビュー対象・概要
 
 {args.summary or '最新の変更内容についてのレビューを依頼します。'}
-
+{extra_instructions}
 ## 指示事項
 
 - レビュー結果は `repo-review-helper record-save` で保存し、`result-submit` の `result.ref` に指定してください。
@@ -408,7 +440,7 @@ def build_parser() -> argparse.ArgumentParser:
     # request-create
     p_req = subparsers.add_parser("request-create", help="Create a review request file in .inbox")
     p_req.add_argument("--worktree", help="Path to worktree (default: cwd)")
-    p_req.add_argument("--tier", choices=["LIGHT", "STANDARD", "DEEP"], default="STANDARD", help="Review tier")
+    p_req.add_argument("--tier", choices=["LIGHT", "STANDARD", "DEEP", "WIDE"], default="STANDARD", help="Review tier")
     p_req.add_argument("--target-commit", help="Commit SHA being reviewed (default: HEAD)")
     p_req.add_argument("--summary", help="Review summary / instructions")
     p_req.add_argument("--output-token", action="store_true", help="Print only filename token")
