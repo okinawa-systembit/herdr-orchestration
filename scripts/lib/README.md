@@ -111,3 +111,6 @@ python3 scripts/lib/pull_review.py <target_file> <role> <opposite_role> <is_issu
   - `git ls-files --others --exclude-standard -- scripts/review-sync.sh scripts/lib/` により、`scripts/lib/` 配下に未追跡ファイル（悪意のあるシャドウモジュール等）が存在しないかを検査します。
   - Python スクリプト実行時には常に `-I`（Isolated モード）を付与し、カレントディレクトリやスクリプトディレクトリからの標準ライブラリの誤読み込み（シャドーイング）を防止します。
   - スクリプト開発時や検証作業時は、`ALLOW_REVIEW_SYNC_DEV=1` を指定することでこれらの検査を一時的にバイパス可能です。
+- **ガードレールの境界と前提事項**:
+  - `REPO_ROOT/.venv`（仮想環境）が存在する場合、ラッパーは暗黙にその Python インタプリタを優先して使用します。仮想環境自体の整合性・セキュリティは開発者自身が管理する前提となります。
+  - `git ls-files --exclude-standard` による未追跡ファイル検査は `.gitignore` 対象（`__pycache__` 等）を除外して検査します。Python 呼び出し時に `-I` を徹底することで、スクリプト配置ディレクトリやカレントディレクトリの `sys.path` 追加を抑止し、gitignore 対象ファイルによる標準ライブラリの上書き（シャドーイング）も二重に防御しています。

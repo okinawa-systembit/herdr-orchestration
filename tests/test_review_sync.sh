@@ -220,6 +220,38 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Test 7b: PR 自動解決 - カレントディレクトリに追跡外の json.py があってもシャドーイングされず安全に解決できること (RV068 P2-1)
+# ---------------------------------------------------------------------------
+TEST_ENV=$(setup_mock_env "t7b")
+MOCK_LOG="${TEST_ENV}/gh.log"
+cd "${TEST_ENV}/worktree"
+
+# カレントディレクトリに悪意のある json.py を配置
+cat <<'EOF' > json.py
+raise RuntimeError("MALICIOUS_JSON_SHADOW_RAN")
+EOF
+
+DRAFT_PATH="${TEST_ENV}/worktree/.input/review/reviewer-draft.md"
+cat <<'EOF' > "${DRAFT_PATH}"
+# Draft
+- Role: reviewer
+- Round: 1
+- Status: Changes requested
+## Summary
+test summary
+EOF
+
+# comment reviewer を実行（内部で resolve_pr_number が呼ばれる）
+PR_OUTPUT=$(MOCK_GH_LOG="${MOCK_LOG}" PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh comment reviewer 2>&1 || true)
+rm -f json.py
+
+if [[ "${PR_OUTPUT}" == *"OK: 送信が完了し"* ]] && [[ "${PR_OUTPUT}" != *"MALICIOUS_JSON_SHADOW_RAN"* ]]; then
+  pass "resolve_pr_number uses python3 -I and ignores malicious json.py shadow in cwd (RV068 P2-1)"
+else
+  fail "resolve_pr_number uses python3 -I and ignores malicious json.py shadow in cwd (RV068 P2-1)" "Output: ${PR_OUTPUT}"
+fi
+
+# ---------------------------------------------------------------------------
 # Test 8: 未送信ドラフトの保護 - pull 時に既存未送信ドラフトがあれば停止
 # ---------------------------------------------------------------------------
 TEST_ENV=$(setup_mock_env "t8")
