@@ -132,6 +132,48 @@ class TestPullReview(unittest.TestCase):
         self.assertIn("一般コメント (@human_user)", content)
         self.assertIn("[scripts/foo.sh:42] ここを修正してください", content)
 
+    def test_extract_opposite_review_inserts_decision_for_reviewee(self) -> None:
+        """reviewee で pull 時に各指摘見出し (### ...) の直下に Decision 枠が自動展開されること."""
+        comments_data = {
+            "comments": [],
+            "reviews": [
+                {
+                    "body": (
+                        "<!-- review-sync role=reviewer round=1 -->\n"
+                        "# レビュー結果\n\n"
+                        "- Role: reviewer\n"
+                        "- Round: 1\n"
+                        "- Status: Changes requested\n\n"
+                        "## Findings\n\n"
+                        "### P1-1 [Blocking] 重大な不具合\n\n"
+                        "- 問題: ロジック破綻\n\n"
+                        "### P3-1（Non-blocking）軽微な改善\n\n"
+                        "- 問題: typo\n"
+                    ),
+                    "submittedAt": "2026-10-30T10:05:00Z",
+                    "author": {"login": "reviewer_bot"},
+                }
+            ],
+        }
+
+        parse_and_generate_draft(
+            target_file=self.target_file,
+            role="reviewee",
+            opposite_role="reviewer",
+            is_issue=False,
+            target_id="101",
+            comments_reviews_data=comments_data,
+            inline_comments_data=[],
+        )
+
+        content = self.target_file.read_text(encoding="utf-8")
+        self.assertIn("### P1-1 [Blocking] 重大な不具合", content)
+        self.assertIn("- Decision: accept # accept | reject | defer", content)
+        self.assertIn("- レビューイ評価: 同意 # 同意 | 部分同意 | 不同意", content)
+        self.assertIn("### P3-1（Non-blocking）軽微な改善", content)
+        # Decision 枠が 2 箇所に挿入されていること
+        self.assertEqual(content.count("- Decision: accept # accept | reject | defer"), 2)
+
     def test_marker_in_middle_of_body_treated_as_human_comment(self) -> None:
         """本文途中でマーカーが引用された投稿がドラフトを上書きせず人間コメントに分類されること (RV064 P2-2 回帰テスト)."""
         comments_data = {

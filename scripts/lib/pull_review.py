@@ -131,7 +131,7 @@ def parse_and_generate_draft(
             clean_body = opposite_marker_pattern.sub("", latest_opposite_body).strip()
             lines = clean_body.split("\n")
             out_lines: list[str] = []
-            for line_str in lines:
+            for i, line_str in enumerate(lines):
                 if re.match(r"^\s*-?\s*Role:", line_str, re.IGNORECASE):
                     out_lines.append(f"- Role: {role}")
                 elif re.match(r"^\s*-?\s*Round:", line_str, re.IGNORECASE):
@@ -144,6 +144,19 @@ def parse_and_generate_draft(
                     continue
                 else:
                     out_lines.append(line_str)
+                    # role == "reviewee" の場合、各指摘見出し (### ...) の直下に Decision 枠を自動展開
+                    if role == "reviewee" and re.match(r"^###\s+.*", line_str):
+                        has_decision = False
+                        for next_idx in range(i + 1, min(i + 5, len(lines))):
+                            if "Decision:" in lines[next_idx]:
+                                has_decision = True
+                                break
+                            if lines[next_idx].startswith("#"):
+                                break
+                        if not has_decision:
+                            out_lines.append("- Decision: accept # accept | reject | defer")
+                            out_lines.append("- レビューイ評価: 同意 # 同意 | 部分同意 | 不同意")
+                            out_lines.append("- 対応内容 / 理由:")
             f.write("\n".join(out_lines))
         else:
             header_title = f"Issue #{target_id}" if is_issue else f"PR #{target_id}"
@@ -153,8 +166,9 @@ def parse_and_generate_draft(
             if not is_issue:
                 f.write(f"- PR: #{target_id}\n")
             if role == "reviewer":
-                f.write("- Status: Changes requested\n")
-            f.write("\n## Summary\n\n<要約>\n\n## Findings\n\n")
+                f.write("- Status: Changes requested\n\n## Summary\n\n<要約>\n\n## Findings\n\n")
+            else:
+                f.write("\n## 判定に対する応答\n\n## 指摘への対応 (Decision: accept / reject / defer)\n\n")
 
         if human_comments:
             f.write("\n\n## Human & Inline Comments\n\n")

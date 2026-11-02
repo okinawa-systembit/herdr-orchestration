@@ -328,6 +328,14 @@ GitHub を正本とするコードレビュー運用では、以下の手順で 
    - **安全制約（承認とマージの分離）**:
      1. **AI エージェントの禁止事項**: GitHub App (Bot) 認証下であっても、AI エージェントによる GitHub 公式の承認（`gh pr review --approve`）、変更要求（`--request-changes`）、およびマージ（`gh pr merge`）の実行は**厳格に禁止**する。レビューの合意形成は、常に `--comment` 投稿本文の先頭メタデータ（`- Status: Approved` または `- Status: Changes requested`）にて行う（判定との対応表は [references.md#review-status-mapping](references.md#review-status-mapping) 参照）。
      2. **自 PR 制限回避と人間の役割**: エージェントが Bot 主体として PR を作成・操作することにより、開発者本人の個人アカウントとの同一視（自 PR 制限: 422 エラー）が回避される。GitHub 公式の Approve（承認ボタンの押下）および PR のマージ操作は、エージェントの合意表明を確認した上で**人間の開発者のみが担当**する（詳細は [docs/reviews/GITHUB_APP_AND_REVIEW_POLICY.md](../../../docs/reviews/GITHUB_APP_AND_REVIEW_POLICY.md) 参照）。
+4. **レビューイ対応ワークフロー（指摘への対応・回答投稿・再レビュー依頼）**:
+   - レビュワーから指摘を受領した際、**いきなりコード修正に走ることを厳禁**とする（手戻りや別不具合の誘発、PR 肥大化を防止するため、以下の必須 6 ステップを厳守する。詳細は [references.md#reviewee-response-workflow](references.md#reviewee-response-workflow) 参照）：
+     1. **ドラフト取り込み**: `bash scripts/review-sync.sh pull reviewee` で最新レビューを取り込む（各指摘見出し直下に Decision 枠が自動展開される）。
+     2. **事前評価（コード修正厳禁）**: 各指摘を客観的に評価し、「同意 / 部分同意 / 不同意」および Decision（`accept` / `reject` / `defer`）を策定する。この段階でコードを 1 行も修正してはならない。
+     3. **チャット提示（必須・トリアージ）**: 人間（利用者）へチャットで各指摘の評価・Decision 案・代替案を提示する。
+     4. **人間との合意・方針確定**: 人間からの合意・指示を得て対応方針を確定する。
+     5. **修正の実施（`accept` のみ）**: 合意された `accept` の項目のみコード修正を行い、テスト（`npm run test:orchestrator`）および `npm run format:md && npm run check:md` で検証する。`reject` や `defer` の項目はコード変更しない。
+     6. **回答投稿と再レビュー依頼**: `.input/review/reviewee-draft.md` を完成させ、`bash scripts/review-sync.sh comment reviewee` で投稿後、レビュワーへ再レビューを依頼する（sync handoff）。
 
 ### B. 初回 20 Scope レビュー手順
 
@@ -363,11 +371,14 @@ GitHub API の一時停止や認証エラー時は、ローカルの `repo-revie
 
 ## Requester — 「レビュー結果の確認 / レビュー対応」
 
-[requester-receive.md](../../../skills/herdr-orchestrator/references/requester-receive.md) に従い `task-status` / `task-result` で terminal を確認後:
+[requester-receive.md](../../../skills/herdr-orchestrator/references/requester-receive.md) に従い `task-status` / `task-result` で terminal を確認後、以下のレビューイ対応標準ワークフローに従って対応する（即時修正厳禁）：
 
-1. `result.ref`（`docs/reviews/internal/<instance-id>/RVNNN.md`）を正本として指摘対応。
-2. 人間チャットへ [references.md#human-report](references.md#human-report) 形式で報告。
-3. **コミット・プッシュの先走り禁止（責務境界の厳守）**:
+1. **結果の確認**: `result.ref`（`docs/reviews/internal/<instance-id>/RVNNN.md`）を正本として指摘内容と判定を確認。
+2. **事前評価（即時修正禁止）**: 各指摘を客観的に評価し、「同意 / 部分同意 / 不同意」および Decision（`accept` / `reject` / `defer`）を策定する（[references.md#reviewee-response-workflow](references.md#reviewee-response-workflow) 参照）。**この段階でコードを 1 行も修正してはならない**。
+3. **人間チャットへの事前トリアージ提示**: 人間へ [references.md#reviewee-response-workflow](references.md#reviewee-response-workflow) 形式で各指摘の評価・Decision 案を提示し合意を得る。
+4. **修正の実施（`accept` のみ）**: 人間と合意した `accept` の項目のみ修正を実施し、テストで検証する。
+5. **人間チャットへ対応完了報告**: [references.md#human-report](references.md#human-report) 形式で報告。
+6. **コミット・プッシュの先走り禁止（責務境界の厳守）**:
    - レビュー対応完了および人間報告の時点で**必ず処理を停止する**。
    - **Git のコミット・プッシュ等の永続化・リモート反映操作は、利用者の明示的な指示（例：「コミット＆プッシュして」）を得るまで決して実行してはならない**。
 
