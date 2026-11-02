@@ -187,7 +187,18 @@ else
 fi
 git checkout -- scripts/lib/github_app_auth.py
 
-# 6-4: ALLOW_REVIEW_SYNC_DEV=1 でバイパスできること
+# 6-4: scripts/lib/ 配下に未追跡ファイルが存在する場合も検知して停止すること (RV065 P3-1)
+echo "print('shadow')" > scripts/lib/untracked_module.py
+
+ERR_MSG_UNTRACKED=$(bash scripts/review-sync.sh check reviewer 2>&1 || true)
+if [[ "${ERR_MSG_UNTRACKED}" == *"未追跡のファイルが存在します"* ]]; then
+  pass "Tamper detection stops when untracked files exist in scripts/lib (RV065 P3-1)"
+else
+  fail "Tamper detection stops when untracked files exist in scripts/lib (RV065 P3-1)" "Output: ${ERR_MSG_UNTRACKED}"
+fi
+rm -f scripts/lib/untracked_module.py
+
+# 6-5: ALLOW_REVIEW_SYNC_DEV=1 でバイパスできること
 ERR_MSG_BYPASS=$(ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh check reviewer 2>&1 || true)
 if [[ "${ERR_MSG_BYPASS}" != *"origin/main と一致しません"* && "${ERR_MSG_BYPASS}" == *"ドラフトファイルが存在しない"* ]]; then
   pass "Tamper detection bypassed with ALLOW_REVIEW_SYNC_DEV=1"

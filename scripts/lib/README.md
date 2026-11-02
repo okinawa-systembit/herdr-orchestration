@@ -108,4 +108,6 @@ python3 scripts/lib/pull_review.py <target_file> <role> <opposite_role> <is_issu
   - 共有ライブラリ: `scripts/lib/` 配下（`github_app_auth.py`, `pull_review.py` 等）
 - **検査ロジック**:
   - `origin/main` に対する `git diff --quiet origin/main -- scripts/review-sync.sh scripts/lib/` を実行し、未マージの改変や不正なコード混入がないかを検査します。
-  - スクリプト開発時や検証作業時は、`ALLOW_REVIEW_SYNC_DEV=1` を指定することでこの検査を一時的にバイパス可能です。
+  - `git ls-files --others --exclude-standard -- scripts/review-sync.sh scripts/lib/` により、`scripts/lib/` 配下に未追跡ファイル（悪意のあるシャドウモジュール等）が存在しないかを検査します。
+  - Python スクリプト実行時には常に `-I`（Isolated モード）を付与し、カレントディレクトリやスクリプトディレクトリからの標準ライブラリの誤読み込み（シャドーイング）を防止します。
+  - スクリプト開発時や検証作業時は、`ALLOW_REVIEW_SYNC_DEV=1` を指定することでこれらの検査を一時的にバイパス可能です。

@@ -42,6 +42,16 @@ check_tamper() {
     echo "git fetch と rebase を確認するか、スクリプト開発作業時は ALLOW_REVIEW_SYNC_DEV=1 を指定してください。" >&2
     exit 1
   fi
+
+  # 未追跡 (untracked) ファイルの存在を検査 (scripts/lib/ 配下への不正モジュール混入防止)
+  local untracked_files
+  untracked_files="$(git -C "${REPO_ROOT}" ls-files --others --exclude-standard -- scripts/review-sync.sh scripts/lib/ 2>/dev/null || true)"
+  if [[ -n "${untracked_files}" ]]; then
+    echo "エラー: scripts/review-sync.sh または scripts/lib/ に未追跡のファイルが存在します:" >&2
+    echo "${untracked_files}" >&2
+    echo "不要なファイルを削除するか、スクリプト開発作業時は ALLOW_REVIEW_SYNC_DEV=1 を指定してください。" >&2
+    exit 1
+  fi
 }
 
 check_tamper
@@ -126,7 +136,7 @@ load_github_auth() {
   local token=""
   local auth_rc=0
   if [[ -f "${auth_script}" ]]; then
-    token="$("${python_bin}" "${auth_script}" "${REPO_ROOT}" 2>"${err_file}")" || auth_rc=$?
+    token="$("${python_bin}" -I "${auth_script}" "${REPO_ROOT}" 2>"${err_file}")" || auth_rc=$?
   else
     auth_rc=1
     echo "ERROR: 認証スクリプトが見つかりません: ${auth_script}" >"${err_file}"
@@ -356,7 +366,7 @@ pull_content() {
   fi
 
   local pull_script="${REPO_ROOT}/scripts/lib/pull_review.py"
-  if ! "${python_bin}" "${pull_script}" \
+  if ! "${python_bin}" -I "${pull_script}" \
       "${DRAFT_FILE}" \
       "${ROLE}" \
       "${opposite_role}" \
