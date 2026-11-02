@@ -4,6 +4,9 @@
 
 set -euo pipefail
 
+# 外部環境変数の影響を排除
+unset ALLOW_REVIEW_SYNC_DEV || true
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TARGET_SCRIPT="${SCRIPT_DIR}/scripts/review-sync.sh"
 
@@ -57,6 +60,10 @@ elif [[ "$*" == *"pr review --comment --body-file"* ]]; then
     fi
   done
   exit "${MOCK_GH_EXIT:-0}"
+elif [[ "$*" == *"pr create"* ]]; then
+  echo "mock-pr-create: GH_TOKEN=${GH_TOKEN:-none} args=$*" >> "${MOCK_GH_LOG:-/dev/null}"
+  echo "https://github.com/example/repo/pull/123"
+  exit 0
 elif [[ "$*" == *"issue comment"* ]]; then
   for arg in "$@"; do
     if [[ -f "$arg" ]]; then
@@ -812,7 +819,50 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Test 23: Python 認証モジュール・ドラフト生成モジュールの単体テスト実行
+# Test 23: pr-create - Bot トークンを利用して gh pr create を透過呼び出しすること
+# ---------------------------------------------------------------------------
+TEST_ENV=$(setup_mock_env "t23")
+cd "${TEST_ENV}/worktree"
+
+# モック github_app_auth.py (トークン出力)
+cat <<'EOF' > "${TEST_ENV}/worktree/scripts/lib/github_app_auth.py"
+import sys
+print("ghs_mock_bot_token_for_pr_create")
+sys.exit(0)
+EOF
+
+MOCK_LOG="${TEST_ENV}/gh.log"
+OUTPUT=$(MOCK_GH_LOG="${MOCK_LOG}" PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh pr-create --title "Test PR" --body "Test Body" 2>&1 || true)
+
+if grep -q "mock-pr-create: GH_TOKEN=ghs_mock_bot_token_for_pr_create args=pr create --title Test PR --body Test Body" "${MOCK_LOG}" 2>/dev/null; then
+  pass "pr-create sets GH_TOKEN to bot token and forwards arguments to gh pr create"
+else
+  fail "pr-create sets GH_TOKEN to bot token" "Log: $(cat "${MOCK_LOG}" 2>/dev/null || echo 'no log'), Output: ${OUTPUT}"
+fi
+
+# ---------------------------------------------------------------------------
+# Test 24: pr-create - GitHub App 設定なし時に警告を出力すること
+# ---------------------------------------------------------------------------
+TEST_ENV=$(setup_mock_env "t24")
+cd "${TEST_ENV}/worktree"
+
+# トークンなし（個人認証モード）
+cat <<'EOF' > "${TEST_ENV}/worktree/scripts/lib/github_app_auth.py"
+import sys
+sys.exit(0)
+EOF
+
+MOCK_LOG="${TEST_ENV}/gh.log"
+OUTPUT=$(MOCK_GH_LOG="${MOCK_LOG}" PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh pr-create --title "Personal PR" 2>&1 || true)
+
+if [[ "${OUTPUT}" == *"警告: GitHub App 設定が存在しません"* ]] && grep -q "mock-pr-create: GH_TOKEN=none args=pr create --title Personal PR" "${MOCK_LOG}" 2>/dev/null; then
+  pass "pr-create warns when GitHub App config is absent and falls back to personal auth"
+else
+  fail "pr-create warns when GitHub App config is absent" "Output: ${OUTPUT}"
+fi
+
+# ---------------------------------------------------------------------------
+# Test 25: Python 認証モジュール・ドラフト生成モジュールの単体テスト実行
 # ---------------------------------------------------------------------------
 if (cd "${SCRIPT_DIR}" && python3 -m unittest tests/test_github_app_auth.py tests/test_pull_review.py) >/dev/null 2>&1; then
   pass "Python modules unit tests passed (github_app_auth, pull_review)"

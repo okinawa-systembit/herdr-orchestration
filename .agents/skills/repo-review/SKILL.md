@@ -281,21 +281,31 @@ GitHub を正本とするコードレビュー運用では、以下の手順で 
 
 ### A. 通常 Pull Request の継続的レビュー手順
 
-1. **差分とメタデータの確認**:
-   ```bash
-   gh pr view <pr_number> --json number,title,baseRefName,headRefOid,commits
-   gh pr diff <pr_number>
-   gh pr checks <pr_number>
-   ```
+0. **Pull Request の作成（Bot 認証）**:
+   - エージェントが PR を作成する際は、自 PR 制限を回避するため `scripts/review-sync.sh pr-create` を使用する（PR 作成者が `<app-slug>[bot]` となり、人間が自アカウントで公式 Approve できるようになる）：
+     ```bash
+     bash scripts/review-sync.sh pr-create --title "..." --body "..."
+     ```
+1. **差分とメタデータの確認・ドラフト取り込み**:
+   - レビュー対象ブランチをチェックアウトし、ドラフトを取り込む（※ PR 番号は現在のブランチから自動解決されるため引数にはロール名のみを指定する）：
+     ```bash
+     bash scripts/review-sync.sh pull reviewer
+     ```
+   - 差分と CI チェックの確認：
+     ```bash
+     gh pr view --json number,title,baseRefName,headRefOid,commits
+     gh pr diff
+     gh pr checks
+     ```
 2. **2段階レビューの実施**:
    - `repo-review` 基準に沿って、第 1 段階（仕様・設計整合性）および第 2 段階（批判的不具合探索）を実施。
-   - 指摘事項（P0〜P3）、総合判定（GO / 要修正 / NO-GO）、未実施検証をまとめた Markdown 結果ファイルを生成。
+   - `.input/review/reviewer-draft.md` を編集し、指摘事項（P0〜P3）、総合判定（GO / 要修正 / NO-GO）、未実施検証を記載。
 3. **レビュー結果の投稿**:
-   - 原則として `--comment` でレビュー結果を投稿する（Blocking 指摘時も `--request-changes` は使用せず、`- Status: Changes requested` を含む `--comment` で表明する）：
+   - レビュー投稿は `scripts/review-sync.sh comment reviewer` を使用する（※ PR 番号は現在のブランチから自動解決されるため引数にはロール名のみを指定する）：
      ```bash
-     gh pr review <pr_number> --comment -F review-result.md
+     bash scripts/review-sync.sh comment reviewer
      ```
-   - レビュー投稿は `scripts/review-sync.sh comment reviewer`（または `--body-file` 指定の `gh pr review --comment`）を使用する。
+   - 原則として `--comment` でレビュー結果を投稿する（Blocking 指摘時も `--request-changes` は使用せず、`- Status: Changes requested` を含む `--comment` で表明する）。
    - **安全制約（承認とマージの分離）**:
      1. **AI エージェントの禁止事項**: GitHub App (Bot) 認証下であっても、AI エージェントによる GitHub 公式の承認（`gh pr review --approve`）、変更要求（`--request-changes`）、およびマージ（`gh pr merge`）の実行は**厳格に禁止**する。レビューの合意形成は、常に `--comment` 投稿本文の先頭メタデータ（`- Status: Approved` または `- Status: Changes requested`）にて行う（判定との対応表は [references.md#review-status-mapping](references.md#review-status-mapping) 参照）。
      2. **自 PR 制限回避と人間の役割**: エージェントが Bot 主体として PR を作成・操作することにより、開発者本人の個人アカウントとの同一視（自 PR 制限: 422 エラー）が回避される。GitHub 公式の Approve（承認ボタンの押下）および PR のマージ操作は、エージェントの合意表明を確認した上で**人間の開発者のみが担当**する（詳細は [docs/reviews/GITHUB_APP_AND_REVIEW_POLICY.md](../../../docs/reviews/GITHUB_APP_AND_REVIEW_POLICY.md) 参照）。

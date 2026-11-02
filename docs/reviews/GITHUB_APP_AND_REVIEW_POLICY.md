@@ -104,28 +104,18 @@ Phase 2 で実装された `scripts/review-sync.sh` は、本規約に完全に�
 3. **機密情報漏洩検査**:
    - 送信前に GitHub トークン（`ghs_` 等）や秘密鍵ヘッダーの混入を機械的にスキャンし遮断。
 
-### 4.1 Bot トークンを利用した PR 作成手順（参考運用）
+### 4.1 Bot トークンを利用した PR 作成手順 (`review-sync.sh pr-create`)
 
-エージェントが Bot を主体として PR を作成する場合は、`github_app_auth.py` より発行された Installation Access Token を `GH_TOKEN` に設定して `gh pr create` を実行する。認証エラー時は個人認証へ暗黙にフォールバックさせず、直ちに停止する：
+エージェントが Bot を主体として PR を作成する場合は、`scripts/review-sync.sh pr-create` を使用する。
+内部で改ざん検知を実施した上で、`github_app_auth.py` より発行された Installation Access Token を `GH_TOKEN` に自動設定して `gh pr create` を安全に呼び出す。認証エラー時は個人認証へ暗黙にフォールバックさせず、直ちに停止する：
 
 ```bash
 # Bot トークンによる PR 作成 (PR 作成者を <app-slug>[bot] とする)
-token=""
-if ! token="$(python3 -I scripts/lib/github_app_auth.py)"; then
-  echo "エラー: Bot 認証に失敗しました。設定を確認してください。" >&2
-  exit 1
-fi
-
-if [[ -n "${token}" ]]; then
-  GH_TOKEN="${token}" gh pr create --draft --title "..." --body "..."
-else
-  echo "警告: GitHub App 設定が存在しません。個人認証で PR を作成すると、自 PR 制限により自分自身での Approve ができなくなります。" >&2
-  gh pr create --draft --title "..." --body "..."
-fi
+bash scripts/review-sync.sh pr-create --title "..." --body "..."
 ```
 
+GitHub App 設定が存在しない環境では、個人認証による自 PR 制限に関する警告を表示した上でフォールバック実行される。
 これにより PR の作成者が Bot となり、ブランチ保護下で人間の開発者が自アカウントから公式 Approve を押すことが可能となる。
-※ 後続フェーズにおいて、必要に応じて `scripts/review-sync.sh pr-create` などのサブコマンドとしてラッパー化を検討する。
 
 ---
 

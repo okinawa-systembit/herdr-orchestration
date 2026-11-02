@@ -89,6 +89,7 @@ def parse_and_generate_draft(
 
     latest_opposite_body = ""
     latest_round = 1
+    has_opposite_marker = False
     human_comments: list[str] = []
 
     for item in all_items:
@@ -97,13 +98,17 @@ def parse_and_generate_draft(
         if m:
             latest_opposite_body = body
             latest_round = int(m.group(1))
+            has_opposite_marker = True
         elif not any_marker_pattern.match(body):
             # 先頭に正規マーカーを持たないコメント（人間コメント、インラインコメント、本文中でのマーカー引用等）
             if body.strip():
                 author_str = f" (@{item['author']})" if item.get("author") else ""
                 human_comments.append(f"{body.strip()}{author_str}")
 
-    next_round = latest_round if role == "reviewee" else latest_round + 1
+    if has_opposite_marker:
+        next_round = latest_round if role == "reviewee" else latest_round + 1
+    else:
+        next_round = 1
 
     target_file.parent.mkdir(parents=True, exist_ok=True)
     with target_file.open("w", encoding="utf-8") as f:

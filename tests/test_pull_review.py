@@ -48,7 +48,7 @@ class TestPullReview(unittest.TestCase):
         content = self.target_file.read_text(encoding="utf-8")
         self.assertIn("# Review Draft: PR #101", content)
         self.assertIn("- Role: reviewer", content)
-        self.assertIn("- Round: 2", content)
+        self.assertIn("- Round: 1", content)
         self.assertIn("- PR: #101", content)
         self.assertIn("- Status: Changes requested", content)
         self.assertIn("## Findings", content)

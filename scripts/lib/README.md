@@ -4,6 +4,21 @@
 
 ---
 
+## 0. review-sync.sh サブコマンド一覧
+
+`scripts/review-sync.sh` は以下のサブコマンドを提供します：
+
+| サブコマンド        | 書式                                            | 説明                                                                          |
+| :------------------ | :---------------------------------------------- | :---------------------------------------------------------------------------- |
+| **`pr-create`**     | `pr-create [gh pr create の引数...]`            | GitHub App (Bot) 認証を利用して PR を安全に作成（自 PR 制限を回避）           |
+| **`pull`**          | `pull <reviewer\|reviewee>`                     | PR から最新レビューを取り込みドラフトに展開（PR 番号はブランチから自動解決）  |
+| **`comment`**       | `comment <reviewer\|reviewee>`                  | ドラフト内容を PR レビューコメントとして送信（PR 番号はブランチから自動解決） |
+| **`check`**         | `check <reviewer\|reviewee>`                    | ドラフトの構文・メタデータ・機密情報を静的検証（オフライン実行）              |
+| **`pull-issue`**    | `pull-issue <reviewer\|reviewee> <issue-no>`    | Issue から指摘・回答を取り込みドラフトに展開                                  |
+| **`comment-issue`** | `comment-issue <reviewer\|reviewee> <issue-no>` | Issue へドラフト内容をコメントとして送信                                      |
+
+---
+
 ## 1. github_app_auth.py: GitHub App 自動認証モジュール
 
 GitHub App の App ID、Installation ID、および秘密鍵（`.pem`）から RS256 JWT を生成し、GitHub REST API より有効期限 1 時間のインストールアクセストークン（`ghs_...`）を発行します。

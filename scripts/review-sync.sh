@@ -67,6 +67,7 @@ usage() {
   bash scripts/review-sync.sh check <reviewer|reviewee>
   bash scripts/review-sync.sh pull-issue <reviewer|reviewee> <issue-number>
   bash scripts/review-sync.sh comment-issue <reviewer|reviewee> <issue-number>
+  bash scripts/review-sync.sh pr-create [gh pr create のオプション...]
 
 説明:
   pull          : PR から最新レビューを取り込み .input/review/<role>-draft.md に展開 (PR番号は自動解決)
@@ -74,37 +75,47 @@ usage() {
   check         : .input/review/<role>-draft.md の構文・メタデータ・機密情報を静的検証 (オフライン実行)
   pull-issue    : Issue から指摘・回答を取り込みドラフトに展開
   comment-issue : Issue へドラフト内容をコメントとして送信
+  pr-create     : GitHub App (Bot) 認証を利用して PR を作成 (自 PR 制限を回避)
 EOF
   exit 1
 }
 
-if [[ $# -lt 2 ]]; then
+if [[ $# -lt 1 ]]; then
   usage
 fi
 
 SUBCOMMAND="$1"
-ROLE="$2"
+shift
 
-# ロール検証
-if [[ "${ROLE}" != "reviewer" && "${ROLE}" != "reviewee" ]]; then
-  echo "エラー: ロールは 'reviewer' または 'reviewee' を指定してください (指定値: ${ROLE})" >&2
-  exit 1
-fi
+ROLE=""
+ISSUE_NUMBER=""
 
-# サブコマンド・引数個数・Issue 番号検証
 case "${SUBCOMMAND}" in
+  pr-create)
+    # PR 作成: 引数はそのまま gh pr create へ渡す
+    ;;
   pull|comment|check)
-    if [[ $# -ne 2 ]]; then
+    if [[ $# -ne 1 ]]; then
       echo "エラー: サブコマンド '${SUBCOMMAND}' は引数 <role> のみ受け付けます (PR番号は自動解決されます)。" >&2
       usage
     fi
+    ROLE="$1"
+    if [[ "${ROLE}" != "reviewer" && "${ROLE}" != "reviewee" ]]; then
+      echo "エラー: ロールは 'reviewer' または 'reviewee' を指定してください (指定値: ${ROLE})" >&2
+      exit 1
+    fi
     ;;
   pull-issue|comment-issue)
-    if [[ $# -ne 3 ]]; then
+    if [[ $# -ne 2 ]]; then
       echo "エラー: サブコマンド '${SUBCOMMAND}' には <role> と <issue-number> の2つの引数が必要です。" >&2
       usage
     fi
-    ISSUE_NUMBER="$3"
+    ROLE="$1"
+    ISSUE_NUMBER="$2"
+    if [[ "${ROLE}" != "reviewer" && "${ROLE}" != "reviewee" ]]; then
+      echo "エラー: ロールは 'reviewer' または 'reviewee' を指定してください (指定値: ${ROLE})" >&2
+      exit 1
+    fi
     if [[ ! "${ISSUE_NUMBER}" =~ ^[0-9]+$ ]]; then
       echo "エラー: Issue 番号には半角数字を指定してください (指定値: ${ISSUE_NUMBER})" >&2
       exit 1
@@ -116,7 +127,9 @@ case "${SUBCOMMAND}" in
     ;;
 esac
 
-DRAFT_FILE="${DRAFT_DIR}/${ROLE}-draft.md"
+if [[ -n "${ROLE}" ]]; then
+  DRAFT_FILE="${DRAFT_DIR}/${ROLE}-draft.md"
+fi
 mkdir -p "${DRAFT_DIR}" "${SENT_DIR}"
 
 # ---------------------------------------------------------------------------
@@ -158,6 +171,7 @@ load_github_auth() {
 
   if [[ -n "${token}" ]]; then
     export GH_TOKEN="${token}"
+    BOT_AUTH_ACTIVE=1
     return 0
   fi
 
@@ -407,5 +421,11 @@ case "${SUBCOMMAND}" in
     ;;
   pull-issue)
     pull_content 1 "${ISSUE_NUMBER}"
+    ;;
+  pr-create)
+    if [[ "${BOT_AUTH_ACTIVE:-0}" -ne 1 ]]; then
+      echo "警告: GitHub App 設定が存在しません。個人認証で PR を作成すると、自 PR 制限により自分自身での Approve ができなくなります。" >&2
+    fi
+    gh pr create "$@"
     ;;
 esac
