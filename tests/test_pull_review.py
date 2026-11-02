@@ -178,6 +178,8 @@ class TestPullReview(unittest.TestCase):
         self.assertIn("F001: 正規の指摘内容", content)
         # 本文途中にマーカーが含まれる投稿は Human & Inline Comments 側に隔離されること
         self.assertIn("## Human & Inline Comments", content)
+        self.assertIn("quoting: <!-- review-sync role=reviewer round=7 -->", content)
+        self.assertIn("(@another_user)", content)
 
     def test_consecutive_pull_increments_round_based_on_own_marker(self) -> None:
         """相手の返信がないまま同一ロールが連続 pull した場合の Round 繰り上げ (RV074 P3-2)."""
