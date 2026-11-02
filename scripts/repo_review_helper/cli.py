@@ -108,8 +108,8 @@ def cmd_init(args: argparse.Namespace) -> int:
             state = create_initial_state(new_instance_id, worktree, counter=0)
             save_state(git_common_dir, state)
 
-            # Ensure .inbox and docs/reviews/internal/<instance-id> are initialized
-            inbox_dir = worktree / ".inbox"
+            # Ensure .input/inbox and docs/reviews/internal/<instance-id> are initialized
+            inbox_dir = worktree / ".input" / "inbox"
             safe_ensure_dir(inbox_dir, 0o700, base_dir=worktree)
 
             internal_root = get_internal_reviews_root(worktree)
@@ -218,7 +218,7 @@ def cmd_request_create(args: argparse.Namespace) -> int:
                 print(f"[ERROR] Worktree mismatch: registered={reg_worktree}, current={worktree}", file=sys.stderr)
                 return 1
 
-            inbox_dir = worktree / ".inbox"
+            inbox_dir = worktree / ".input" / "inbox"
             safe_ensure_dir(inbox_dir, 0o700, base_dir=worktree)
 
             target_commit = args.target_commit or _get_head_commit(worktree)
@@ -237,7 +237,7 @@ def cmd_request_create(args: argparse.Namespace) -> int:
 - [ ] A-4: 相対リンクおよびアンカー（#anchor）の健全性
 - [ ] A-5: バージョン表記の整合性（package.json、SKILL、git tag）
 - [ ] A-6: GitHub Issue・PR の健全性（クローズ漏れ・放置 PR の点検）
-- [ ] A-7: ローカル作業領域の健全性（.inbox、.input の残存ファイル点検）
+- [ ] A-7: ローカル作業領域の健全性（.input の残存ファイル点検）
 - [ ] A-8: 放置 TODO・将来課題の棚卸し
 
 ※ 発見された問題は Finding Issue 起票候補として整理し、サマリに記載してください（PR 合否はブロックしません）。
@@ -438,7 +438,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_status.set_defaults(func=cmd_status)
 
     # request-create
-    p_req = subparsers.add_parser("request-create", help="Create a review request file in .inbox")
+    p_req = subparsers.add_parser("request-create", help="Create a review request file in .input/inbox")
     p_req.add_argument("--worktree", help="Path to worktree (default: cwd)")
     p_req.add_argument("--tier", choices=["LIGHT", "STANDARD", "DEEP", "WIDE"], default="STANDARD", help="Review tier")
     p_req.add_argument("--target-commit", help="Commit SHA being reviewed (default: HEAD)")

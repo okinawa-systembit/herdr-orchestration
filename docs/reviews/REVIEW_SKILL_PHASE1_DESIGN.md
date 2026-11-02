@@ -72,7 +72,7 @@ Phase 1 はこのリポジトリの Herdr 内部レビューの品質基準、�
 | 情報                                     | 正本                                                              | ID・参照                                                                  |
 | ---------------------------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------- |
 | Task、dispatch、result、completion       | [Task Registry](../herdr-orchestrator/03-task-registry.md#sec-6)  | Registry が発行する Task ID                                               |
-| 配送前の依頼                             | Git 除外した `.inbox/`                                            | 一時パストークン (`review-request.<token>.md`)                            |
+| 配送前の依頼                             | Git 除外した `.input/inbox/`                                      | 一時パストークン (`review-request.<token>.md`)                            |
 | 内部レビューの個別記録                   | worktree 内で Git 除外した `docs/reviews/internal/<instance-id>/` | Review ID、初回 Review ID を再利用する Chain ID                           |
 | 内部レビューの一覧                       | `docs/reviews/internal/<instance-id>/INDEX.md`                    | 個別記録から再構築できる派生索引                                          |
 | 採番と排他制御の補助状態                 | Git common directory 内の非公開状態領域                           | 共有 lock (`flock`、固定パス)、instance ID、worktree 実パス、採番カウンタ |
@@ -89,9 +89,9 @@ Phase 1 はこのリポジトリの Herdr 内部レビューの品質基準、�
 
 現行の `handoff` は Task ID を内部で発行してから worker に通知する。公開 CLI に Task ID の事前発行機能はないため、requester が事前に Task ID 命名のファイルを直接作る方式は採らない。Phase 1 の review handoff は必ず repository 固有 helper を経由し、[handoff の契約](../herdr-orchestrator/04-handoff-and-requester.md#sec-7)に従い、次の順序にする。
 
-1. requester は helper（`scripts/repo-review-helper request-create`）を通じて[§4 の共有 lock](#sec-4)下で登録 worktree を確認し、一時ファイルに依頼内容を書き込んでから不可逆な rename / link 等で `.inbox/review-request.<random-token>.md` として原子的に公開する。短い相対パスを `handoff --instruction` に載せる。一時パストークンは配送前の衝突回避用で、Task ID や Review ID の代わりに使用しない。`--instruction` はファイル内容を取り込む機能ではない。
+1. requester は helper（`scripts/repo-review-helper request-create`）を通じて[§4 の共有 lock](#sec-4)下で登録 worktree を確認し、一時ファイルに依頼内容を書き込んでから不可逆な rename / link 等で `.input/inbox/review-request.<random-token>.md` として原子的に公開する。短い相対パスを `handoff --instruction` に載せる。一時パストークンは配送前の衝突回避用で、Task ID や Review ID の代わりに使用しない。`--instruction` はファイル内容を取り込む機能ではない。
 2. worker は通知された Task ID で `task-status` を読み、Registry の instruction、worker、repository identity、worktree を照合する。一致しなければ依頼を読んだだけで作業を開始せず、既存の[worker 受信手順](../../skills/herdr-orchestrator/references/worker-receive.md)に従う。
-3. worker は公開された依頼書（`.inbox/review-request.<token>.md`）を読み、[repo-review Skill](../../.agents/skills/repo-review/SKILL.md) の2段階レビュー、指摘の反証確認、既存保証の確認を実施する。Tier は調査範囲を決めるが品質ゲートの省略には使わない（※ 依頼ファイルを別ディレクトリへ写す中間工程は採らず、公開ファイルを直接参照する）。
+3. worker は公開された依頼書（`.input/inbox/review-request.<token>.md`）を読み、[repo-review Skill](../../.agents/skills/repo-review/SKILL.md) の2段階レビュー、指摘の反証確認、既存保証の確認を実施する。Tier は調査範囲を決めるが品質ゲートの省略には使わない（※ 依頼ファイルを別ディレクトリへ写す中間工程は採らず、公開ファイルを直接参照する）。
 4. [§4](#sec-4)〜[§6](#sec-6) に従って記録・result 登録を行う。requester は sync handoff の終了だけを信用せず、`task-result` と記録を確認する。
 
 仮置き依頼は Registry の terminal result、個別記録と `result.ref` の有効性を確認した後にのみ削除できる。公開前の一時ファイル（書き込み途中の未完成ファイル）は、異常終了後に破棄または隔離してよい。一方、正常に公開済みで Task ID が発行されなかった handoff 失敗や、dispatch/result が不確定な依頼は自動削除せず、手動で確認する。作成後30日の経過は手動確認の目印とし、依頼者または運用管理者が再依頼の有無を確認する。`uncertain` を未配送と断定して自動再送しない。
@@ -201,7 +201,7 @@ submit 後は `task-result` と記録を照合する。不完全な結果ファ�
 
 ## 7. 公開防止と権限
 
-`.inbox/` と `docs/reviews/internal/` はディレクトリ単位で Git 除外する。Git common directory 内の補助状態も Git 管理対象にしない。作成時は実行ユーザーを owner としてディレクトリ 0700、ファイル 0600 とし、アプリ側の追加暗号化は行わない。親ディレクトリ・対象ファイルの owner、symlink、実パスを確認する。既存ファイルの上書き、symlink 経由の許可領域外への書き込みを拒否する。
+`.input/` と `docs/reviews/internal/` はディレクトリ単位で Git 除外する。Git common directory 内の補助状態も Git 管理対象にしない。作成時は実行ユーザーを owner としてディレクトリ 0700、ファイル 0600 とし、アプリ側の追加暗号化は行わない。親ディレクトリ・対象ファイルの owner、symlink、実パスを確認する。既存ファイルの上書き、symlink 経由の許可領域外への書き込みを拒否する。
 
 公開前の自動検査は追跡済みファイルと staged diff の禁止パスを検出し、`git add -f` による強制追加も停止対象とする。別パスに複写された内容は、機密情報らしい文字列を検査し、検出した実値をログへ出さない。Issue、PR、コメント、ブランチ名、コミットメッセージ、差分、CI ログ、添付物は人間が公開前に最終確認する。文脈からの推測可能性は自動検査だけで判断しない。公開可否が不明なら投稿・push を停止する。
 
@@ -211,7 +211,7 @@ CI は push 後の検出であり、公開済み情報の流出防止にはな�
 
 ## 8. 移行と改修対象
 
-実装承認後は新規依頼だけを新方式へ切り替える。旧 `.review-inbox/` の固定ファイルと履歴は読み取り専用で残し、進行中 task の有無を確認してから旧参照を廃止する。過去の検証記録（GitHub Issues）は維持する。旧・新パスを同時に履歴の正本として更新しない。
+旧 `.review-inbox/` は廃止・削除済み（作業領域は `.input/` に一元化）。過去の検証記録（GitHub Issues）は維持する。旧・新パスを同時に履歴の正本として更新しない。
 
 改修対象候補は `.agents/skills/repo-review/SKILL.md` と `references.md`、`.agents/skills/repo-workflow/SKILL.md`、repository 固有の handoff・記録・採番 helper とテスト、`.gitignore`、依頼・応答テンプレート、`AGENTS.md`、`README.md`、公開可能な運用文書である。Skill と運用文書には review handoff の helper 経由を必須として記載する。旧パス参照を検索し、運用上の参照を切り替える。中央 Orchestrator の Task Registry schema、handoff、result、completion、`task-list` は変更しない。
 

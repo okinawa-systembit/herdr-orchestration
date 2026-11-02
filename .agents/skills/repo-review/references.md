@@ -82,7 +82,7 @@ Herdr 上の live 名は環境依存。logical role は handoff の `reviewer` /
 | **A-4** | **相対リンクおよびアンカーの健全性** | `check:md` に加え、主要ドキュメント間の相対リンクおよび `#anchor`（`#sec-N` 等）が実在するか確認する。                                                                                                                                                                                                                                        |
 | **A-5** | **バージョン表記の整合性**           | `package.json`、SKILL 定義、最新 git tag のバージョン表記に矛盾がないか確認する。                                                                                                                                                                                                                                                             |
 | **A-6** | **GitHub Issue・PR の健全性**        | クローズ漏れの Finding Issue、マージ済み機能を参照したままの未解決 Issue、放置された draft PR がないか（読み取り確認のみ、自律的な状態変更は厳禁）。                                                                                                                                                                                          |
-| **A-7** | **ローカル作業領域の健全性**         | `.inbox/` に放置された古い依頼ファイル、`.input/review/` に残存したドラフト、`docs/reviews/internal/INDEX.md` と個別 RV 記録の整合性を確認する。                                                                                                                                                                                              |
+| **A-7** | **ローカル作業領域の健全性**         | `.input/inbox/` に放置された古い依頼ファイル、`.input/review/` に残存したドラフト、`docs/reviews/internal/INDEX.md` と個別 RV 記録の整合性を確認する。                                                                                                                                                                                        |
 | **A-8** | **放置 TODO・将来課題の棚卸し**      | ドキュメントやコード内に放置された「TODO」「将来対応」「チケット」等の記述を棚卸しし、未起票の課題がないか確認する。                                                                                                                                                                                                                          |
 
 ---
@@ -224,7 +224,7 @@ GitHub 管理対象レビュー（Pull Request レビュー等）において、
 
 ## レビュー依頼書（requester）
 
-`scripts/repo-review-helper request-create` により `.inbox/` に原子的生成する。
+`scripts/repo-review-helper request-create` により `.input/inbox/` に原子的生成する。
 
 - 必須項目: 対象リポジトリ、基準ブランチ/コミット、対象コミット/ブランチ（未コミット差分時は HEAD SHA、対象ファイル、変更範囲）、レビュー種別、変更目的、重点確認事項、テスト結果。
 - 再レビュー時: 前回レビューの参照先（RVNNN.md、INDEX.md、または前回主要指摘の要約・引用）を必ず明記する。
@@ -375,7 +375,7 @@ GitHub 管理対象レビュー（Pull Request レビュー等）において、
 sync handoff が prompt 配送するのが正。足りない場合のみ:
 
 ```bash
-herdr agent prompt "${HERDR_WORKSPACE_ID}:p2" '.inbox/<request-file> を読め'
+herdr agent prompt "${HERDR_WORKSPACE_ID}:p2" '.input/inbox/<request-file> を読め'
 ```
 
 ```bash

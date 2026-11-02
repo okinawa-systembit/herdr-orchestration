@@ -833,7 +833,7 @@ class TestCliIntegration(unittest.TestCase):
             "--summary", "Test request",
         ])
         self.assertEqual(code, 0)
-        inbox_dir = self.worktree / ".inbox"
+        inbox_dir = self.worktree / ".input" / "inbox"
         self.assertTrue(inbox_dir.exists())
         req_files = list(inbox_dir.glob("review-request.*.md"))
         self.assertEqual(len(req_files), 1)
@@ -907,11 +907,12 @@ class TestCliIntegration(unittest.TestCase):
         self.assertIn("Stdin Review", rv1.read_text(encoding="utf-8"))
 
     def test_symlink_inbox_rejection_cli(self):
-        """N-2: Reject operation if .inbox is a symlink pointing outside worktree."""
+        """N-2: Reject operation if .input/inbox is a symlink pointing outside worktree."""
         outside_dir = Path(tempfile.mkdtemp())
         try:
             os.chmod(str(outside_dir), 0o755)
-            inbox_symlink = self.worktree / ".inbox"
+            (self.worktree / ".input").mkdir(parents=True, exist_ok=True)
+            inbox_symlink = self.worktree / ".input" / "inbox"
             inbox_symlink.symlink_to(outside_dir)
 
             wt_str = str(self.worktree)
@@ -1035,7 +1036,7 @@ class TestCliIntegration(unittest.TestCase):
         wt_str = str(self.worktree)
         cli_main(["init", "--worktree", wt_str])
 
-        inbox_dir = self.worktree / ".inbox"
+        inbox_dir = self.worktree / ".input" / "inbox"
 
         # 1. STANDARD tier: should include D-1 to D-3
         code = cli_main([
