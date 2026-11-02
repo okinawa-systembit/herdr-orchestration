@@ -455,11 +455,17 @@ def obtain_token(repo_root: Path | None = None) -> AuthResult:
         )
 
     key_file = Path(os.path.expanduser(config.key_path))
+    if not key_file.is_absolute():
+        root = resolve_repo_root(repo_root)
+        key_file = (root / key_file).resolve()
+    else:
+        key_file = key_file.resolve()
+
     if not key_file.is_file():
         return AuthResult(
             token=None,
             mode="bot",
-            error=f"秘密鍵ファイルが見つかりません: {config.key_path}",
+            error=f"秘密鍵ファイルが見つかりません: {config.key_path} (解決先: {key_file})",
         )
 
     try:
