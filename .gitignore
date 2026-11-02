@@ -10,16 +10,10 @@
 __pycache__/
 *.py[cod]
 
-# Orchestrator レビュー inbox（依頼・結果はローカル）
-.review-inbox/review-request.md
-.review-inbox/review-response.md
-.review-inbox/INDEX.md
-
 # 非公開内部レビュー領域（Phase 1）
-.inbox/
 docs/reviews/internal/
 
-# 分散型レビュー作業バッファ（Phase 2）
+# 分散型レビュー作業バッファ・一時ファイル領域（Phase 2 / Issue #108）
 .input/
 
 # GitHub App 認証情報・環境変数ファイル

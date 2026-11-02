@@ -503,7 +503,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Test 12f: check - コードブロック未閉じ（開閉奇数個）のドラフトで停止
+# Test 12f: check - コードブロック未閉じ（開閉奇数個: ```）のドラフトで停止
 # ---------------------------------------------------------------------------
 TEST_ENV=$(setup_mock_env "t12f")
 DRAFT_PATH="${TEST_ENV}/worktree/.input/review/reviewer-draft.md"
@@ -521,9 +521,33 @@ EOF
 cd "${TEST_ENV}/worktree"
 ERR_OUTPUT=$(PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh check reviewer 2>&1 || true)
 if [[ "${ERR_OUTPUT}" == *"コードブロック（\`\`\`）が閉じられていません"* ]]; then
-  pass "Reject draft with unclosed code block"
+  pass "Reject draft with unclosed backtick code block"
 else
-  fail "Reject draft with unclosed code block" "Output: ${ERR_OUTPUT}"
+  fail "Reject draft with unclosed backtick code block" "Output: ${ERR_OUTPUT}"
+fi
+
+# ---------------------------------------------------------------------------
+# Test 12g: check - チルダによるコードブロック未閉じ（開閉奇数個: ~~~）のドラフトで停止 (RV082 P3-2)
+# ---------------------------------------------------------------------------
+TEST_ENV=$(setup_mock_env "t12g")
+DRAFT_PATH="${TEST_ENV}/worktree/.input/review/reviewer-draft.md"
+
+cat <<'EOF' > "${DRAFT_PATH}"
+# Draft
+- Role: reviewer
+- Round: 1
+- Status: Approved
+## Summary
+~~~bash
+チルダブロックが閉じられていない本文
+EOF
+
+cd "${TEST_ENV}/worktree"
+ERR_OUTPUT=$(PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh check reviewer 2>&1 || true)
+if [[ "${ERR_OUTPUT}" == *"コードブロック（~~~）が閉じられていません"* ]]; then
+  pass "Reject draft with unclosed tilde code block (RV082 P3-2)"
+else
+  fail "Reject draft with unclosed tilde code block" "Output: ${ERR_OUTPUT}"
 fi
 
 # ---------------------------------------------------------------------------
@@ -826,6 +850,9 @@ chmod +x scripts/lib/github_app_auth.py
 
 LOADED_TOKEN=$(PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash -c '
 REPO_ROOT="$(pwd)"
+TMP_DIR="${REPO_ROOT}/.input/tmp"
+mkdir -p "${TMP_DIR}"
+source <(sed -n "/^create_temp_file()/,/^}/p" scripts/review-sync.sh)
 source <(sed -n "/^load_github_auth()/,/^}/p" scripts/review-sync.sh)
 load_github_auth
 echo "${GH_TOKEN:-}"
@@ -914,6 +941,9 @@ chmod +x "${TEST_ENV}/bin/gh"
 
 ERR_OUTPUT=$(GITHUB_BOT_APP_ID=111111 GITHUB_BOT_INSTALL_ID=222222 GITHUB_APP_PRIVATE_KEY_PATH=/nonexistent.pem PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash -c '
 REPO_ROOT="$(pwd)"
+TMP_DIR="${REPO_ROOT}/.input/tmp"
+mkdir -p "${TMP_DIR}"
+source <(sed -n "/^create_temp_file()/,/^}/p" scripts/review-sync.sh)
 source <(sed -n "/^load_github_auth()/,/^}/p" scripts/review-sync.sh)
 load_github_auth
 ' 2>&1 || true)
@@ -941,6 +971,9 @@ chmod +x "${TEST_ENV}/bin/gh"
 
 ERR_OUTPUT=$(env -u GH_TOKEN -u GITHUB_TOKEN -u GITHUB_BOT_APP_ID -u GITHUB_APP_ID -u GITHUB_BOT_INSTALL_ID -u GITHUB_APP_INSTALLATION_ID -u GITHUB_APP_PRIVATE_KEY_PATH PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash -c '
 REPO_ROOT="$(pwd)"
+TMP_DIR="${REPO_ROOT}/.input/tmp"
+mkdir -p "${TMP_DIR}"
+source <(sed -n "/^create_temp_file()/,/^}/p" scripts/review-sync.sh)
 source <(sed -n "/^load_github_auth()/,/^}/p" scripts/review-sync.sh)
 load_github_auth
 ' 2>&1 || true)
@@ -1036,6 +1069,100 @@ if grep -q "mock-pr-create: GH_TOKEN=none args=pr create --title Format PR --bod
   pass "pr-create formats body via .input/tmp/ temporary file"
 else
   fail "pr-create formats body via .input/tmp/ temporary file" "Log: $(cat "${MOCK_LOG}" 2>/dev/null || true)"
+fi
+
+# ---------------------------------------------------------------------------
+# Test 27: comment - .prettierignore があっても .input/ 内のドラフトが自動整形されること (RV082 P2-1)
+# ---------------------------------------------------------------------------
+TEST_ENV=$(setup_mock_env "t27")
+cd "${TEST_ENV}/worktree"
+DRAFT_PATH="${TEST_ENV}/worktree/.input/review/reviewer-draft.md"
+LAST_BODY="${TEST_ENV}/last_body.txt"
+
+# .prettierignore に .input/ が指定されている環境を再現
+cat <<'EOF' > "${TEST_ENV}/worktree/.prettierignore"
+.input/
+EOF
+
+# 未整形の Markdown (アスタリスク箇条書きと過剰スペース)
+cat <<'EOF' > "${DRAFT_PATH}"
+# Draft
+- Role: reviewer
+- Round: 1
+- Status: Approved
+## Summary
+*  unformatted item 1
+*  unformatted item 2
+EOF
+
+MOCK_LAST_BODY="${LAST_BODY}" PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh comment reviewer
+
+SENT_FILE=$(compgen -G "${TEST_ENV}/worktree/.input/review/sent/*-reviewer-draft.md" | head -n 1 || true)
+if [[ -f "${SENT_FILE}" ]] && grep -q -- "- unformatted item 1" "${SENT_FILE}"; then
+  pass "Format markdown in .input/ bypassing .prettierignore (RV082 P2-1)"
+else
+  fail "Format markdown in .input/ bypassing .prettierignore" "Sent content: $(cat "${SENT_FILE}" 2>/dev/null || echo 'not found')"
+fi
+
+# ---------------------------------------------------------------------------
+# Test 28: format - 悪意ある prettier.config.mjs が存在しても実行されないこと (RV082 P2-2)
+# ---------------------------------------------------------------------------
+TEST_ENV=$(setup_mock_env "t28")
+cd "${TEST_ENV}/worktree"
+DRAFT_PATH="${TEST_ENV}/worktree/.input/review/reviewer-draft.md"
+MARKER_FILE="${TEST_ENV}/exploit_marker.txt"
+
+# 悪意ある prettier.config.mjs (実行されたら印ファイルを生成)
+cat <<EOF > "${TEST_ENV}/worktree/prettier.config.mjs"
+import fs from 'node:fs';
+fs.writeFileSync('${MARKER_FILE}', 'EXPLOIT_EXECUTED');
+export default {};
+EOF
+
+cat <<'EOF' > "${DRAFT_PATH}"
+# Draft
+- Role: reviewer
+- Round: 1
+- Status: Approved
+## Summary
+summary text
+EOF
+
+PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh comment reviewer >/dev/null 2>&1 || true
+
+if [[ ! -f "${MARKER_FILE}" ]]; then
+  pass "Do not execute repository prettier.config.mjs during format (RV082 P2-2)"
+else
+  fail "Do not execute repository prettier.config.mjs during format" "Marker file was created"
+fi
+
+# ---------------------------------------------------------------------------
+# Test 29: pr-create - --body-file の元ファイルを保護し一時ファイルを残存させないこと (RV082 P3-1)
+# ---------------------------------------------------------------------------
+TEST_ENV=$(setup_mock_env "t29")
+cd "${TEST_ENV}/worktree"
+
+cat <<'EOF' > "${TEST_ENV}/worktree/scripts/lib/github_app_auth.py"
+import sys
+sys.exit(0)
+EOF
+
+ORIGINAL_BODY_FILE="${TEST_ENV}/worktree/my-pr-body.md"
+ORIGINAL_CONTENT="*   original raw content   *"
+printf '%s\n' "${ORIGINAL_CONTENT}" > "${ORIGINAL_BODY_FILE}"
+
+MOCK_LOG="${TEST_ENV}/gh.log"
+OUTPUT=$(env -u GH_TOKEN -u GITHUB_TOKEN MOCK_GH_LOG="${MOCK_LOG}" PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh pr-create --title "Safe PR" --body-file "${ORIGINAL_BODY_FILE}" 2>&1 || true)
+
+# 1. 元ファイルが変更されていないこと
+CURRENT_CONTENT="$(cat "${ORIGINAL_BODY_FILE}")"
+# 2. 一時ファイルが .input/tmp/ に残存していないこと
+REMAINING_TMP_COUNT=$(find "${TEST_ENV}/worktree/.input/tmp" -type f | wc -l)
+
+if [[ "${CURRENT_CONTENT}" == "${ORIGINAL_CONTENT}" ]] && [[ "${REMAINING_TMP_COUNT}" -eq 0 ]]; then
+  pass "Protect original body-file and clean up temporary files on pr-create (RV082 P3-1)"
+else
+  fail "Protect original body-file and clean up temporary files" "Content changed: $(( CURRENT_CONTENT != ORIGINAL_CONTENT )), Remaining tmp files: ${REMAINING_TMP_COUNT}"
 fi
 
 echo "=========================================="
