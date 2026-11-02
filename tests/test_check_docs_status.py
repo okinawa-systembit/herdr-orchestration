@@ -58,6 +58,14 @@ class TestCheckDocsStatus(unittest.TestCase):
         self.assertEqual(len(errors), 1)
         self.assertIn("単一正本原則違反", errors[0])
 
+        # 違反のある AGENTS.md（「実装中」「廃止」「設計承認」混入の検出 P3-1）
+        for word in ["実装中", "廃止", "設計承認"]:
+            with open(agents_path, "w", encoding="utf-8") as f:
+                f.write(f"### 設計書の構成\n\n- [herdr-orchestrator-sample.md](docs/herdr-orchestrator-sample.md): Sample Doc（Issue #1 {word}）\n\n### 次の節\n")
+            errs = check_agents_md(self.temp_dir)
+            self.assertEqual(len(errs), 1, f"Expected error for forbidden word: {word}")
+            self.assertIn(word, errs[0])
+
     def test_design_md_forbidden_status_words(self):
         docs_dir = os.path.join(self.temp_dir, "docs")
         os.makedirs(docs_dir, exist_ok=True)

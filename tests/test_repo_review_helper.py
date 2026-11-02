@@ -1067,6 +1067,21 @@ class TestCliIntegration(unittest.TestCase):
         self.assertIn("A-1", wide_text)
         self.assertIn("A-8", wide_text)
 
+        # 3. LIGHT tier: should include D-1 (P3-4)
+        code = cli_main([
+            "request-create",
+            "--worktree", wt_str,
+            "--tier", "LIGHT",
+            "--summary", "Light review request",
+        ])
+        self.assertEqual(code, 0)
+        req_files = sorted(inbox_dir.glob("review-request.*.md"), key=lambda p: p.stat().st_mtime)
+        self.assertEqual(len(req_files), 3)
+        light_text = req_files[-1].read_text(encoding="utf-8")
+        self.assertIn("差分外波及確認（D-1）", light_text)
+        self.assertIn("D-1", light_text)
+        self.assertNotIn("D-2", light_text)
+
 
 if __name__ == "__main__":
     unittest.main()

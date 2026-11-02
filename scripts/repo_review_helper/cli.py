@@ -231,7 +231,7 @@ def cmd_request_create(args: argparse.Namespace) -> int:
 ## ワイドレビュー（総点検 / 全体点検 / 総チェック）確認事項
 
 リポジトリ全体を横断し、以下のチェックリスト（references.md §ワイドレビュー）を総点検してください:
-- [ ] A-1: 各設計書のステータスと Issue/PR/タグ実績の一致（npm run check:docs-status）
+- [ ] A-1: 設計書ステータス形式の確認（npm run check:docs-status）と Issue/PR/タグ実績の突合
 - [ ] A-2: 単一正本と目次の整合性（AGENTS.md、目次に重複記述がないか）
 - [ ] A-3: CLI usage とドキュメント（--help、public-cli.md、SKILL、README）の一致
 - [ ] A-4: 相対リンクおよびアンカー（#anchor）の健全性
@@ -249,6 +249,12 @@ def cmd_request_create(args: argparse.Namespace) -> int:
 - [ ] D-1: PR やコミットが Closes #N を含む場合、該当設計書のステータスが「実装完了」に更新されているか
 - [ ] D-2: CLI コマンドやオプションを変更した場合、--help / ドキュメントと一致しているか
 - [ ] D-3: 文書の見出しや節名を変えた場合、旧い名前がリポジトリ内に残っていないか
+"""
+            elif tier == "LIGHT":
+                extra_instructions = """
+## 差分外波及確認（D-1）
+
+- [ ] D-1: PR やコミットが Closes #N を含む場合、該当設計書のステータスが「実装完了」に更新されているか
 """
 
             content = f"""# レビュー依頼書 (Review Request)
