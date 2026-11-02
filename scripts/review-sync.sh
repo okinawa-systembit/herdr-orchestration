@@ -235,6 +235,18 @@ do_check() {
       echo "エラー: reviewee のドラフトのメタデータ部に判定 Status: 行を含めることはできません。Finding 内の Status のみ更新してください。" >&2
       exit 1
     fi
+
+    # 未記入の Decision 目印またはレビューイ評価目印が残っている場合は停止
+    if grep -E -q "<accept[[:space:]]*\|[[:space:]]*reject[[:space:]]*\|[[:space:]]*defer>|<同意[[:space:]]*\|[[:space:]]*部分同意[[:space:]]*\|[[:space:]]*不同意>" "${target_file}"; then
+      echo "エラー: reviewee のドラフトに未記入の Decision またはレビューイ評価の目印（<...>）が残っています。" >&2
+      exit 1
+    fi
+
+    # 不正な Decision 値（accept|reject|defer 以外の指定）の検査
+    if grep -E "^[[:space:]]*-?[[:space:]]*Decision:" "${target_file}" | grep -E -v "^[[:space:]]*-?[[:space:]]*Decision:[[:space:]]*(accept|reject|defer)([[:space:]]|$)"; then
+      echo "エラー: reviewee のドラフトに不正な Decision 値が含まれています（値は accept, reject, defer のいずれかを指定してください）。" >&2
+      exit 1
+    fi
   fi
 
   echo "OK: check passed (${ROLE})"

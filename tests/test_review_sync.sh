@@ -381,6 +381,54 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Test 12a: check - reviewee のドラフトに未記入目印が残っている場合は停止
+# ---------------------------------------------------------------------------
+TEST_ENV=$(setup_mock_env "t12a")
+DRAFT_PATH="${TEST_ENV}/worktree/.input/review/reviewee-draft.md"
+
+cat <<'EOF' > "${DRAFT_PATH}"
+# Draft
+- Role: reviewee
+- Round: 1
+## Findings
+### P1-1 Title
+- Decision: <accept | reject | defer>
+- レビューイ評価: 同意
+EOF
+
+cd "${TEST_ENV}/worktree"
+ERR_OUTPUT=$(PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh check reviewee 2>&1 || true)
+if [[ "${ERR_OUTPUT}" == *"未記入の Decision またはレビューイ評価の目印（<...>）が残っています"* ]]; then
+  pass "Reject reviewee draft with placeholder Decision"
+else
+  fail "Reject reviewee draft with placeholder Decision" "Output: ${ERR_OUTPUT}"
+fi
+
+# ---------------------------------------------------------------------------
+# Test 12b: check - reviewee のドラフトに不正な Decision 値がある場合は停止
+# ---------------------------------------------------------------------------
+TEST_ENV=$(setup_mock_env "t12b")
+DRAFT_PATH="${TEST_ENV}/worktree/.input/review/reviewee-draft.md"
+
+cat <<'EOF' > "${DRAFT_PATH}"
+# Draft
+- Role: reviewee
+- Round: 1
+## Findings
+### P1-1 Title
+- Decision: invalid_decision
+- レビューイ評価: 同意
+EOF
+
+cd "${TEST_ENV}/worktree"
+ERR_OUTPUT=$(PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh check reviewee 2>&1 || true)
+if [[ "${ERR_OUTPUT}" == *"不正な Decision 値が含まれています"* ]]; then
+  pass "Reject reviewee draft with invalid Decision value"
+else
+  fail "Reject reviewee draft with invalid Decision value" "Output: ${ERR_OUTPUT}"
+fi
+
+# ---------------------------------------------------------------------------
 # Test 13: comment - マーカー付与と sent/ への退避
 # ---------------------------------------------------------------------------
 TEST_ENV=$(setup_mock_env "t13")

@@ -131,7 +131,11 @@ def parse_and_generate_draft(
             clean_body = opposite_marker_pattern.sub("", latest_opposite_body).strip()
             lines = clean_body.split("\n")
             out_lines: list[str] = []
+            in_code_block = False
             for i, line_str in enumerate(lines):
+                if re.match(r"^\s*```", line_str):
+                    in_code_block = not in_code_block
+
                 if re.match(r"^\s*-?\s*Role:", line_str, re.IGNORECASE):
                     out_lines.append(f"- Role: {role}")
                 elif re.match(r"^\s*-?\s*Round:", line_str, re.IGNORECASE):
@@ -144,18 +148,22 @@ def parse_and_generate_draft(
                     continue
                 else:
                     out_lines.append(line_str)
-                    # role == "reviewee" の場合、各指摘見出し (### ...) の直下に Decision 枠を自動展開
-                    if role == "reviewee" and re.match(r"^###\s+.*", line_str):
+                    # role == "reviewee" かつコードブロック外の場合、指摘見出し (### [P0-3|B|C]...) の直下に Decision 枠を展開
+                    if (
+                        role == "reviewee"
+                        and not in_code_block
+                        and re.match(r"^###\s+\[?(?:P[0-3]|B|C)[-ー\d]", line_str)
+                    ):
                         has_decision = False
-                        for next_idx in range(i + 1, min(i + 5, len(lines))):
-                            if "Decision:" in lines[next_idx]:
+                        for next_idx in range(i + 1, min(i + 8, len(lines))):
+                            if re.match(r"^\s*-?\s*Decision:", lines[next_idx]):
                                 has_decision = True
                                 break
                             if lines[next_idx].startswith("#"):
                                 break
                         if not has_decision:
-                            out_lines.append("- Decision: accept # accept | reject | defer")
-                            out_lines.append("- レビューイ評価: 同意 # 同意 | 部分同意 | 不同意")
+                            out_lines.append("- Decision: <accept | reject | defer>")
+                            out_lines.append("- レビューイ評価: <同意 | 部分同意 | 不同意>")
                             out_lines.append("- 対応内容 / 理由:")
             f.write("\n".join(out_lines))
         else:
