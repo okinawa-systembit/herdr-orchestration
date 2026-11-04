@@ -197,7 +197,7 @@ def parse_and_generate_draft(
             if not is_issue:
                 f.write(f"- PR: #{target_id}\n")
             if role == "reviewer":
-                f.write("- Status: Changes requested\n\n## Summary\n\n<要約>\n\n## Findings\n\n")
+                f.write("\n## Summary\n\n<要約>\n\n## Findings\n\n")
             else:
                 f.write("\n## 判定に対する応答\n\n## 指摘への対応 (Decision: accept / reject / defer)\n\n")
 

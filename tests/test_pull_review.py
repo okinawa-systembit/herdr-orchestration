@@ -50,7 +50,7 @@ class TestPullReview(unittest.TestCase):
         self.assertIn("- Role: reviewer", content)
         self.assertIn("- Round: 1", content)
         self.assertIn("- PR: #101", content)
-        self.assertIn("- Status: Changes requested", content)
+        self.assertNotIn("- Status:", content)
         self.assertIn("## Findings", content)
 
     def test_generate_initial_draft_issue_reviewee(self) -> None:
