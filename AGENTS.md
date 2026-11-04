@@ -1,5 +1,25 @@
 # リポジトリ作業ガイド
 
+## 基本方針（Core Principles）
+
+本リポジトリおよびオーケストレーション基盤の設計・開発・レビューでは、過剰な複雑化を防ぎ、長期的な保守性と安全性を確保するため、以下の原則と指針を遵守する。詳細な解説・具体規則・移行注記を含む単一正本は **[基本方針正本](docs/core-principles.md)** を参照する（[Issue #113](https://github.com/okinawa-systembit/herdr-orchestration/issues/113)）。
+
+### 7 大設計原則（要約）
+
+1. **シンプル is ベスト（KISS 原則）**: 複雑な仕組み・過剰な状態管理・パーミッション縛りを排除し、最も単純で壊れにくいアプローチを優先する。
+2. **保守性を高める・人間中心の可観測性**: ブラックボックスを作らず、作業領域は `.input/` に一元化して人間が直感的に把握できるようにする。
+3. **車輪の再発明はしない**: `git`、`gh` CLI、Prettier、Unix 標準コマンド等の既存ツール・公式機能に素直に委譲・活用する。
+4. **依存管理の境界分離**: 開発環境は柔軟にツールを導入し、配布物（中央 Skill・CLI）は Python 標準ライブラリと OS 標準コマンドのみ（ゼロ依存）とする。
+5. **秘密は使う 1 か所だけにインラインで渡す**: 認証トークンや鍵の存在範囲をコマンドの一瞬に限定し、トークンが見える環境で他のツールを動かさない。
+6. **1 つの事実は 1 か所だけに持たせ、機械検査とセットで定義する**: ステータスや設定の多重管理を禁止し、単一正本と機械検査（lint/check）をセットで運用する。
+7. **修正ラウンドでスコープを広げない**: レビュー指摘の修正コミットには指摘の是正のみを入れ、新機能追加や大規模移行を混ぜない。
+
+### 3 大実践指針（要約）
+
+1. **（指針 8）機械検査とエージェント判断の境界**: 致命的事故（漏洩・改ざん）や固定形式は機械で止め、自由な文章の意味や妥当性はエージェント判断に任せる（「ただし〜を除く」が 2 つ以上必要な機械チェックは作らない）。
+2. **（指針 9）テンプレート主導による記述と機械制御値の完全分離**: 機械制御値（役割、Round、Status）は外側ヘッダーとして付与し、本文はテンプレートに沿った自由記述として構文解析・自動挿入・過剰バリデーションを行わない（※ 現行 review-sync は [Issue #116](https://github.com/okinawa-systembit/herdr-orchestration/issues/116) で段階的移行）。
+3. **（指針 10）黙って失敗しない**: 補助機能のスキップ時も警告を標準エラーに出し、テストは引数変換だけでなく実際の結果を検証する。
+
 ## Herdr Orchestrator 実装
 
 作業順序は [実装 INDEX](docs/herdr-orchestrator-implementation-index.md)。CLI 入口は `skills/herdr-orchestrator/scripts/herdr-orchestrator`。段階 0–8 の自動テスト: `npm run test:orchestrator`。**開発時ローカルインストール**: `npm run install:orchestrator-dev`（`~/.agents/skills/herdr-orchestration`）— [dev-local-install.md](skills/herdr-orchestrator/references/dev-local-install.md)。導入前確認: `npm run verify:orchestrator`。配布方針: [distribution-install.md](skills/herdr-orchestrator/references/distribution-install.md)。§18 実機記録: [docs/herdr-orchestrator-verification-log.md](docs/herdr-orchestrator-verification-log.md)。
