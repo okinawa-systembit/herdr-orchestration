@@ -203,12 +203,23 @@ curl -fsSL 'https://raw.githubusercontent.com/okinawa-systembit/herdr-orchestrat
 - **Codex CLI の共有デーモン（`app-server`）に起因する既知の問題です**（詳細は [Issue #122](https://github.com/okinawa-systembit/herdr-orchestration/issues/122) / Herdr 公式 [#4649](https://github.com/herdrdev/herdr/issues/4649) を参照）。
 - Codex CLI（v0.157 以降）はデフォルトで共有デーモン（`codex app-server --managed-daemon`）を自動起動し、最初に起動したペインの環境変数（`HERDR_PANE_ID`）をツール実行プロセスに引き継いでしまいます。そのため、別ペインの Codex がタスクを受け取った際に呼び出し元ペインを誤認して停止します。
 - **暫定回避策（Codex 利用時の必須設定）**:  
-  Codex を Herdr 内で利用する場合は、`~/.codex/config.toml` に以下の設定を追加して共有デーモンを無効化してください：
-  ```toml
-  [features]
-  daemon_auto_start = false
-  ```
-  ※ 既にバックグラウンドでデーモンが起動している場合は、ターミナルで `codex app-server daemon stop` を実行して停止してください（詳細は [CLI リファレンス (public-cli.md)](skills/herdr-orchestrator/references/public-cli.md#62-共有デーモンapp-serverの無効化設定codex-利用時の必須設定) を参照）。
+  Codex を Herdr 内で利用する場合は、以下のいずれかの方法で共有デーモンを無効化してください：
+
+  - **コマンドで設定する場合（推奨）**:
+    ```bash
+    codex features disable daemon_auto_start
+    ```
+  - **設定ファイルを手動編集する場合**:
+    `~/.codex/config.toml` に以下を追加します（※既に `[features]` セクションが存在する場合は、その配下に `daemon_auto_start = false` のみを追加してください）：
+    ```toml
+    [features]
+    daemon_auto_start = false
+    ```
+
+  **反映手順**:
+  1. 他のペインで作業中の Codex タスクがないことを確認します。
+  2. 起動中のデーモンを停止します：`codex app-server daemon stop`
+  3. 各ペインで Codex を再起動します（詳細は [CLI リファレンス (public-cli.md)](skills/herdr-orchestrator/references/public-cli.md#62-共有デーモンapp-serverの無効化設定codex-利用時の必須設定) を参照）。
 
 ### Q. エージェントを再起動したらロール設定はどうなる？
 
@@ -250,7 +261,7 @@ curl -fsSL 'https://raw.githubusercontent.com/okinawa-systembit/herdr-orchestrat
   - [herdr](https://herdr.dev) が稼働していること
   - Python 3.10 以上, bash 4.0 以上, curl, tar, flock, git
 - **動作確認した AI Agent**:
-  - Cursor, Antigravity (Agy), Claude Code
+  - Cursor, Antigravity (Agy), Claude Code 等
   - **Codex**: 共有デーモンの無効化設定（`daemon_auto_start = false`）が必要です（詳細は[よくある質問](#q-codex-agent-でタスク受信時に宛先不一致caller_not_task_participantエラーで停止する)を参照）。
 
 ---
