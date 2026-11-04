@@ -1,8 +1,8 @@
 # 内部レビュースキル改善 Phase 1 詳細実装設計書
 
-> 状態: 実装設計初版。Issue #64 対応。
->
-> 対象: このリポジトリの内部レビュー helper 実装。比較対象の固有情報は記載しない。
+- **ステータス**: 実装完了（[PR #65](https://github.com/okinawa-systembit/herdr-orchestration/pull/65) / v0.3.0 にてマージ済み）
+- **対象 Issue**: [Issue #61](https://github.com/okinawa-systembit/herdr-orchestration/issues/61) / [Issue #64](https://github.com/okinawa-systembit/herdr-orchestration/issues/64)
+- **対象**: このリポジトリの内部レビュー helper 実装。比較対象の固有情報は記載しない。
 
 本書は、[Issue #61](https://github.com/okinawa-systembit/herdr-orchestration/issues/61) および [Issue #64](https://github.com/okinawa-systembit/herdr-orchestration/issues/64) に基づき、[Phase 1 設計書](REVIEW_SKILL_PHASE1_DESIGN.md) の各仕様を具体的に実装するための詳細設計を定義する。
 
