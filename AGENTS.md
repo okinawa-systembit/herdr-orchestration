@@ -17,7 +17,7 @@
 ### 3 大実践指針（要約）
 
 1. **（指針 8）機械検査とエージェント判断の境界**: 致命的事故（漏洩・改ざん）や固定形式は機械で止め、自由な文章の意味や妥当性はエージェント判断に任せる（「ただし〜を除く」が 2 つ以上必要な機械チェックは作らない）。
-2. **（指針 9）テンプレート主導による記述と機械制御値の完全分離**: 機械制御値（役割、Round、Status）は外側ヘッダーとして付与し、本文はテンプレートに沿った自由記述として構文解析・自動挿入・過剰バリデーションを行わない（※ review-sync の第 1 段階移行は [Issue #116](https://github.com/okinawa-systembit/herdr-orchestration/issues/116) にて完了、制御値完全分離は後続 [Issue #119](https://github.com/okinawa-systembit/herdr-orchestration/issues/119) で対応）。
+2. **（指針 9）テンプレート主導による記述と機械制御値の完全分離**: 機械制御値（役割、Round、Status）は外側ヘッダーとして付与し、本文はテンプレートに沿った自由記述として構文解析・自動挿入・過剰バリデーションを行わない（※ review-sync のテンプレート主導移行および制御値完全分離は [Issue #116](https://github.com/okinawa-systembit/herdr-orchestration/issues/116) および [Issue #119](https://github.com/okinawa-systembit/herdr-orchestration/issues/119) にて完了）。
 3. **（指針 10）黙って失敗しない**: 補助機能のスキップ時も警告を標準エラーに出し、テストは引数変換だけでなく実際の結果を検証する。
 
 ## Herdr Orchestrator 実装

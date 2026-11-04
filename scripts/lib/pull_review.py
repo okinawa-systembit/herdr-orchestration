@@ -126,6 +126,43 @@ def parse_and_generate_draft(
         next_round = base_round
 
     target_file.parent.mkdir(parents=True, exist_ok=True)
+
+    # 1. 状態管理ファイル (state.json) の更新 (Issue #119: 制御値の本文外分離)
+    state_file = target_file.parent / "state.json"
+    state_data: dict[str, Any] = {}
+    if state_file.is_file():
+        try:
+            state_data = json.loads(state_file.read_text(encoding="utf-8"))
+            if not isinstance(state_data, dict):
+                state_data = {}
+        except Exception:
+            state_data = {}
+
+    state_data[role] = {
+        "round": next_round,
+        "target_id": str(target_id),
+        "target_type": "issue" if is_issue else "pr",
+    }
+    state_file.write_text(
+        json.dumps(state_data, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+
+    # 2. incoming (受信内容) の保存 (Issue #119: incoming / outgoing の分離)
+    incoming_file = target_file.parent / "incoming.md"
+    with incoming_file.open("w", encoding="utf-8") as f:
+        if latest_opposite_body:
+            clean_incoming = opposite_marker_pattern.sub("", latest_opposite_body).strip()
+            f.write(clean_incoming + "\n")
+        else:
+            f.write(f"# No incoming messages from {opposite_role}\n")
+
+        if human_comments:
+            f.write("\n\n## Human & Inline Comments\n\n")
+            for hc in human_comments:
+                f.write(f"{hc}\n\n---\n\n")
+
+    # 3. 作業用ドラフト (outgoing) の生成
     with target_file.open("w", encoding="utf-8") as f:
         if latest_opposite_body:
             clean_body = opposite_marker_pattern.sub("", latest_opposite_body).strip()

@@ -1201,6 +1201,186 @@ else
   fail "Accept --body-file - from stdin" "Log: $(cat "${MOCK_LOG}" 2>/dev/null || true), Remaining tmp: ${REMAINING_TMP_COUNT}, Body: ${CAPTURED_BODY}, Output: ${OUTPUT}"
 fi
 
+# ---------------------------------------------------------------------------
+# Test 31: check/comment - reviewer の --status CLI 指定と外側ヘッダー付与 (Issue #119 / 指針9)
+# ---------------------------------------------------------------------------
+TEST_ENV=$(setup_mock_env "t31")
+DRAFT_PATH="${TEST_ENV}/worktree/.input/review/reviewer-draft.md"
+LAST_BODY="${TEST_ENV}/last_body.txt"
+
+cat <<'EOF' > "${DRAFT_PATH}"
+# Review Draft: PR #118
+- Role: reviewer
+- Round: 1
+## Summary
+Review summary without status line in body.
+EOF
+
+cd "${TEST_ENV}/worktree"
+CHECK_OUT=$(PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh check reviewer --status Approved 2>&1 || true)
+if [[ "${CHECK_OUT}" == *"OK: check passed (reviewer)"* ]]; then
+  pass "Pass check reviewer with --status Approved when body lacks Status (Issue #119)"
+else
+  fail "Pass check reviewer with --status Approved when body lacks Status" "Output: ${CHECK_OUT}"
+fi
+
+MOCK_LAST_BODY="${LAST_BODY}" PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh comment reviewer --status Approved
+CAPTURED_SUBMITTED="$(cat "${LAST_BODY}" 2>/dev/null || true)"
+if [[ "${CAPTURED_SUBMITTED}" == *"- Status: Approved"* ]] && grep -q "<!-- review-sync role=reviewer round=1 -->" "${LAST_BODY}"; then
+  pass "Inject - Status: Approved as outer header when specified via CLI (Issue #119)"
+else
+  fail "Inject - Status: Approved as outer header when specified via CLI" "Body: ${CAPTURED_SUBMITTED}"
+fi
+
+# ---------------------------------------------------------------------------
+# Test 32: comment - state.json からの Round 解決 (Issue #119 / 指針9)
+# ---------------------------------------------------------------------------
+TEST_ENV=$(setup_mock_env "t32")
+DRAFT_PATH="${TEST_ENV}/worktree/.input/review/reviewer-draft.md"
+LAST_BODY="${TEST_ENV}/last_body.txt"
+STATE_FILE="${TEST_ENV}/worktree/.input/review/state.json"
+
+cat <<'EOF' > "${STATE_FILE}"
+{
+  "reviewer": {
+    "round": 3,
+    "target_id": "118",
+    "target_type": "pr"
+  }
+}
+EOF
+
+cat <<'EOF' > "${DRAFT_PATH}"
+# Review Draft
+- Role: reviewer
+## Summary
+Draft body with absolutely no Round line.
+EOF
+
+cd "${TEST_ENV}/worktree"
+MOCK_LAST_BODY="${LAST_BODY}" PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh comment reviewer --status "Changes requested"
+if grep -q "<!-- review-sync role=reviewer round=3 -->" "${LAST_BODY}"; then
+  pass "Resolve round from state.json when draft lacks Round line (Issue #119)"
+else
+  fail "Resolve round from state.json when draft lacks Round line" "Body: $(cat "${LAST_BODY}" 2>/dev/null || true)"
+fi
+
+if grep -q '"last_sent_round": 3' "${STATE_FILE}"; then
+  pass "Update state.json with last_sent_round on comment success (Issue #119)"
+else
+  fail "Update state.json with last_sent_round on comment success" "State: $(cat "${STATE_FILE}" 2>/dev/null || true)"
+fi
+
+# ---------------------------------------------------------------------------
+# Test 33: comment - --round CLI 指定による明示的オーバーライド (Issue #119)
+# ---------------------------------------------------------------------------
+TEST_ENV=$(setup_mock_env "t33")
+DRAFT_PATH="${TEST_ENV}/worktree/.input/review/reviewer-draft.md"
+LAST_BODY="${TEST_ENV}/last_body.txt"
+STATE_FILE="${TEST_ENV}/worktree/.input/review/state.json"
+
+cat <<'EOF' > "${STATE_FILE}"
+{
+  "reviewer": {
+    "round": 2,
+    "target_id": "118",
+    "target_type": "pr"
+  }
+}
+EOF
+
+cat <<'EOF' > "${DRAFT_PATH}"
+# Review Draft
+- Role: reviewer
+- Round: 1
+- Status: Approved
+## Summary
+Draft body.
+EOF
+
+cd "${TEST_ENV}/worktree"
+MOCK_LAST_BODY="${LAST_BODY}" PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh comment reviewer --round 5
+if grep -q "<!-- review-sync role=reviewer round=5 -->" "${LAST_BODY}"; then
+  pass "Override round via --round CLI argument (Issue #119)"
+else
+  fail "Override round via --round CLI argument" "Body: $(cat "${LAST_BODY}" 2>/dev/null || true)"
+fi
+
+# ---------------------------------------------------------------------------
+# Test 34: check - reviewee への --status 指定は拒否 (Issue #119)
+# ---------------------------------------------------------------------------
+TEST_ENV=$(setup_mock_env "t34")
+DRAFT_PATH="${TEST_ENV}/worktree/.input/review/reviewee-draft.md"
+
+cat <<'EOF' > "${DRAFT_PATH}"
+# Draft
+- Role: reviewee
+- Round: 1
+## Summary
+summary text
+EOF
+
+cd "${TEST_ENV}/worktree"
+ERR_OUT=$(PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh check reviewee --status Approved 2>&1 || true)
+if [[ "${ERR_OUT}" == *"reviewee に --status を指定することはできません"* ]]; then
+  pass "Reject --status argument for reviewee (Issue #119)"
+else
+  fail "Reject --status argument for reviewee" "Output: ${ERR_OUT}"
+fi
+
+# ---------------------------------------------------------------------------
+# Test 35: pull - state.json および incoming.md の生成と incoming/outgoing 分離 (Issue #119)
+# ---------------------------------------------------------------------------
+TEST_ENV=$(setup_mock_env "t35")
+cd "${TEST_ENV}/worktree"
+
+cat <<'EOF' > "${TEST_ENV}/bin/gh"
+#!/usr/bin/env bash
+if [[ "$*" == *"pr view --json number,url"* ]]; then
+  echo '{"number": 42}'
+  exit 0
+elif [[ "$*" == *"pr view 42 --json comments,reviews"* ]]; then
+  cat <<'JSON'
+{
+  "comments": [
+    {
+      "body": "<!-- review-sync role=reviewer round=2 -->\n# Review PR #42\n- Role: reviewer\n- Round: 2\n- Status: Changes requested\n## Summary\nPlease address findings.\n",
+      "createdAt": "2026-11-04T12:00:00Z"
+    }
+  ],
+  "reviews": []
+}
+JSON
+  exit 0
+elif [[ "$*" == *"repo view"* ]]; then
+  echo "example/repo"
+  exit 0
+elif [[ "$*" == *"pulls/42/comments"* ]]; then
+  echo "[]"
+  exit 0
+fi
+exit 0
+EOF
+chmod +x "${TEST_ENV}/bin/gh"
+
+PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh pull reviewee
+
+PULLED_DRAFT="${TEST_ENV}/worktree/.input/review/reviewee-draft.md"
+INCOMING_FILE="${TEST_ENV}/worktree/.input/review/incoming.md"
+STATE_FILE="${TEST_ENV}/worktree/.input/review/state.json"
+
+if [[ -f "${INCOMING_FILE}" ]] && grep -q "Please address findings." "${INCOMING_FILE}" && ! grep -q "<!-- review-sync" "${INCOMING_FILE}"; then
+  pass "Generate incoming.md without raw marker on pull (Issue #119)"
+else
+  fail "Generate incoming.md without raw marker on pull" "Incoming: $(cat "${INCOMING_FILE}" 2>/dev/null || true)"
+fi
+
+if [[ -f "${STATE_FILE}" ]] && grep -q '"round": 2' "${STATE_FILE}" && grep -q '"target_id": "42"' "${STATE_FILE}"; then
+  pass "Generate state.json with round and target_id on pull (Issue #119)"
+else
+  fail "Generate state.json with round and target_id on pull" "State: $(cat "${STATE_FILE}" 2>/dev/null || true)"
+fi
+
 echo "=========================================="
 echo "Results: ${PASSED} passed, ${FAILED} failed"
 echo "=========================================="

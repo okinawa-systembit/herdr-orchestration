@@ -99,10 +99,10 @@ usage() {
   cat <<'EOF' >&2
 使用方法:
   bash scripts/review-sync.sh pull <reviewer|reviewee>
-  bash scripts/review-sync.sh comment <reviewer|reviewee>
-  bash scripts/review-sync.sh check <reviewer|reviewee>
+  bash scripts/review-sync.sh comment <reviewer|reviewee> [--status <Approved|"Changes requested">] [--round <N>]
+  bash scripts/review-sync.sh check <reviewer|reviewee> [--status <Approved|"Changes requested">]
   bash scripts/review-sync.sh pull-issue <reviewer|reviewee> <issue-number>
-  bash scripts/review-sync.sh comment-issue <reviewer|reviewee> <issue-number>
+  bash scripts/review-sync.sh comment-issue <reviewer|reviewee> <issue-number> [--status <Approved|"Changes requested">] [--round <N>]
   bash scripts/review-sync.sh pr-create [gh pr create のオプション...]
 
 説明:
@@ -112,6 +112,10 @@ usage() {
   pull-issue    : Issue から指摘・回答を取り込みドラフトに展開
   comment-issue : Issue へドラフト内容をコメントとして送信
   pr-create     : GitHub App (Bot) 認証を利用して PR を作成 (自 PR 制限を回避)
+
+オプション (comment / check / comment-issue):
+  --status <val>: reviewer の判定 Status (Approved または 'Changes requested') を指定
+  --round <N>   : 送信時の Round 番号を明示的に指定 (省略時は state.json またはドラフトから自動解決)
 EOF
   exit 1
 }
@@ -125,14 +129,16 @@ shift
 
 ROLE=""
 ISSUE_NUMBER=""
+STATUS_ARG=""
+ROUND_ARG=""
 
 case "${SUBCOMMAND}" in
   pr-create)
     # PR 作成: 引数はそのまま gh pr create へ渡す
     ;;
-  pull|comment|check)
+  pull)
     if [[ $# -ne 1 ]]; then
-      echo "エラー: サブコマンド '${SUBCOMMAND}' は引数 <role> のみ受け付けます (PR番号は自動解決されます)。" >&2
+      echo "エラー: サブコマンド 'pull' は引数 <role> のみ受け付けます (PR番号は自動解決されます)。" >&2
       usage
     fi
     ROLE="$1"
@@ -141,9 +147,45 @@ case "${SUBCOMMAND}" in
       exit 1
     fi
     ;;
-  pull-issue|comment-issue)
+  comment|check)
+    if [[ $# -lt 1 ]]; then
+      echo "エラー: サブコマンド '${SUBCOMMAND}' には引数 <role> が必要です。" >&2
+      usage
+    fi
+    ROLE="$1"
+    shift
+    if [[ "${ROLE}" != "reviewer" && "${ROLE}" != "reviewee" ]]; then
+      echo "エラー: ロールは 'reviewer' または 'reviewee' を指定してください (指定値: ${ROLE})" >&2
+      exit 1
+    fi
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --status)
+          if [[ $# -lt 2 ]]; then
+            echo "エラー: --status には値 (Approved または 'Changes requested') が必要です。" >&2
+            exit 1
+          fi
+          STATUS_ARG="$2"
+          shift 2
+          ;;
+        --round)
+          if [[ $# -lt 2 ]]; then
+            echo "エラー: --round には整数値が必要です。" >&2
+            exit 1
+          fi
+          ROUND_ARG="$2"
+          shift 2
+          ;;
+        *)
+          echo "エラー: 未知のオプション '$1' です。" >&2
+          usage
+          ;;
+      esac
+    done
+    ;;
+  pull-issue)
     if [[ $# -ne 2 ]]; then
-      echo "エラー: サブコマンド '${SUBCOMMAND}' には <role> と <issue-number> の2つの引数が必要です。" >&2
+      echo "エラー: サブコマンド 'pull-issue' には <role> と <issue-number> の2つの引数が必要です。" >&2
       usage
     fi
     ROLE="$1"
@@ -156,6 +198,47 @@ case "${SUBCOMMAND}" in
       echo "エラー: Issue 番号には半角数字を指定してください (指定値: ${ISSUE_NUMBER})" >&2
       exit 1
     fi
+    ;;
+  comment-issue)
+    if [[ $# -lt 2 ]]; then
+      echo "エラー: サブコマンド 'comment-issue' には <role> と <issue-number> が必要です。" >&2
+      usage
+    fi
+    ROLE="$1"
+    ISSUE_NUMBER="$2"
+    shift 2
+    if [[ "${ROLE}" != "reviewer" && "${ROLE}" != "reviewee" ]]; then
+      echo "エラー: ロールは 'reviewer' または 'reviewee' を指定してください (指定値: ${ROLE})" >&2
+      exit 1
+    fi
+    if [[ ! "${ISSUE_NUMBER}" =~ ^[0-9]+$ ]]; then
+      echo "エラー: Issue 番号には半角数字を指定してください (指定値: ${ISSUE_NUMBER})" >&2
+      exit 1
+    fi
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --status)
+          if [[ $# -lt 2 ]]; then
+            echo "エラー: --status には値 (Approved または 'Changes requested') が必要です。" >&2
+            exit 1
+          fi
+          STATUS_ARG="$2"
+          shift 2
+          ;;
+        --round)
+          if [[ $# -lt 2 ]]; then
+            echo "エラー: --round には整数値が必要です。" >&2
+            exit 1
+          fi
+          ROUND_ARG="$2"
+          shift 2
+          ;;
+        *)
+          echo "エラー: 未知のオプション '$1' です。" >&2
+          usage
+          ;;
+      esac
+    done
     ;;
   *)
     echo "エラー: 未知のサブコマンド '${SUBCOMMAND}' です。" >&2
@@ -273,12 +356,24 @@ do_check() {
   metadata="$(awk '/^## /{exit} {print}' "${target_file}")"
 
   if [[ "${ROLE}" == "reviewer" ]]; then
-    # reviewer はメタデータ部に Status: (Approved|Changes requested) が必須
-    if ! echo "${metadata}" | grep -E -q "^[[:space:]]*-?[[:space:]]*Status:[[:space:]]*(Approved|Changes requested)"; then
-      echo "エラー: reviewer のドラフトメタデータ部に '- Status: Approved' または '- Status: Changes requested' が必要です。" >&2
-      exit 1
+    # reviewer の判定 Status の検証 (引数優先、なければメタデータ部)
+    if [[ -n "${STATUS_ARG}" ]]; then
+      if [[ "${STATUS_ARG}" != "Approved" && "${STATUS_ARG}" != "Changes requested" ]]; then
+        echo "エラー: --status には 'Approved' または 'Changes requested' を指定してください (指定値: ${STATUS_ARG})" >&2
+        exit 1
+      fi
+    else
+      # 引数未指定時は後方互換としてメタデータ部から検査
+      if ! echo "${metadata}" | grep -E -q "^[[:space:]]*-?[[:space:]]*Status:[[:space:]]*(Approved|Changes requested)"; then
+        echo "エラー: reviewer のドラフトメタデータ部に '- Status: Approved' または '- Status: Changes requested' が必要です (または --status を指定してください)。" >&2
+        exit 1
+      fi
     fi
   elif [[ "${ROLE}" == "reviewee" ]]; then
+    if [[ -n "${STATUS_ARG}" ]]; then
+      echo "エラー: reviewee に --status を指定することはできません。判定 Status は reviewer のみ有効です。" >&2
+      exit 1
+    fi
     # reviewee はメタデータ部に判定 Status: が含まれてはならない（Finding 内の Status は許可）
     if echo "${metadata}" | grep -E -q "^[[:space:]]*-?[[:space:]]*Status:"; then
       echo "エラー: reviewee のドラフトのメタデータ部に判定 Status: 行を含めることはできません。Finding 内の Status のみ更新してください。" >&2
@@ -332,17 +427,68 @@ submit_comment() {
   # 送信前に check を自動実行
   do_check "${DRAFT_FILE}" >/dev/null
 
-  # メタデータ部（最初の '## ' より前）からラウンド番号を抽出（ドラフト内に指定があれば利用、なければ 1）
-  local metadata
-  metadata="$(awk '/^## /{exit} {print}' "${DRAFT_FILE}")"
-  local round=1
-  local round_match
-  round_match="$(echo "${metadata}" | grep -E "^[[:space:]]*-?[[:space:]]*Round:[[:space:]]*[0-9]+" | head -n 1 || true)"
-  if [[ -n "${round_match}" ]]; then
-    round="$(echo "${round_match}" | grep -o '[0-9]\+' | head -n 1)"
+  local python_bin="python3"
+  if [[ -x "${REPO_ROOT}/.venv/bin/python3" ]]; then
+    python_bin="${REPO_ROOT}/.venv/bin/python3"
   fi
 
-  # 送信用一時ファイルの作成（マーカー付与）
+  # メタデータ部（最初の '## ' より前）
+  local metadata
+  metadata="$(awk '/^## /{exit} {print}' "${DRAFT_FILE}")"
+
+  # 1. ラウンド番号の解決（引数優先 -> state.json -> ドラフトメタデータ -> 1）
+  local round=""
+  if [[ -n "${ROUND_ARG}" ]]; then
+    if [[ ! "${ROUND_ARG}" =~ ^[0-9]+$ ]]; then
+      echo "エラー: --round には正の整数を指定してください: ${ROUND_ARG}" >&2
+      exit 1
+    fi
+    round="${ROUND_ARG}"
+  fi
+
+  local state_file="${DRAFT_DIR}/state.json"
+  if [[ -z "${round}" && -f "${state_file}" ]]; then
+    round="$("${python_bin}" -I -c "
+import json
+try:
+    with open('${state_file}', 'r', encoding='utf-8') as f:
+        data = json.load(f)
+    val = data.get('${ROLE}', {}).get('round', '')
+    if val:
+        print(val)
+except Exception:
+    pass
+" 2>/dev/null || true)"
+    round="$(echo "${round}" | tr -d '\r\n')"
+  fi
+
+  if [[ -z "${round}" ]]; then
+    local round_match
+    round_match="$(echo "${metadata}" | grep -E "^[[:space:]]*-?[[:space:]]*Round:[[:space:]]*[0-9]+" | head -n 1 || true)"
+    if [[ -n "${round_match}" ]]; then
+      round="$(echo "${round_match}" | grep -o '[0-9]\+' | head -n 1)"
+    fi
+  fi
+  round="${round:-1}"
+
+  # 2. reviewer の場合の判定 Status 解決（引数優先 -> ドラフトメタデータ）
+  local status_header=""
+  if [[ "${ROLE}" == "reviewer" ]]; then
+    local status_val="${STATUS_ARG}"
+    if [[ -z "${status_val}" ]]; then
+      local status_match
+      status_match="$(echo "${metadata}" | grep -E "^[[:space:]]*-?[[:space:]]*Status:[[:space:]]*(Approved|Changes requested)" | head -n 1 || true)"
+      if [[ -n "${status_match}" ]]; then
+        status_val="$(echo "${status_match}" | sed -E 's/^[[:space:]]*-?[[:space:]]*Status:[[:space:]]*//' | tr -d '\r\n')"
+      fi
+    fi
+    # ドラフト本文のメタデータ部に - Status: が含まれていない場合は外側制御値ヘッダーとして付与
+    if [[ -n "${status_val}" ]] && ! echo "${metadata}" | grep -E -q "^[[:space:]]*-?[[:space:]]*Status:"; then
+      status_header="- Status: ${status_val}"$'\n\n'
+    fi
+  fi
+
+  # 送信用一時ファイルの作成（マーカーおよび外側制御値ヘッダー付与）
   local temp_body
   temp_body="$(create_temp_file "review-body")"
   trap 'rm -f "${temp_body}"' EXIT
@@ -350,6 +496,9 @@ submit_comment() {
   cat <<EOF > "${temp_body}"
 <!-- review-sync role=${ROLE} round=${round} -->
 EOF
+  if [[ -n "${status_header}" ]]; then
+    printf '%s' "${status_header}" >> "${temp_body}"
+  fi
   cat "${DRAFT_FILE}" >> "${temp_body}"
 
   # 送信実行 (常に --body-file 経由)
@@ -373,6 +522,23 @@ EOF
   mv "${DRAFT_FILE}" "${dest}"
   rm -f "${temp_body}"
   trap - EXIT
+
+  # 送信成功時に state.json を更新（last_sent_round を記録）
+  if [[ -f "${state_file}" ]]; then
+    "${python_bin}" -I -c "
+import json
+try:
+    with open('${state_file}', 'r', encoding='utf-8') as f:
+        data = json.load(f)
+    if '${ROLE}' in data and isinstance(data['${ROLE}'], dict):
+        data['${ROLE}']['last_sent_round'] = int('${round}')
+    with open('${state_file}', 'w', encoding='utf-8') as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+        f.write('\n')
+except Exception:
+    pass
+" 2>/dev/null || true
+  fi
 
   echo "OK: 送信が完了し、ドラフトを ${dest} に退避しました。"
 }

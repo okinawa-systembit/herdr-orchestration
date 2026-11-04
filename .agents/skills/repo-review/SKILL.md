@@ -320,9 +320,12 @@ GitHub を正本とするコードレビュー運用では、以下の手順で 
    - `repo-review` 基準に沿って、第 1 段階（仕様・設計整合性）および第 2 段階（批判的不具合探索）を実施。
    - `.input/review/reviewer-draft.md` を編集し、指摘事項（P0〜P3）、総合判定（GO / 要修正 / NO-GO）、未実施検証を記載。
 3. **レビュー結果の投稿**:
-   - レビュー投稿は `scripts/review-sync.sh comment reviewer` を使用する（※ PR 番号は現在のブランチから自動解決されるため引数にはロール名のみを指定する）：
+   - レビュー投稿は `scripts/review-sync.sh comment reviewer` を使用する（※ PR 番号は現在のブランチから自動解決される。判定 Status は `--status Approved` または `--status "Changes requested"` を CLI 引数で明示的に指定可能）：
      ```bash
-     bash scripts/review-sync.sh comment reviewer
+     # 判定 Status を CLI オプションで指定して投稿 (推奨)
+     bash scripts/review-sync.sh comment reviewer --status Approved
+     # または
+     bash scripts/review-sync.sh comment reviewer --status "Changes requested"
      ```
    - 原則として `--comment` でレビュー結果を投稿する（Blocking 指摘時も `--request-changes` は使用せず、`- Status: Changes requested` を含む `--comment` で表明する）。
    - **安全制約（承認とマージの分離）**:
@@ -330,7 +333,7 @@ GitHub を正本とするコードレビュー運用では、以下の手順で 
      2. **自 PR 制限回避と人間の役割**: エージェントが Bot 主体として PR を作成・操作することにより、開発者本人の個人アカウントとの同一視（自 PR 制限: 422 エラー）が回避される。GitHub 公式の Approve（承認ボタンの押下）および PR のマージ操作は、エージェントの合意表明を確認した上で**人間の開発者のみが担当**する（詳細は [docs/reviews/GITHUB_APP_AND_REVIEW_POLICY.md](../../../docs/reviews/GITHUB_APP_AND_REVIEW_POLICY.md) 参照）。
 4. **レビューイ対応ワークフロー（指摘への対応・回答投稿・再レビュー依頼）**:
    - レビュワーから指摘を受領した際、**いきなりコード修正に走ることを厳禁**とする（手戻りや別不具合の誘発、PR 肥大化を防止するため、以下の必須 6 ステップを厳守する。詳細は [references.md#reviewee-response-workflow](references.md#reviewee-response-workflow) 参照）：
-     1. **ドラフト取り込み**: `bash scripts/review-sync.sh pull reviewee` で最新レビューを取り込む（テンプレート主導アプローチに基づき、相手の指摘本文がそのまま展開される）。
+     1. **ドラフト取り込み**: `bash scripts/review-sync.sh pull reviewee` で最新レビューを取り込む（相手の生投稿は `.input/review/incoming.md` に保存され、作業用ドラフト `.input/review/reviewee-draft.md` にテンプレートが展開される）。
      2. **事前評価（コード修正厳禁）**: 各指摘を客観的に評価し、「同意 / 部分同意 / 不同意」および Decision（`accept` / `reject` / `defer`）を策定する。この段階でコードを 1 行も修正してはならない。
         - **複数ラウンド時の差分返信と文脈引き継ぎ**: スクリプト側で壊れやすい機械的 3-way マージを行わないため、エージェントは過去コメント履歴を参照し、**既に合意・解消した指摘はドラフトから省いて「継続論点・新規論点」に絞り込み、過去の Decision（defer / reject）の文脈を自律的に引き継いで記述する**（人間の手動コピペ不要）。
      3. **チャット提示（必須・トリアージ）**: 人間（利用者）へチャットで各指摘の評価・Decision 案・代替案を提示する。
