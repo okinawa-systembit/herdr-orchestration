@@ -308,6 +308,8 @@ def verify_worker_submit_context(
     expected_worker_cwd: Path | None = None,
     expected_worktree_path: Path,
     expected_repository_identity: str,
+    competing_pane: str | None = None,
+    competing_cwd: Path | None = None,
 ) -> None:
     target_cwd = (expected_worker_cwd or expected_worktree_path).resolve()
     target_pane = expected_worker_pane or expected_worker_agent
@@ -315,6 +317,8 @@ def verify_worker_submit_context(
         caller, _ = resolve_caller_live_agent_for_worker(
             expected_pane=target_pane,
             expected_cwd=target_cwd,
+            competing_pane=competing_pane,
+            competing_cwd=competing_cwd,
         )
     except LiveAgentError as exc:
         raise ResultCommandError(
@@ -384,6 +388,8 @@ def result_submit(
 
     worktree_path = Path(doc["context"]["worktree"]["path"])
     worker_cwd = Path(doc["worker"].get("cwd") or worktree_path)
+    requester_info = doc.get("requester", {})
+    requester_pane = requester_info.get("pane_id") or requester_info.get("agent_name")
     verify_worker_submit_context(
         expected_worker_agent=doc["worker"]["agent_name"],
         expected_worker_pane=doc["worker"].get("pane_id"),
@@ -391,6 +397,8 @@ def result_submit(
         expected_worker_cwd=worker_cwd,
         expected_worktree_path=worktree_path,
         expected_repository_identity=doc["context"]["repository"]["identity"],
+        competing_pane=requester_pane,
+        competing_cwd=worktree_path,
     )
 
     before_result = copy.deepcopy(doc["result"])

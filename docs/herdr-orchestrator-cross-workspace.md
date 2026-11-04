@@ -563,25 +563,25 @@ Requester の `context.worktree.path` と Worker の `worker.cwd` は異なっ�
 
 これに対し、`get_caller_live_agent()` が `os.environ["HERDR_PANE_ID"]` のみを単一の信頼源としていると、タスクが正しい Worker ペインに配送され正しい作業ディレクトリで実行されているにもかかわらず、`recipient_verification` で `verified: false`（`caller_not_task_participant`）となり誤って停止してしまう。
 
-#### 2. 多層的な呼び出し元判定と自己回復ロジック
+#### 2. 一意性原則に基づく呼び出し元判定と自己回復ロジック
 
-プロセスの実作業ディレクトリ（`proc_cwd = Path.cwd().resolve()`）と Task Registry のコンテキスト（`expected_worker` および `expected_requester`）をクロスチェックし、環境変数の汚染または欠落を能動的に検知して真の Caller を安全に逆引き・回復する：
+作業ディレクトリ（CWD）は、同一リポジトリ・同一 worktree に複数のエージェント（Requester と Worker、または第三のペイン）が同居している場合、ペインを一意に特定する手がかりにはならない。したがって、自己回復機構は **「対象作業ディレクトリ（worktree）においてアクティブなペインが一意に特定できる場合」にのみ安全に回復を行い、曖昧性がある場合は従来通り安全停止（fail-closed）** する設計とする：
 
 1. **通常解決（最速・互換パス）**:
-   - `os.environ.get("HERDR_PANE_ID")` が存在し、そのペインの `foreground_cwd` と `proc_cwd` にディレクトリ親和性（`check_cwd_affinity`）がある場合は、通常通りそのペインを Caller として採用する。
-2. **汚染検知または欠落時のフォールバック回復**:
-   - `HERDR_PANE_ID` のペインの `cwd` と `proc_cwd` が乖離している場合（環境変数汚染）、または `HERDR_PANE_ID` が空の場合（環境変数欠落）：
-     - **Worker コンテキストの照合**:
-       - タスクの `expected_worker` の `worker.cwd` と `proc_cwd` に親和性があるかを検査。
-       - 親和性があり、かつ `worker.pane_id` のペインでエージェントが稼働中（`agent_status != "none"`）であれば、真の Caller を `worker.pane_id` として自動解決・回復する。
-     - **Requester コンテキストの照合**:
-       - Worker 照合に合致しない場合、タスクの `expected_requester`（`context.worktree.path`）と `proc_cwd` に親和性があるかを検査。
-       - 親和性があり、かつ `requester.pane_id` のペインでエージェントが稼働中であれば、真の Caller を `requester.pane_id` として自動解決・回復する。
-3. **安全制約の堅持（フェイルクローズ）**:
-   - `proc_cwd` が Worker にも Requester にも一致しない場合、または関係ペインでエージェントが稼働していない場合は回復を行わず、従来通り `verified: false`（`caller_not_task_participant` または `recipient_role_or_cwd_mismatch`）として安全停止する。
-4. **可観測性の担保（原則 2・指針 10）**:
-   - 回復が行われた場合、`recipient_verification` に `caller_recovery` 情報を記録し、標準エラー（`sys.stderr`）に環境変数汚染・欠落からの回復警告を出力する。
-   - `result-submit` の提出前コンテキスト検証（`verify_worker_submit_context`）においても同一の回復ロジックを適用し、結果提出を安全に完了させる。
+   - `os.environ.get("HERDR_PANE_ID")` が存在し、そのペインの `foreground_cwd` がプロセスの `proc_cwd` と同一ディレクトリまたは上位ツリー（`is_strictly_within_directory`）である場合は、通常通りそのペインを Caller として採用する。
+2. **クロスワークスペース環境での自己回復の成立条件（一意性の厳格な証明）**:
+   - `HERDR_PANE_ID` のペインの `cwd` と `proc_cwd` が乖離している場合（別ディレクトリからの環境変数汚染）、または `HERDR_PANE_ID` が空の場合（環境変数欠落）：
+     - **作業ディレクトリの厳密一致**: `proc_cwd` が候補ロール（Worker または Requester）の作業ディレクトリ配下に厳密に含まれていること（git common dir 等による広義の親和性は排除し、別 worktree の混同を防止）。
+     - **タスク関係者間の競合検査**: もう一方の関係者（Worker に対する Requester 等）が存在する場合、そのペインが同一 worktree に滞在していないこと（滞在している場合はどちらのペインか判別不能なため回復不可）。
+     - **Herdr 全体でのアクティブペイン一意性**: Herdr 上で対象 worktree に存在するアクティブペインが候補ペインただ 1 つのみであること（第三のペインが存在する場合は曖昧なため回復不可）。
+     - 上記条件がすべて成立した場合に限り、真の Caller ペインとして安全に自己回復する。
+3. **安全制約の堅持（同一 worktree におけるフェイルクローズ停止）**:
+   - 同一 worktree に Requester と Worker（または第三者）が同居している場合、環境変数が欠落していてもプロセスの CWD だけでは呼び出し元を一意特定できないため、回復を諦めて安全に `verified: false`（`caller_live_agent_unavailable`）として停止する。
+   - 同一 worktree 内の別ペインによる環境変数汚染（例: Worker の環境変数が同じリポジトリの Requester ペイン ID に汚染された場合）も同様に、CWD からは汚染を客観検知できないため安全停止（または Requester と認識）となる。この場合は自己回復機構の対象外であり、[Issue #122](https://github.com/okinawa-systembit/herdr-orchestration/issues/122) に示す Codex CLI の設定（`daemon_auto_start = false`）による回避が必須となる。
+4. **`result-submit` の厳格な防護**:
+   - Registry のタスク結果を更新する `result-submit`（`verify_worker_submit_context`）においても、同様の一意性証明ルールを厳格に適用する。同一 worktree に Requester 等が同居している曖昧な環境では環境変数欠落時の提出を拒否し、第三者や Requester による誤提出・不正書き換えを完全に防護する。
+5. **可観測性の担保（原則 2・指針 10）**:
+   - 自己回復が行われた場合、`recipient_verification` に `caller_recovery` 情報を記録し、標準エラー（`sys.stderr`）に環境変数汚染・欠落からの自動回復警告を出力する。
 
 ---
 
