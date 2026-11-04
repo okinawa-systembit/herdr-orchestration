@@ -52,7 +52,7 @@ GitHub App 自動認証基盤（Phase 1）および安全な連携ラッパー�
 1. **レビュー指摘・回答の投稿**:
    - AI レビュワーおよび AI レビューイは、PR レビューコメントおよび Issue コメントの投稿（`gh pr review --comment` または `gh issue comment`）を行う。
 2. **合意形成の表明（メタデータ）**:
-   - AI レビュワーは、未解消の Blocking 指摘がなくマージ可能と判断した場合（判定基準は references.md §4.1 参照）、ドラフトおよびコメント本文先頭のメタデータにおいて `- Status: Approved` を明記して合意を表明する（要修正および NO-GO の場合は `- Status: Changes requested` を明記。内部判定とメタデータの対応表は [.agents/skills/repo-review/references.md#review-status-mapping](../../.agents/skills/repo-review/references.md#review-status-mapping) 参照）。
+   - AI レビュワーは、未解消の Blocking 指摘がなくマージ可能と判断した場合（判定基準は references.md §4.1 参照）、`--status Approved` オプションを指定して合意を表明する（要修正および NO-GO の場合は `--status "Changes requested"` を指定。スクリプトが送信コメント先頭の外側ヘッダーとして自動付与する。内部判定とメタデータの対応表は [.agents/skills/repo-review/references.md#review-status-mapping](../../.agents/skills/repo-review/references.md#review-status-mapping) 参照）。
 3. **厳格な禁止事項（安全制約の堅持）**:
    - **GitHub 公式の Approve 操作（`gh pr review --approve`）の実行禁止**:
      - Bot トークンを利用している場合であっても、AI エージェント自身が GitHub 公式の Approve を送信することは厳格に禁止する。
@@ -99,8 +99,8 @@ Phase 2 で実装された `scripts/review-sync.sh` は、本規約に完全に�
 1. **常に `--comment` のみを使用**:
    - `submit_comment` 関数では `gh pr review --comment --body-file ...` のみを使用し、`--approve` や `--request-changes` フラグを呼び出すコードは一切存在しない。
 2. **静的検証 (`check`) によるロール統制**:
-   - `reviewer` はメタデータ部に `- Status: (Approved|Changes requested)` が必須。
-   - `reviewee` はメタデータ部に判定 `Status:` を記述不可（Finding 内の個別 Status のみ更新可能）。
+   - `reviewer` は CLI 引数で `--status <Approved|"Changes requested">` の指定が必須（スクリプトが外側ヘッダーとして自動付与し、ドラフト本文内の Status 行は送信時に安全に除去される）。
+   - `reviewee` はメタデータ部に判定 `Status:` を記述不可（Finding 内の個別 Status のみ更新可能）。また `--status` の指定も禁止。
 3. **機密情報漏洩検査**:
    - 送信前に GitHub トークン（`ghs_` 等）や秘密鍵ヘッダーの混入を機械的にスキャンし遮断。
 
@@ -171,4 +171,4 @@ GitHub App 設定が存在しない環境では、個人認証による自 PR �
 
 - **本文の品質・妥当性**: 指摘内容、反証確認、評価、修正理由の意味解釈はエージェントおよび人間に委ね、スクリプトで文章の完成度や形式を過剰にバリデーションしない。
 - **Markdown の構文と見た目**: コードブロックの閉じ忘れや混在フェンスの構文解釈をスクリプトで中途半端に機械検査（数え上げや状態追跡）せず、Prettier による自動整形およびエージェントの読み返しに委ねる。
-- **テンプレート主導**: 機械が制御する値（Round, Status 等）は本文外側のヘッダーとして付与し、本文はエージェントがテンプレートに沿って記述する。スクリプトが本文をパースして値を抽出したり、本文内に Decision 欄を機械的に自動挿入する処理は行わない（[Issue #116](https://github.com/okinawa-systembit/herdr-orchestration/issues/116) にて本文パース・Decision自動挿入・過剰バリデーションを廃止しテンプレート主導へ第 1 段階移行完了。残る制御値完全分離は後続 [Issue #119](https://github.com/okinawa-systembit/herdr-orchestration/issues/119) にて段階的対応）。
+- **テンプレート主導**: 機械が制御する値（Round, Status 等）は本文外側のヘッダーとして付与し、本文はエージェントがテンプレートに沿って記述する。スクリプトが本文をパースして値を抽出したり、本文内に Decision 欄を機械的に自動挿入する処理は行わない（[Issue #116](https://github.com/okinawa-systembit/herdr-orchestration/issues/116) にて本文パース・Decision自動挿入・過剰バリデーションを廃止し、[Issue #119](https://github.com/okinawa-systembit/herdr-orchestration/issues/119) にて制御値完全分離、状態管理移行、および incoming / outgoing 分離を完了）。

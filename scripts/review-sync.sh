@@ -99,19 +99,23 @@ usage() {
   cat <<'EOF' >&2
 使用方法:
   bash scripts/review-sync.sh pull <reviewer|reviewee>
-  bash scripts/review-sync.sh comment <reviewer|reviewee>
-  bash scripts/review-sync.sh check <reviewer|reviewee>
+  bash scripts/review-sync.sh comment <reviewer|reviewee> [オプション...]
+  bash scripts/review-sync.sh check <reviewer|reviewee> [オプション...]
   bash scripts/review-sync.sh pull-issue <reviewer|reviewee> <issue-number>
-  bash scripts/review-sync.sh comment-issue <reviewer|reviewee> <issue-number>
+  bash scripts/review-sync.sh comment-issue <reviewer|reviewee> <issue-number> [オプション...]
   bash scripts/review-sync.sh pr-create [gh pr create のオプション...]
 
 説明:
-  pull          : PR から最新レビューを取り込み .input/review/<role>-draft.md に展開 (PR番号は自動解決)
-  comment       : .input/review/<role>-draft.md の内容を PR レビューコメントとして送信 (PR番号は自動解決)
-  check         : .input/review/<role>-draft.md の構文・メタデータ・機密情報を静的検証 (オフライン実行)
+  pull          : PR から最新レビューを取り込みドラフトに展開 (PR番号は自動解決)
+  comment       : ドラフトを PR レビューコメントとして送信 (PR番号は自動解決)
+  check         : ドラフトの構文・メタデータ・機密情報を静的検証 (オフライン実行)
   pull-issue    : Issue から指摘・回答を取り込みドラフトに展開
   comment-issue : Issue へドラフト内容をコメントとして送信
   pr-create     : GitHub App (Bot) 認証を利用して PR を作成 (自 PR 制限を回避)
+
+オプション:
+  --status <val>: reviewer の判定 Status (Approved または 'Changes requested') を指定 (reviewer 必須)
+  --round <N>   : 送信時の Round 番号を明示的に指定 (comment / comment-issue のみ有効)
 EOF
   exit 1
 }
@@ -125,14 +129,47 @@ shift
 
 ROLE=""
 ISSUE_NUMBER=""
+STATUS_ARG=""
+ROUND_ARG=""
+
+parse_options() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --status)
+        if [[ $# -lt 2 ]]; then
+          echo "エラー: --status には値 (Approved または 'Changes requested') が必要です。" >&2
+          exit 1
+        fi
+        STATUS_ARG="$2"
+        shift 2
+        ;;
+      --round)
+        if [[ "${SUBCOMMAND}" == "check" ]]; then
+          echo "エラー: check コマンドでは --round オプションは使用できません。" >&2
+          exit 1
+        fi
+        if [[ $# -lt 2 ]]; then
+          echo "エラー: --round には整数値が必要です。" >&2
+          exit 1
+        fi
+        ROUND_ARG="$2"
+        shift 2
+        ;;
+      *)
+        echo "エラー: 未知のオプション '$1' です。" >&2
+        usage
+        ;;
+    esac
+  done
+}
 
 case "${SUBCOMMAND}" in
   pr-create)
     # PR 作成: 引数はそのまま gh pr create へ渡す
     ;;
-  pull|comment|check)
+  pull)
     if [[ $# -ne 1 ]]; then
-      echo "エラー: サブコマンド '${SUBCOMMAND}' は引数 <role> のみ受け付けます (PR番号は自動解決されます)。" >&2
+      echo "エラー: サブコマンド 'pull' は引数 <role> のみ受け付けます (PR番号は自動解決されます)。" >&2
       usage
     fi
     ROLE="$1"
@@ -141,9 +178,22 @@ case "${SUBCOMMAND}" in
       exit 1
     fi
     ;;
-  pull-issue|comment-issue)
+  comment|check)
+    if [[ $# -lt 1 ]]; then
+      echo "エラー: サブコマンド '${SUBCOMMAND}' には引数 <role> が必要です。" >&2
+      usage
+    fi
+    ROLE="$1"
+    shift
+    if [[ "${ROLE}" != "reviewer" && "${ROLE}" != "reviewee" ]]; then
+      echo "エラー: ロールは 'reviewer' または 'reviewee' を指定してください (指定値: ${ROLE})" >&2
+      exit 1
+    fi
+    parse_options "$@"
+    ;;
+  pull-issue)
     if [[ $# -ne 2 ]]; then
-      echo "エラー: サブコマンド '${SUBCOMMAND}' には <role> と <issue-number> の2つの引数が必要です。" >&2
+      echo "エラー: サブコマンド 'pull-issue' には <role> と <issue-number> の2つの引数が必要です。" >&2
       usage
     fi
     ROLE="$1"
@@ -157,11 +207,42 @@ case "${SUBCOMMAND}" in
       exit 1
     fi
     ;;
+  comment-issue)
+    if [[ $# -lt 2 ]]; then
+      echo "エラー: サブコマンド 'comment-issue' には <role> と <issue-number> が必要です。" >&2
+      usage
+    fi
+    ROLE="$1"
+    ISSUE_NUMBER="$2"
+    shift 2
+    if [[ "${ROLE}" != "reviewer" && "${ROLE}" != "reviewee" ]]; then
+      echo "エラー: ロールは 'reviewer' または 'reviewee' を指定してください (指定値: ${ROLE})" >&2
+      exit 1
+    fi
+    if [[ ! "${ISSUE_NUMBER}" =~ ^[0-9]+$ ]]; then
+      echo "エラー: Issue 番号には半角数字を指定してください (指定値: ${ISSUE_NUMBER})" >&2
+      exit 1
+    fi
+    parse_options "$@"
+    ;;
   *)
     echo "エラー: 未知のサブコマンド '${SUBCOMMAND}' です。" >&2
     usage
     ;;
 esac
+
+# ロール別バリデーション (指針8・9)
+if [[ "${ROLE}" == "reviewer" ]]; then
+  if [[ "${SUBCOMMAND}" =~ ^(check|comment|comment-issue)$ && -z "${STATUS_ARG}" ]]; then
+    echo "エラー: reviewer は --status Approved または --status 'Changes requested' の指定が必要です。" >&2
+    exit 1
+  fi
+elif [[ "${ROLE}" == "reviewee" ]]; then
+  if [[ -n "${STATUS_ARG}" ]]; then
+    echo "エラー: reviewee に --status を指定することはできません。判定 Status は reviewer のみ有効です。" >&2
+    exit 1
+  fi
+fi
 
 if [[ -n "${ROLE}" ]]; then
   DRAFT_FILE="${DRAFT_DIR}/${ROLE}-draft.md"
@@ -273,12 +354,20 @@ do_check() {
   metadata="$(awk '/^## /{exit} {print}' "${target_file}")"
 
   if [[ "${ROLE}" == "reviewer" ]]; then
-    # reviewer はメタデータ部に Status: (Approved|Changes requested) が必須
-    if ! echo "${metadata}" | grep -E -q "^[[:space:]]*-?[[:space:]]*Status:[[:space:]]*(Approved|Changes requested)"; then
-      echo "エラー: reviewer のドラフトメタデータ部に '- Status: Approved' または '- Status: Changes requested' が必要です。" >&2
+    # reviewer の判定 Status の検証
+    if [[ -z "${STATUS_ARG}" ]]; then
+      echo "エラー: reviewer は --status Approved または --status 'Changes requested' の指定が必要です。" >&2
+      exit 1
+    fi
+    if [[ "${STATUS_ARG}" != "Approved" && "${STATUS_ARG}" != "Changes requested" ]]; then
+      echo "エラー: --status には 'Approved' または 'Changes requested' を指定してください (指定値: ${STATUS_ARG})" >&2
       exit 1
     fi
   elif [[ "${ROLE}" == "reviewee" ]]; then
+    if [[ -n "${STATUS_ARG}" ]]; then
+      echo "エラー: reviewee に --status を指定することはできません。判定 Status は reviewer のみ有効です。" >&2
+      exit 1
+    fi
     # reviewee はメタデータ部に判定 Status: が含まれてはならない（Finding 内の Status は許可）
     if echo "${metadata}" | grep -E -q "^[[:space:]]*-?[[:space:]]*Status:"; then
       echo "エラー: reviewee のドラフトのメタデータ部に判定 Status: 行を含めることはできません。Finding 内の Status のみ更新してください。" >&2
@@ -325,6 +414,10 @@ resolve_pr_number() {
 submit_comment() {
   local is_issue="$1"
   local target_id="$2"
+  local target_type="pr"
+  if [[ "${is_issue}" == "1" ]]; then
+    target_type="issue"
+  fi
 
   # 送信前にドラフトの自動 Markdown 整形 (Prettier) を実行
   format_markdown_file "${DRAFT_FILE}"
@@ -332,17 +425,81 @@ submit_comment() {
   # 送信前に check を自動実行
   do_check "${DRAFT_FILE}" >/dev/null
 
-  # メタデータ部（最初の '## ' より前）からラウンド番号を抽出（ドラフト内に指定があれば利用、なければ 1）
-  local metadata
-  metadata="$(awk '/^## /{exit} {print}' "${DRAFT_FILE}")"
-  local round=1
-  local round_match
-  round_match="$(echo "${metadata}" | grep -E "^[[:space:]]*-?[[:space:]]*Round:[[:space:]]*[0-9]+" | head -n 1 || true)"
-  if [[ -n "${round_match}" ]]; then
-    round="$(echo "${round_match}" | grep -o '[0-9]\+' | head -n 1)"
+  local python_bin="python3"
+  if [[ -x "${REPO_ROOT}/.venv/bin/python3" ]]; then
+    python_bin="${REPO_ROOT}/.venv/bin/python3"
   fi
 
-  # 送信用一時ファイルの作成（マーカー付与）
+  # 1. ラウンド番号の解決（引数優先 -> state.json（対象一致検証付き） -> なければエラー、本文読み戻し廃止）
+  local round=""
+  if [[ -n "${ROUND_ARG}" ]]; then
+    if [[ ! "${ROUND_ARG}" =~ ^[0-9]+$ ]]; then
+      echo "エラー: --round には正の整数を指定してください: ${ROUND_ARG}" >&2
+      exit 1
+    fi
+    round="${ROUND_ARG}"
+  fi
+
+  local state_file="${DRAFT_DIR}/state.json"
+  if [[ -z "${round}" && -f "${state_file}" ]]; then
+    local py_out
+    py_out="$("${python_bin}" -I -c '
+import sys, json
+
+state_path, role_name, tgt_type, tgt_id = sys.argv[1:5]
+try:
+    with open(state_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    role_data = data.get(role_name, {})
+    if not isinstance(role_data, dict):
+        sys.exit(2)
+    s_type = str(role_data.get("target_type", ""))
+    s_id = str(role_data.get("target_id", ""))
+    if s_type != tgt_type or s_id != str(tgt_id):
+        print(f"MISMATCH:{s_type}:{s_id}", file=sys.stderr)
+        sys.exit(3)
+    val = role_data.get("round", "")
+    print(val)
+except FileNotFoundError:
+    sys.exit(2)
+except Exception as err:
+    print(f"警告: state.json 読み込み失敗: {err}", file=sys.stderr)
+    sys.exit(1)
+' "${state_file}" "${ROLE}" "${target_type}" "${target_id}" 2>&1 || true)"
+
+    if [[ "${py_out}" == *"MISMATCH:"* ]]; then
+      local mismatch_val="${py_out#*MISMATCH:}"
+      mismatch_val="$(echo "${mismatch_val}" | head -n 1)"
+      echo "エラー: state.json の対象 (${mismatch_val}) が現在の送信先 (${target_type}:${target_id}) と一致しません。pull を再実行するか、--round <N> を明示的に指定してください。" >&2
+      exit 1
+    fi
+
+    local clean_round
+    clean_round="$(echo "${py_out}" | tr -d '\r\n')"
+    if [[ "${clean_round}" =~ ^[0-9]+$ ]]; then
+      round="${clean_round}"
+    elif [[ -n "${clean_round}" ]]; then
+      echo "エラー: state.json の round 値が無効です (${clean_round})。--round <N> を指定するか pull を再実行してください。" >&2
+      exit 1
+    fi
+  fi
+
+  if [[ -z "${round}" ]]; then
+    echo "エラー: Round 番号を解決できませんでした。pull を実行するか、--round <N> を明示的に指定してください。" >&2
+    exit 1
+  fi
+
+  # 2. reviewer の場合の判定 Status 解決 (P1-1: 引数必須・本文除外)
+  local status_header=""
+  if [[ "${ROLE}" == "reviewer" ]]; then
+    if [[ -z "${STATUS_ARG}" ]]; then
+      echo "エラー: reviewer は --status Approved または --status 'Changes requested' の指定が必要です。" >&2
+      exit 1
+    fi
+    status_header="- Status: ${STATUS_ARG}"$'\n\n'
+  fi
+
+  # 送信用一時ファイルの作成（マーカーおよび外側制御値ヘッダー付与）
   local temp_body
   temp_body="$(create_temp_file "review-body")"
   trap 'rm -f "${temp_body}"' EXIT
@@ -350,7 +507,21 @@ submit_comment() {
   cat <<EOF > "${temp_body}"
 <!-- review-sync role=${ROLE} round=${round} -->
 EOF
-  cat "${DRAFT_FILE}" >> "${temp_body}"
+  if [[ -n "${status_header}" ]]; then
+    printf '%s' "${status_header}" >> "${temp_body}"
+  fi
+
+  # 下書き本文のメタデータ部に万一残っている Status: 行を送信用ファイルから除去して連結 (P1-1)
+  if [[ "${ROLE}" == "reviewer" ]]; then
+    awk '
+      BEGIN { in_header = 1 }
+      /^## / { in_header = 0 }
+      in_header && /^[[:space:]]*-?[[:space:]]*Status:/ { next }
+      { print }
+    ' "${DRAFT_FILE}" >> "${temp_body}"
+  else
+    cat "${DRAFT_FILE}" >> "${temp_body}"
+  fi
 
   # 送信実行 (常に --body-file 経由)
   if [[ "${is_issue}" == "1" ]]; then
@@ -373,6 +544,25 @@ EOF
   mv "${DRAFT_FILE}" "${dest}"
   rm -f "${temp_body}"
   trap - EXIT
+
+  # 送信成功時に state.json を更新（last_sent_round を記録、P3-2: sys.argv 経由で安全呼び出し）
+  if [[ -f "${state_file}" ]]; then
+    "${python_bin}" -I -c '
+import sys, json
+
+state_path, role_name, round_str = sys.argv[1:4]
+try:
+    with open(state_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    if role_name in data and isinstance(data[role_name], dict):
+        data[role_name]["last_sent_round"] = int(round_str)
+        with open(state_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+            f.write("\n")
+except Exception as err:
+    print(f"警告: state.json 更新失敗: {err}", file=sys.stderr)
+' "${state_file}" "${ROLE}" "${round}" || true
+  fi
 
   echo "OK: 送信が完了し、ドラフトを ${dest} に退避しました。"
 }

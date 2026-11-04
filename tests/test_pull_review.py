@@ -50,7 +50,7 @@ class TestPullReview(unittest.TestCase):
         self.assertIn("- Role: reviewer", content)
         self.assertIn("- Round: 1", content)
         self.assertIn("- PR: #101", content)
-        self.assertIn("- Status: Changes requested", content)
+        self.assertNotIn("- Status:", content)
         self.assertIn("## Findings", content)
 
     def test_generate_initial_draft_issue_reviewee(self) -> None:
@@ -292,6 +292,73 @@ class TestPullReview(unittest.TestCase):
         with patch("sys.argv", ["pull_review.py"]):
             code = cli_main()
         self.assertEqual(code, 1)
+
+    def test_state_json_and_incoming_generation(self) -> None:
+        """state.json および incoming.md の生成と分離の検証 (Issue #119)."""
+        comments_data = {
+            "comments": [
+                {
+                    "body": (
+                        "<!-- review-sync role=reviewer round=1 -->\n"
+                        "# Review Draft: PR #105\n\n"
+                        "- Role: reviewer\n"
+                        "- Round: 1\n"
+                        "- Status: Changes requested\n\n"
+                        "## Summary\n\nFirst review summary\n"
+                    ),
+                    "createdAt": "2026-11-04T10:00:00Z",
+                    "author": {"login": "reviewer_bot"},
+                }
+            ],
+            "reviews": [],
+        }
+
+        # reviewee が pull を実行
+        parse_and_generate_draft(
+            target_file=self.target_file,
+            role="reviewee",
+            opposite_role="reviewer",
+            is_issue=False,
+            target_id="105",
+            comments_reviews_data=comments_data,
+            inline_comments_data=[],
+        )
+
+        state_file = self.tmp_path / "state.json"
+        incoming_file = self.tmp_path / "incoming.md"
+
+        self.assertTrue(state_file.is_file())
+        self.assertTrue(incoming_file.is_file())
+
+        # state.json の検証
+        state_data = json.loads(state_file.read_text(encoding="utf-8"))
+        self.assertIn("reviewee", state_data)
+        self.assertEqual(state_data["reviewee"]["round"], 1)
+        self.assertEqual(state_data["reviewee"]["target_id"], "105")
+        self.assertEqual(state_data["reviewee"]["target_type"], "pr")
+
+        # incoming.md の検証 (マーカー除去され相手の投稿が保持されていること)
+        incoming_content = incoming_file.read_text(encoding="utf-8")
+        self.assertNotIn("<!-- review-sync", incoming_content)
+        self.assertIn("# Review Draft: PR #105", incoming_content)
+        self.assertIn("First review summary", incoming_content)
+
+        # 続いて reviewer が pull した場合、state.json の既存エントリが維持されること
+        reviewer_target = self.tmp_path / "reviewer-draft.md"
+        parse_and_generate_draft(
+            target_file=reviewer_target,
+            role="reviewer",
+            opposite_role="reviewee",
+            is_issue=False,
+            target_id="105",
+            comments_reviews_data=comments_data,
+            inline_comments_data=[],
+        )
+
+        state_data2 = json.loads(state_file.read_text(encoding="utf-8"))
+        self.assertIn("reviewee", state_data2)
+        self.assertIn("reviewer", state_data2)
+        self.assertEqual(state_data2["reviewer"]["round"], 2)
 
 
 if __name__ == "__main__":

@@ -211,7 +211,7 @@ fi
 rm -f scripts/lib/untracked_module.py
 
 # 6-5: ALLOW_REVIEW_SYNC_DEV=1 でバイパスできること
-ERR_MSG_BYPASS=$(ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh check reviewer 2>&1 || true)
+ERR_MSG_BYPASS=$(ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh check reviewee 2>&1 || true)
 if [[ "${ERR_MSG_BYPASS}" != *"origin/main と一致しません"* && "${ERR_MSG_BYPASS}" == *"ドラフトファイルが存在しない"* ]]; then
   pass "Tamper detection bypassed with ALLOW_REVIEW_SYNC_DEV=1"
 else
@@ -224,7 +224,7 @@ fi
 TEST_ENV=$(setup_mock_env "t7")
 MOCK_LOG="${TEST_ENV}/gh.log"
 cd "${TEST_ENV}/worktree"
-ERR_OUTPUT=$(MOCK_GH_LOG="${MOCK_LOG}" MOCK_PR_NOT_FOUND=1 PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh comment reviewer 2>&1 || true)
+ERR_OUTPUT=$(MOCK_GH_LOG="${MOCK_LOG}" MOCK_PR_NOT_FOUND=1 PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh comment reviewer --status Approved 2>&1 || true)
 if [[ "${ERR_OUTPUT}" == *"PR"* || "${ERR_OUTPUT}" == *"pull request"* ]]; then
   pass "Stop when PR not found"
 else
@@ -248,13 +248,12 @@ cat <<'EOF' > "${DRAFT_PATH}"
 # Draft
 - Role: reviewer
 - Round: 1
-- Status: Changes requested
 ## Summary
 test summary
 EOF
 
 # comment reviewer を実行（内部で resolve_pr_number が呼ばれる）
-PR_OUTPUT=$(MOCK_GH_LOG="${MOCK_LOG}" PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh comment reviewer 2>&1 || true)
+PR_OUTPUT=$(MOCK_GH_LOG="${MOCK_LOG}" PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh comment reviewer --status "Changes requested" --round 1 2>&1 || true)
 rm -f json.py
 
 if [[ "${PR_OUTPUT}" == *"OK: 送信が完了し"* ]] && [[ "${PR_OUTPUT}" != *"MALICIOUS_JSON_SHADOW_RAN"* ]]; then
@@ -287,12 +286,11 @@ DRAFT_PATH="${TEST_ENV}/worktree/.input/review/reviewer-draft.md"
 cat <<'EOF' > "${DRAFT_PATH}"
 # Draft
 - Role: reviewer
-- Status: Changes requested
 Token: ghs_12345678901234567890123456789012
 EOF
 
 cd "${TEST_ENV}/worktree"
-ERR_OUTPUT=$(PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh check reviewer 2>&1 || true)
+ERR_OUTPUT=$(PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh check reviewer --status "Changes requested" 2>&1 || true)
 if [[ "${ERR_OUTPUT}" == *"機密情報"* ]]; then
   pass "Detect leaked ghs_ token in check"
 else
@@ -302,12 +300,11 @@ fi
 cat <<'EOF' > "${DRAFT_PATH}"
 # Draft
 - Role: reviewer
-- Status: Changes requested
 -----BEGIN RSA PRIVATE KEY-----
 MIIEowIBAAKCAQEA...
 -----END RSA PRIVATE KEY-----
 EOF
-ERR_OUTPUT=$(PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh check reviewer 2>&1 || true)
+ERR_OUTPUT=$(PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh check reviewer --status "Changes requested" 2>&1 || true)
 if [[ "${ERR_OUTPUT}" == *"機密情報"* ]]; then
   pass "Detect leaked private key in check"
 else
@@ -315,7 +312,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Test 10: check - reviewer メタデータに Status がない場合停止
+# Test 10: check - reviewer で --status オプションがない場合停止 (RV096 P3-2)
 # ---------------------------------------------------------------------------
 TEST_ENV=$(setup_mock_env "t10")
 DRAFT_PATH="${TEST_ENV}/worktree/.input/review/reviewer-draft.md"
@@ -330,10 +327,10 @@ EOF
 
 cd "${TEST_ENV}/worktree"
 ERR_OUTPUT=$(PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh check reviewer 2>&1 || true)
-if [[ "${ERR_OUTPUT}" == *"reviewer のドラフトメタデータ部に"* ]]; then
-  pass "Reject reviewer draft missing metadata Status"
+if [[ "${ERR_OUTPUT}" == *"reviewer は --status Approved または"* ]]; then
+  pass "Reject reviewer missing --status option (RV096 P3-2)"
 else
-  fail "Reject reviewer draft missing metadata Status" "Output: ${ERR_OUTPUT}"
+  fail "Reject reviewer missing --status option" "Output: ${ERR_OUTPUT}"
 fi
 
 # ---------------------------------------------------------------------------
@@ -528,7 +525,7 @@ echo "nested"
 EOF
 
 cd "${TEST_ENV}/worktree"
-OUTPUT=$(PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh check reviewer 2>&1 || true)
+OUTPUT=$(PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh check reviewer --status Approved 2>&1 || true)
 if [[ "${OUTPUT}" == *"OK: check passed (reviewer)"* ]]; then
   pass "Pass draft with mixed code blocks without mechanical parse error (Issue #110 / #113)"
 else
@@ -545,14 +542,12 @@ LAST_BODY="${TEST_ENV}/last_body.txt"
 cat <<'EOF' > "${DRAFT_PATH}"
 # Draft
 - Role: reviewer
-- Round: 2
-- Status: Changes requested
 ## Summary
 summary text
 EOF
 
 cd "${TEST_ENV}/worktree"
-MOCK_LAST_BODY="${LAST_BODY}" PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh comment reviewer
+MOCK_LAST_BODY="${LAST_BODY}" PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh comment reviewer --status Approved --round 1 --status "Changes requested" --round 2
 
 if grep -q "<!-- review-sync role=reviewer round=2 -->" "${LAST_BODY}"; then
   pass "Inject marker into submitted comment"
@@ -567,7 +562,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Test 13b: comment - Round 行に複数数字がある場合に最初の数字を採用 (RV064 P3-1)
+# Test 13b: comment - --round CLI 指定によるマーカー付与
 # ---------------------------------------------------------------------------
 TEST_ENV=$(setup_mock_env "t13b")
 DRAFT_PATH="${TEST_ENV}/worktree/.input/review/reviewer-draft.md"
@@ -576,19 +571,17 @@ LAST_BODY="${TEST_ENV}/last_body.txt"
 cat <<'EOF' > "${DRAFT_PATH}"
 # Draft
 - Role: reviewer
-- Round: 2 (prev 1)
-- Status: Changes requested
 ## Summary
 summary text
 EOF
 
 cd "${TEST_ENV}/worktree"
-MOCK_LAST_BODY="${LAST_BODY}" PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh comment reviewer
+MOCK_LAST_BODY="${LAST_BODY}" PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh comment reviewer --status Approved --round 1 --status "Changes requested" --round 2
 
 if grep -q "^<!-- review-sync role=reviewer round=2 -->$" "${LAST_BODY}"; then
-  pass "Extract first numeric round from metadata when multiple numbers exist (RV064 P3-1)"
+  pass "Set numeric round marker via --round CLI option"
 else
-  fail "Extract first numeric round from metadata when multiple numbers exist (RV064 P3-1)" "Marker: $(head -n 2 "${LAST_BODY}")"
+  fail "Set numeric round marker via --round CLI option" "Marker: $(head -n 2 "${LAST_BODY}")"
 fi
 
 # ---------------------------------------------------------------------------
@@ -603,23 +596,19 @@ cd "${TEST_ENV}/worktree"
 cat <<'EOF' > "${DRAFT_PATH}"
 # Draft 1
 - Role: reviewer
-- Round: 1
-- Status: Changes requested
 ## Summary
 first draft
 EOF
-MOCK_LAST_BODY="${LAST_BODY}" PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh comment reviewer
+MOCK_LAST_BODY="${LAST_BODY}" PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh comment reviewer --status Approved --round 1 --status "Changes requested" --round 1
 
 # 2回目の送信（直後に実行）
 cat <<'EOF' > "${DRAFT_PATH}"
 # Draft 2
 - Role: reviewer
-- Round: 2
-- Status: Changes requested
 ## Summary
 second draft
 EOF
-MOCK_LAST_BODY="${LAST_BODY}" PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh comment reviewer
+MOCK_LAST_BODY="${LAST_BODY}" PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh comment reviewer --status Approved --round 1 --status "Changes requested" --round 2
 
 SENT_COUNT=$(find "${TEST_ENV}/worktree/.input/review/sent" -name "*-reviewer-draft*.md" | wc -l)
 if [[ "${SENT_COUNT}" -eq 2 ]]; then
@@ -638,14 +627,12 @@ LAST_BODY="${TEST_ENV}/last_body.txt"
 cat <<'EOF' > "${DRAFT_PATH}"
 # Draft
 - Role: reviewer
-- Round: 1
-- Status: Approved
 ## Summary
 summary text
 EOF
 
 cd "${TEST_ENV}/worktree"
-MOCK_LAST_BODY="${LAST_BODY}" PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh comment-issue reviewer 99
+MOCK_LAST_BODY="${LAST_BODY}" PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh comment-issue reviewer 99 --status Approved --round 1
 
 if grep -q "<!-- review-sync role=reviewer round=1 -->" "${LAST_BODY}"; then
   pass "Inject marker on comment-issue"
@@ -1104,7 +1091,7 @@ cat <<'EOF' > "${DRAFT_PATH}"
 *  unformatted item 2
 EOF
 
-MOCK_LAST_BODY="${LAST_BODY}" PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh comment reviewer
+MOCK_LAST_BODY="${LAST_BODY}" PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh comment reviewer --status Approved --round 1
 
 SENT_FILE=$(compgen -G "${TEST_ENV}/worktree/.input/review/sent/*-reviewer-draft.md" | head -n 1 || true)
 if [[ -f "${SENT_FILE}" ]] && grep -q -- "- unformatted item 1" "${SENT_FILE}"; then
@@ -1199,6 +1186,356 @@ if grep -q "mock-pr-create: GH_TOKEN=none args=pr create --title Stdin PR --body
   pass "Accept --body-file - from stdin, format with prettier, and clean up temp files (RV083 P3-1 / RV085 P3-3 / Issue #110)"
 else
   fail "Accept --body-file - from stdin" "Log: $(cat "${MOCK_LOG}" 2>/dev/null || true), Remaining tmp: ${REMAINING_TMP_COUNT}, Body: ${CAPTURED_BODY}, Output: ${OUTPUT}"
+fi
+
+# ---------------------------------------------------------------------------
+# Test 31: check/comment - reviewer の --status CLI 指定と外側ヘッダー優先付与 (RV095 P1-1)
+# ---------------------------------------------------------------------------
+TEST_ENV=$(setup_mock_env "t31")
+DRAFT_PATH="${TEST_ENV}/worktree/.input/review/reviewer-draft.md"
+LAST_BODY="${TEST_ENV}/last_body.txt"
+
+# 1. ドラフトに Status 行がなくても --status Approved で通過し付与されること
+cat <<'EOF' > "${DRAFT_PATH}"
+# Review Draft: PR #118
+- Role: reviewer
+- Round: 1
+## Summary
+Review summary without status line in body.
+EOF
+
+cd "${TEST_ENV}/worktree"
+CHECK_OUT=$(PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh check reviewer --status Approved 2>&1 || true)
+if [[ "${CHECK_OUT}" == *"OK: check passed (reviewer)"* ]]; then
+  pass "Pass check reviewer with --status Approved when body lacks Status (Issue #119)"
+else
+  fail "Pass check reviewer with --status Approved when body lacks Status" "Output: ${CHECK_OUT}"
+fi
+
+# 2. ドラフトに - Status: Changes requested があっても、--status Approved で送信すると Approved だけが投稿されること (P1-1 回帰防止)
+cat <<'EOF' > "${DRAFT_PATH}"
+# Review Draft: PR #118
+- Role: reviewer
+- Round: 1
+- Status: Changes requested
+## Summary
+Review summary.
+EOF
+
+MOCK_LAST_BODY="${LAST_BODY}" PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh comment reviewer --status Approved --round 1
+CAPTURED_SUBMITTED="$(cat "${LAST_BODY}" 2>/dev/null || true)"
+STATUS_COUNT=$(grep -c "^- Status:" "${LAST_BODY}" || true)
+if [[ "${CAPTURED_SUBMITTED}" == *"- Status: Approved"* ]] && [[ "${CAPTURED_SUBMITTED}" != *"- Status: Changes requested"* ]] && [[ "${STATUS_COUNT}" -eq 1 ]]; then
+  pass "Override body Status with CLI --status Approved and avoid duplicate Status lines (RV095 P1-1)"
+else
+  fail "Override body Status with CLI --status Approved" "Count: ${STATUS_COUNT}, Body: ${CAPTURED_SUBMITTED}"
+fi
+
+# 3. 逆の組み合わせ: ドラフトに - Status: Approved があっても、--status 'Changes requested' で送信すると Changes requested だけが投稿されること (P1-1 回帰防止)
+cat <<'EOF' > "${DRAFT_PATH}"
+# Review Draft: PR #118
+- Role: reviewer
+- Round: 1
+- Status: Approved
+## Summary
+Review summary.
+EOF
+
+MOCK_LAST_BODY="${LAST_BODY}" PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh comment reviewer --status "Changes requested" --round 1
+CAPTURED_SUBMITTED2="$(cat "${LAST_BODY}" 2>/dev/null || true)"
+STATUS_COUNT2=$(grep -c "^- Status:" "${LAST_BODY}" || true)
+if [[ "${CAPTURED_SUBMITTED2}" == *"- Status: Changes requested"* ]] && [[ "${CAPTURED_SUBMITTED2}" != *"- Status: Approved"* ]] && [[ "${STATUS_COUNT2}" -eq 1 ]]; then
+  pass "Override body Status with CLI --status 'Changes requested' (RV095 P1-1)"
+else
+  fail "Override body Status with CLI --status 'Changes requested'" "Count: ${STATUS_COUNT2}, Body: ${CAPTURED_SUBMITTED2}"
+fi
+
+# 4. ドラフトに旧 Status 行が残っていても、check は --status のみ検証して通過すること (指針9)
+cat <<'EOF' > "${DRAFT_PATH}"
+# Review Draft: PR #118
+- Role: reviewer
+- Round: 1
+- Status: Changes requested
+## Summary
+Review summary.
+EOF
+
+CHECK_PASS=$(PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh check reviewer --status "Changes requested" 2>&1 || true)
+if [[ "${CHECK_PASS}" == *"OK: check passed (reviewer)"* ]]; then
+  pass "Pass check reviewer regardless of legacy Status in body (RV095 P1-1 (a))"
+else
+  fail "Pass check reviewer regardless of legacy Status in body" "Output: ${CHECK_PASS}"
+fi
+
+# ---------------------------------------------------------------------------
+# Test 32: comment - state.json からの Round 解決と target_id 照合 (RV095 P2-1)
+# ---------------------------------------------------------------------------
+TEST_ENV=$(setup_mock_env "t32")
+DRAFT_PATH="${TEST_ENV}/worktree/.input/review/reviewer-draft.md"
+LAST_BODY="${TEST_ENV}/last_body.txt"
+STATE_FILE="${TEST_ENV}/worktree/.input/review/state.json"
+
+# モックの PR 番号は 2 なので、一致する target_id: "2" を設定
+cat <<'EOF' > "${STATE_FILE}"
+{
+  "reviewer": {
+    "round": 3,
+    "target_id": "2",
+    "target_type": "pr"
+  }
+}
+EOF
+
+cat <<'EOF' > "${DRAFT_PATH}"
+# Review Draft
+- Role: reviewer
+## Summary
+Draft body with absolutely no Round line.
+EOF
+
+cd "${TEST_ENV}/worktree"
+MOCK_LAST_BODY="${LAST_BODY}" PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh comment reviewer --status "Changes requested"
+if grep -q "<!-- review-sync role=reviewer round=3 -->" "${LAST_BODY}"; then
+  pass "Resolve round from state.json when target_id matches (RV095 P2-1)"
+else
+  fail "Resolve round from state.json when target_id matches" "Body: $(cat "${LAST_BODY}" 2>/dev/null || true)"
+fi
+
+if grep -q '"last_sent_round": 3' "${STATE_FILE}"; then
+  pass "Update state.json with last_sent_round on comment success (Issue #119)"
+else
+  fail "Update state.json with last_sent_round on comment success" "State: $(cat "${STATE_FILE}" 2>/dev/null || true)"
+fi
+
+# target_id が不一致の場合、エラー停止すること (P2-1 回帰防止)
+cat <<'EOF' > "${STATE_FILE}"
+{
+  "reviewer": {
+    "round": 7,
+    "target_id": "999",
+    "target_type": "pr"
+  }
+}
+EOF
+cat <<'EOF' > "${DRAFT_PATH}"
+# Review Draft
+- Role: reviewer
+## Summary
+Draft body.
+EOF
+
+MISMATCH_ERR=$(MOCK_LAST_BODY="${LAST_BODY}" PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh comment reviewer --status "Changes requested" 2>&1 || true)
+if [[ "${MISMATCH_ERR}" == *"state.json の対象"* && "${MISMATCH_ERR}" == *"一致しません"* ]]; then
+  pass "Stop with clear error when state.json target_id mismatches destination (RV095 P2-1)"
+else
+  fail "Stop with clear error when state.json target_id mismatches destination" "Output: ${MISMATCH_ERR}"
+fi
+
+# ---------------------------------------------------------------------------
+# Test 33: comment - --round CLI 指定による明示的オーバーライド (Issue #119)
+# ---------------------------------------------------------------------------
+TEST_ENV=$(setup_mock_env "t33")
+DRAFT_PATH="${TEST_ENV}/worktree/.input/review/reviewer-draft.md"
+LAST_BODY="${TEST_ENV}/last_body.txt"
+STATE_FILE="${TEST_ENV}/worktree/.input/review/state.json"
+
+cat <<'EOF' > "${STATE_FILE}"
+{
+  "reviewer": {
+    "round": 2,
+    "target_id": "2",
+    "target_type": "pr"
+  }
+}
+EOF
+
+cat <<'EOF' > "${DRAFT_PATH}"
+# Review Draft
+- Role: reviewer
+## Summary
+Draft body.
+EOF
+
+cd "${TEST_ENV}/worktree"
+MOCK_LAST_BODY="${LAST_BODY}" PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh comment reviewer --status Approved --round 5
+if grep -q "<!-- review-sync role=reviewer round=5 -->" "${LAST_BODY}"; then
+  pass "Override round via --round CLI argument (Issue #119)"
+else
+  fail "Override round via --round CLI argument" "Body: $(cat "${LAST_BODY}" 2>/dev/null || true)"
+fi
+
+# ---------------------------------------------------------------------------
+# Test 34: check - reviewee への --status 指定は拒否 (Issue #119)
+# ---------------------------------------------------------------------------
+TEST_ENV=$(setup_mock_env "t34")
+DRAFT_PATH="${TEST_ENV}/worktree/.input/review/reviewee-draft.md"
+
+cat <<'EOF' > "${DRAFT_PATH}"
+# Draft
+- Role: reviewee
+- Round: 1
+## Summary
+summary text
+EOF
+
+cd "${TEST_ENV}/worktree"
+ERR_OUT=$(PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh check reviewee --status Approved 2>&1 || true)
+if [[ "${ERR_OUT}" == *"reviewee に --status を指定することはできません"* ]]; then
+  pass "Reject --status argument for reviewee (Issue #119)"
+else
+  fail "Reject --status argument for reviewee" "Output: ${ERR_OUT}"
+fi
+
+# ---------------------------------------------------------------------------
+# Test 35: pull - state.json および incoming.md の生成と incoming/outgoing 分離 (Issue #119)
+# ---------------------------------------------------------------------------
+TEST_ENV=$(setup_mock_env "t35")
+cd "${TEST_ENV}/worktree"
+
+cat <<'EOF' > "${TEST_ENV}/bin/gh"
+#!/usr/bin/env bash
+if [[ "$*" == *"pr view --json number,url"* ]]; then
+  echo '{"number": 42}'
+  exit 0
+elif [[ "$*" == *"pr view 42 --json comments,reviews"* ]]; then
+  cat <<'JSON'
+{
+  "comments": [
+    {
+      "body": "<!-- review-sync role=reviewer round=2 -->\n# Review PR #42\n- Role: reviewer\n- Round: 2\n- Status: Changes requested\n## Summary\nPlease address findings.\n",
+      "createdAt": "2026-11-04T12:00:00Z"
+    }
+  ],
+  "reviews": []
+}
+JSON
+  exit 0
+elif [[ "$*" == *"repo view"* ]]; then
+  echo "example/repo"
+  exit 0
+elif [[ "$*" == *"pulls/42/comments"* ]]; then
+  echo "[]"
+  exit 0
+fi
+exit 0
+EOF
+chmod +x "${TEST_ENV}/bin/gh"
+
+PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh pull reviewee
+
+PULLED_DRAFT="${TEST_ENV}/worktree/.input/review/reviewee-draft.md"
+INCOMING_FILE="${TEST_ENV}/worktree/.input/review/incoming.md"
+STATE_FILE="${TEST_ENV}/worktree/.input/review/state.json"
+
+if [[ -f "${INCOMING_FILE}" ]] && grep -q "Please address findings." "${INCOMING_FILE}" && ! grep -q "<!-- review-sync" "${INCOMING_FILE}"; then
+  pass "Generate incoming.md without raw marker on pull (Issue #119)"
+else
+  fail "Generate incoming.md without raw marker on pull" "Incoming: $(cat "${INCOMING_FILE}" 2>/dev/null || true)"
+fi
+
+if [[ -f "${STATE_FILE}" ]] && grep -q '"round": 2' "${STATE_FILE}" && grep -q '"target_id": "42"' "${STATE_FILE}"; then
+  pass "Generate state.json with round and target_id on pull (Issue #119)"
+else
+  fail "Generate state.json with round and target_id on pull" "State: $(cat "${STATE_FILE}" 2>/dev/null || true)"
+fi
+
+# ---------------------------------------------------------------------------
+# Test 36: state.json - 不正な round 値 (非整数) の場合はエラー停止 (RV095 P3-2)
+# ---------------------------------------------------------------------------
+TEST_ENV=$(setup_mock_env "t36")
+DRAFT_PATH="${TEST_ENV}/worktree/.input/review/reviewer-draft.md"
+STATE_FILE="${TEST_ENV}/worktree/.input/review/state.json"
+
+cat <<'EOF' > "${STATE_FILE}"
+{
+  "reviewer": {
+    "round": "1 --> injected <!--",
+    "target_id": "2",
+    "target_type": "pr"
+  }
+}
+EOF
+
+cat <<'EOF' > "${DRAFT_PATH}"
+# Review Draft
+- Role: reviewer
+## Summary
+Draft body.
+EOF
+
+cd "${TEST_ENV}/worktree"
+INJECT_ERR=$(PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh comment reviewer --status "Changes requested" 2>&1 || true)
+if [[ "${INJECT_ERR}" == *"round 値が無効です"* ]]; then
+  pass "Reject invalid non-numeric round from state.json (RV095 P3-2)"
+else
+  fail "Reject invalid non-numeric round from state.json" "Output: ${INJECT_ERR}"
+fi
+
+# ---------------------------------------------------------------------------
+# Test 37: check コマンドでの --round オプション拒否および本文読み戻し廃止 (RV095 P3-1 / 要確認事項)
+# ---------------------------------------------------------------------------
+TEST_ENV=$(setup_mock_env "t37")
+DRAFT_PATH="${TEST_ENV}/worktree/.input/review/reviewer-draft.md"
+
+cat <<'EOF' > "${DRAFT_PATH}"
+# Review Draft
+- Role: reviewer
+- Round: 1
+## Summary
+Draft body.
+EOF
+
+cd "${TEST_ENV}/worktree"
+# check に --round は指定不可
+CHECK_ROUND_ERR=$(PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh check reviewer --status Approved --round 1 2>&1 || true)
+if [[ "${CHECK_ROUND_ERR}" == *"--round オプションは使用できません"* ]]; then
+  pass "Reject --round option for check subcommand (RV095 要確認事項)"
+else
+  fail "Reject --round option for check subcommand" "Output: ${CHECK_ROUND_ERR}"
+fi
+
+# state.json も --round もない場合、本文に Round: 1 があってもエラー停止すること (本文読み戻し廃止)
+COMMENT_NO_ROUND_ERR=$(PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh comment reviewer --status Approved 2>&1 || true)
+if [[ "${COMMENT_NO_ROUND_ERR}" == *"Round 番号を解決できませんでした"* ]]; then
+  pass "Refuse fallback to draft body Round line and require state.json or --round (RV095 P3-1)"
+else
+  fail "Refuse fallback to draft body Round line and require state.json or --round" "Output: ${COMMENT_NO_ROUND_ERR}"
+fi
+
+# ---------------------------------------------------------------------------
+# Test 38: comment - state.json 更新失敗時に stderr に警告を出力すること (RV096 P3-1 / 指針10)
+# ---------------------------------------------------------------------------
+TEST_ENV=$(setup_mock_env "t38")
+DRAFT_PATH="${TEST_ENV}/worktree/.input/review/reviewer-draft.md"
+LAST_BODY="${TEST_ENV}/last_body.txt"
+STATE_FILE="${TEST_ENV}/worktree/.input/review/state.json"
+
+cat <<'EOF' > "${STATE_FILE}"
+{
+  "reviewer": {
+    "round": 1,
+    "target_id": "2",
+    "target_type": "pr"
+  }
+}
+EOF
+chmod 444 "${STATE_FILE}"
+
+cat <<'EOF' > "${DRAFT_PATH}"
+# Review Draft
+- Role: reviewer
+## Summary
+Draft body.
+EOF
+
+cd "${TEST_ENV}/worktree"
+COMMENT_WARN_OUT=$(MOCK_LAST_BODY="${LAST_BODY}" PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh comment reviewer --status Approved 2>&1 || true)
+chmod 644 "${STATE_FILE}" 2>/dev/null || true
+
+if [[ "${COMMENT_WARN_OUT}" == *"警告: state.json 更新失敗"* ]] && [[ "${COMMENT_WARN_OUT}" == *"OK: 送信が完了し"* ]]; then
+  pass "Emit stderr warning on state.json write failure without failing comment (RV096 P3-1)"
+else
+  fail "Emit stderr warning on state.json write failure" "Output: ${COMMENT_WARN_OUT}"
 fi
 
 echo "=========================================="
