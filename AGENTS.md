@@ -28,7 +28,7 @@
 
 sync handoff + `repo-review-helper` CLI + `herdr-orchestrator` CLI: [repo-review](.agents/skills/repo-review/SKILL.md)。Finding起票・品質検証: [review-finding](.agents/skills/review-finding/SKILL.md)。汎用 handoff/復旧: [repo-workflow](.agents/skills/repo-workflow/SKILL.md)。
 
-内部レビュー改善（Phase 1 実装中、Issue #61 / #64）: [設計書](docs/reviews/REVIEW_SKILL_PHASE1_DESIGN.md)、[詳細実装設計書](docs/reviews/REVIEW_SKILL_PHASE1_IMPLEMENTATION.md)。CLI 入口は `scripts/repo-review-helper`。GitHub App 連携・レビュー運用規約（Issue #85 / #88）: [運用規約方針](docs/reviews/GITHUB_APP_AND_REVIEW_POLICY.md)。CLI 入口は `scripts/review-sync.sh`。
+内部レビュー改善: [設計書](docs/reviews/REVIEW_SKILL_PHASE1_DESIGN.md)、[詳細実装設計書](docs/reviews/REVIEW_SKILL_PHASE1_IMPLEMENTATION.md)。CLI 入口は `scripts/repo-review-helper`。GitHub App 連携・レビュー運用規約: [運用規約方針](docs/reviews/GITHUB_APP_AND_REVIEW_POLICY.md)。CLI 入口は `scripts/review-sync.sh`。
 
 ## Herdr Orchestrator のレビュー
 

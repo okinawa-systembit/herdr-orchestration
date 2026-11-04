@@ -226,7 +226,7 @@ Orchestrator 側で Herdr CLI の変更を追従実装しない。
 
 ---
 
-- 未完了 task の一覧表示 (`task-list` 等) は MVP 必須要件とせず、Task Registry の運用実績を見て将来追加を検討する。
+- 未完了 task の一覧表示は、v0.3.0 で `task-list` コマンドとして実装完了済み（[設計書](../herdr-orchestrator-task-list.md)）。
 
 <a id="sec-24"></a>
 
