@@ -159,7 +159,7 @@ GitHub App 設定が存在しない環境では、個人認証による自 PR �
 
 ## 7. 機械検査とエージェント判断の境界およびテンプレート主導運用方針（Issue #113）
 
-リポジトリ基本方針（[Issue #113](https://github.com/okinawa-systembit/herdr-orchestration/issues/113)）に基づき、レビュー同期基盤およびレビューワークフローにおける機械検査とエージェント判断の責務を以下のように切り分ける。
+リポジトリ基本方針（[基本方針正本](../core-principles.md)、[Issue #113](https://github.com/okinawa-systembit/herdr-orchestration/issues/113)）に基づき、レビュー同期基盤およびレビューワークフローにおける機械検査とエージェント判断の責務を以下のように切り分ける。
 
 ### 7.1 機械検査の対象（安全門番と固定規約）
 
