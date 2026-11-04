@@ -210,7 +210,9 @@ herdr-orchestrator reconcile-dispatch <task_id> \
 
 ---
 
-## 6. Codex Agent 実行承認設定 (`codex execpolicy`)
+## 6. Codex Agent 固有の設定
+
+### 6.1 実行承認設定 (`codex execpolicy`)
 
 Codex を利用する場合、自律実行の中断を防ぐために `~/.codex/rules/default.rules` へ許可ルールを追加します（テンプレート: `skills/herdr-orchestrator/install/codex-execpolicy-snippet.rules`）。
 
@@ -228,3 +230,34 @@ prefix_rule(pattern=["herdr-orchestrator", "result-submit"], decision="allow")
 > **副作用を伴うコマンド（`role set`, `role clear`, `handoff`）の扱い**  
 > `role set` や `handoff` は Role Binding の書き換えや UI 表示名変更、相手ペインへのプロンプト送信などの環境変更（副作用）を伴うため、公式テンプレートでは意図的に自動許可（`allow`）から除外されており、Codex 側の通常承認プロンプト（Human-in-the-loop）が表示されます（方針の詳細は [install/README.md](../install/README.md#21-コマンド分類と許可方針) を参照）。  
 > ※ `role` コマンド全体を一括許可（`pattern=["herdr-orchestrator", "role"]`）すると、`role clear --all --global` まで無条件で自動実行されるリスクがあります。設定変更や委託は人間の承認を経て実行することが推奨されます。
+
+### 6.2 共有デーモン（`app-server`）の無効化設定（Codex 利用時の必須設定）
+
+Codex CLI（v0.157.0 以降）において、デフォルトで自動起動されるバックグラウンドデーモン（`codex app-server --managed-daemon`）が、最初に起動したペインの環境変数（`HERDR_PANE_ID` 等）を保持し続ける問題が確認されています（詳細は [Issue #122](https://github.com/okinawa-systembit/herdr-orchestration/issues/122) / Herdr 公式 [#4649](https://github.com/herdrdev/herdr/issues/4649) を参照）。
+
+別ペインで Codex を起動してタスクを受信・実行した際に、呼び出し元ペインの誤認（`caller_not_task_participant`）による安全停止を防ぐため、**Codex 利用時は共有デーモンを無効化して各ペインのシェルプロセスツリー配下で動作させる設定が必須**となります。
+
+#### 1. 恒久設定（推奨）
+
+`~/.codex/config.toml` に以下の設定を追加します（または `codex features disable daemon_auto_start` を実行）：
+
+```toml
+[features]
+daemon_auto_start = false
+```
+
+#### 2. 実行中デーモンの停止
+
+既にバックグラウンドでデーモンが起動している場合は、以下のコマンドで停止します：
+
+```bash
+codex app-server daemon stop
+```
+
+#### 3. 単一セッションでの起動
+
+起動時にデーモンを使用しないオプションを付与することも可能です：
+
+```bash
+codex --no-daemon
+```
