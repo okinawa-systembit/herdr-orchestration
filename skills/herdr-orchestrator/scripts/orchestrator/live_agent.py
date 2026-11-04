@@ -306,6 +306,13 @@ def _try_recover_unique_party(
     if not candidate_pane:
         return None
 
+    # If HERDR_PANE_ID is present, only permit recovery if the contaminated pane
+    # matches the other task participant (e.g. shared daemon carrying requester wZ:p1).
+    # Unrelated third-party panes must NOT recover to candidate party.
+    if env_pane_id:
+        if not other_pane or env_pane_id != other_pane:
+            return None
+
     actual_cwd = proc_cwd.resolve()
     target_cwd = candidate_cwd.resolve()
 
@@ -336,12 +343,18 @@ def _try_recover_unique_party(
         except LiveAgentError:
             pass
 
-    # 4. Herdr-wide uniqueness across all active panes (if pane listing is supported by Herdr)
+    # 4. Herdr-wide uniqueness across all active panes (MUST be proven via pane list)
     active_in_tree = _find_active_panes_in_worktree(actual_cwd)
-    if active_in_tree is not None:
-        if len(active_in_tree) != 1 or candidate_pane not in active_in_tree:
-            # Multiple active panes in this worktree -> Ambiguous! Fail closed.
-            return None
+    if active_in_tree is None:
+        print(
+            f"警告: Herdr ペイン一覧を取得できないため、{actual_cwd} における呼び出し元の一意性を確認できず自己回復をスキップしました。",
+            file=sys.stderr,
+        )
+        return None
+
+    if len(active_in_tree) != 1 or candidate_pane not in active_in_tree:
+        # Multiple active panes in this worktree -> Ambiguous! Fail closed.
+        return None
 
     # Proven unique! Safe to recover.
     reason = f"{role_label}_cwd_affinity_contaminated" if env_pane_id else f"{role_label}_cwd_affinity_missing_env"

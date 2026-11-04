@@ -568,12 +568,15 @@ Requester の `context.worktree.path` と Worker の `worker.cwd` は異なっ�
 作業ディレクトリ（CWD）は、同一リポジトリ・同一 worktree に複数のエージェント（Requester と Worker、または第三のペイン）が同居している場合、ペインを一意に特定する手がかりにはならない。したがって、自己回復機構は **「対象作業ディレクトリ（worktree）においてアクティブなペインが一意に特定できる場合」にのみ安全に回復を行い、曖昧性がある場合は従来通り安全停止（fail-closed）** する設計とする：
 
 1. **通常解決（最速・互換パス）**:
-   - `os.environ.get("HERDR_PANE_ID")` が存在し、そのペインの `foreground_cwd` がプロセスの `proc_cwd` と同一ディレクトリまたは上位ツリー（`is_strictly_within_directory`）である場合は、通常通りそのペインを Caller として採用する。
+   - `os.environ.get("HERDR_PANE_ID")` が存在し、そのペインの `foreground_cwd` がタスクのコンテキスト範囲（Worker または Requester の作業ディレクトリ）内にあること。
+   - プロセスの実 `proc_cwd` がタスク作業ツリーの外にある場合（外部テストハーネス等からの実行）は、環境変数ペインの CWD を信頼して通常解決（互換性確保）。
+   - プロセスの実 `proc_cwd` がタスク作業ツリー内にある場合は、環境変数ペインの CWD と `proc_cwd` が一致していることを確認する（一致していれば採用、乖離していれば汚染とみなしてフォールバック回復へ進む）。
 2. **クロスワークスペース環境での自己回復の成立条件（一意性の厳格な証明）**:
    - `HERDR_PANE_ID` のペインの `cwd` と `proc_cwd` が乖離している場合（別ディレクトリからの環境変数汚染）、または `HERDR_PANE_ID` が空の場合（環境変数欠落）：
+     - **汚染元の限定**: 環境変数が存在する場合、汚染からの回復が許可されるのは「その環境変数のペインがタスクのもう一方の関係者（Worker 回復時は Requester、Requester 回復時は Worker）である場合」（共有デーモンによる引き継ぎの典型例）に限る。無関係な第三者ペインが Worker の worktree に移動して実行した場合は、誤回復を防止するため回復を行わず安全停止（`caller_not_task_participant`）とする。
      - **作業ディレクトリの厳密一致**: `proc_cwd` が候補ロール（Worker または Requester）の作業ディレクトリ配下に厳密に含まれていること（git common dir 等による広義の親和性は排除し、別 worktree の混同を防止）。
      - **タスク関係者間の競合検査**: もう一方の関係者（Worker に対する Requester 等）が存在する場合、そのペインが同一 worktree に滞在していないこと（滞在している場合はどちらのペインか判別不能なため回復不可）。
-     - **Herdr 全体でのアクティブペイン一意性**: Herdr 上で対象 worktree に存在するアクティブペインが候補ペインただ 1 つのみであること（第三のペインが存在する場合は曖昧なため回復不可）。
+     - **Herdr 全体でのアクティブペイン一意性の必須証明**: `herdr pane list` を介して対象 worktree に存在するアクティブペインが候補ペインただ 1 つであることを客観証明すること。`herdr pane list` の取得に失敗した場合やエラー時は、一意性が証明できないため回復を行わず安全停止（fail-closed）し、標準エラーに警告を出力する。
      - 上記条件がすべて成立した場合に限り、真の Caller ペインとして安全に自己回復する。
 3. **安全制約の堅持（同一 worktree におけるフェイルクローズ停止）**:
    - 同一 worktree に Requester と Worker（または第三者）が同居している場合、環境変数が欠落していてもプロセスの CWD だけでは呼び出し元を一意特定できないため、回復を諦めて安全に `verified: false`（`caller_live_agent_unavailable`）として停止する。
@@ -581,7 +584,7 @@ Requester の `context.worktree.path` と Worker の `worker.cwd` は異なっ�
 4. **`result-submit` の厳格な防護**:
    - Registry のタスク結果を更新する `result-submit`（`verify_worker_submit_context`）においても、同様の一意性証明ルールを厳格に適用する。同一 worktree に Requester 等が同居している曖昧な環境では環境変数欠落時の提出を拒否し、第三者や Requester による誤提出・不正書き換えを完全に防護する。
 5. **可観測性の担保（原則 2・指針 10）**:
-   - 自己回復が行われた場合、`recipient_verification` に `caller_recovery` 情報を記録し、標準エラー（`sys.stderr`）に環境変数汚染・欠落からの自動回復警告を出力する。
+   - 自己回復が行われた場合、`recipient_verification` に `caller_recovery` 情報を記録し、標準エラー（`sys.stderr`）に環境変数汚染・欠落からの自動回復警告を出力する。一意性検査が失敗した際も警告を出力し、黙って失敗しない。
 
 ---
 

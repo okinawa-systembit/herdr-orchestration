@@ -619,6 +619,9 @@ if len(sys.argv) >= 3 and sys.argv[1] == "tab" and sys.argv[2] == "list":
     raise SystemExit(0)
 
 if len(sys.argv) >= 3 and sys.argv[1] == "pane" and sys.argv[2] == "list":
+    if os.environ.get("FAKE_PANE_LIST_FAIL"):
+        sys.stderr.write("fake error: pane list failed\\n")
+        raise SystemExit(1)
     print(json.dumps({"result": {"panes": state.get("panes", [])}}))
     raise SystemExit(0)
 
@@ -1804,6 +1807,36 @@ raise SystemExit(99)
             ("caller_not_task_participant", "caller_live_agent_unavailable"),
         )
         self.assertNotIn("caller_recovery", st_unrelated["recipient_verification"])
+
+        # =========================================================================
+        # Scenario 5: Reviewer RV101 P2-1 regression test (G1: pane list fails)
+        # When herdr pane list fails, uniqueness CANNOT be proven -> FAIL CLOSED!
+        # =========================================================================
+        fail_pane_list_env = {**self.env, "FAKE_PANE_LIST_FAIL": "1"}
+        del fail_pane_list_env["HERDR_PANE_ID"]
+        st_fail_list = json.loads(_run_cli("task-status", task_id, env=fail_pane_list_env, cwd=self.repo_b).stdout)
+        self.assertFalse(
+            st_fail_list["recipient_verification"]["verified"],
+            "Must fail closed when herdr pane list fails (uniqueness unproven)",
+        )
+        self.assertNotIn("caller_recovery", st_fail_list["recipient_verification"])
+
+        # =========================================================================
+        # Scenario 6: Reviewer RV101 P2-2 regression test (F: third-party pane in worker worktree)
+        # An unrelated third-party pane w15:p1 executing inside repo_b must NOT recover as worker!
+        # =========================================================================
+        third_party_env = {**self.env, "HERDR_PANE_ID": "w15:p1"}
+        st_third = json.loads(_run_cli("task-status", task_id, env=third_party_env, cwd=self.repo_b).stdout)
+        self.assertFalse(
+            st_third["recipient_verification"]["verified"],
+            "Unrelated third party pane in worker worktree must not recover as worker",
+        )
+        self.assertEqual(st_third["recipient_verification"]["caller_role_in_task"], "other")
+        self.assertIn(
+            st_third["recipient_verification"]["reason"],
+            ("caller_not_task_participant", "caller_live_agent_unavailable"),
+        )
+        self.assertNotIn("caller_recovery", st_third["recipient_verification"])
 
 
 if __name__ == "__main__":
