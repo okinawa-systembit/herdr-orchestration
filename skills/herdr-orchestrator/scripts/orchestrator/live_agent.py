@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -248,6 +249,169 @@ def check_cwd_affinity(pane_cwd: Path | str, current_cwd: Path | str) -> bool:
         pass
 
     return False
+
+
+def resolve_caller_live_agent_for_task(
+    doc: dict[str, Any],
+    *,
+    preferred_role: str = "worker",
+    proc_cwd: Path | None = None,
+) -> tuple[LiveAgentSnapshot, dict[str, Any] | None]:
+    """
+    Resolve caller LiveAgentSnapshot with fallback recovery when HERDR_PANE_ID is contaminated
+    (e.g., shared Codex daemon retaining another pane) or missing (e.g., Cursor subshell).
+    Returns (snapshot, recovery_info_or_none).
+    """
+    actual_cwd = (proc_cwd or Path.cwd()).resolve()
+    env_pane_id = (os.environ.get("HERDR_PANE_ID") or "").strip()
+
+    initial_snap: LiveAgentSnapshot | None = None
+    cwd_affinity_ok = False
+
+    if env_pane_id:
+        try:
+            initial_snap = get_live_agent(env_pane_id)
+            cwd_affinity_ok = check_cwd_affinity(initial_snap.foreground_cwd, actual_cwd)
+        except LiveAgentError:
+            initial_snap = None
+
+    # Fast path: environment variable is intact and cwd has affinity
+    if initial_snap is not None and cwd_affinity_ok:
+        return initial_snap, None
+
+    # Fallback recovery: environment variable is missing or mismatched (contaminated)
+    worktree_path = Path(doc["context"]["worktree"]["path"]).resolve()
+    worker_info = doc.get("worker", {})
+    requester_info = doc.get("requester", {})
+
+    worker_pane = worker_info.get("pane_id") or worker_info.get("agent_name")
+    worker_cwd = Path(worker_info.get("cwd") or worktree_path).resolve()
+
+    requester_pane = requester_info.get("pane_id") or requester_info.get("agent_name")
+    requester_cwd = worktree_path
+
+    def _try_recover_worker() -> tuple[LiveAgentSnapshot, dict[str, Any]] | None:
+        if worker_pane and check_cwd_affinity(worker_cwd, actual_cwd):
+            try:
+                w_snap = get_live_agent(worker_pane)
+                if check_cwd_affinity(w_snap.foreground_cwd, actual_cwd) and w_snap.agent_status != "none":
+                    reason = "worker_cwd_affinity_contaminated" if env_pane_id else "worker_cwd_affinity_missing_env"
+                    recovery = {
+                        "recovered": True,
+                        "reason": reason,
+                        "env_pane_id": env_pane_id or None,
+                        "resolved_pane_id": worker_pane,
+                        "message": (
+                            f"環境変数 HERDR_PANE_ID ({env_pane_id or '未設定'}) が作業ディレクトリと矛盾していたため、"
+                            f"タスク Worker コンテキスト ({worker_pane}) から呼び出し元を自動解決しました。"
+                        ),
+                    }
+                    print(
+                        f"警告: HERDR_PANE_ID ({env_pane_id or '未設定'}) が作業ディレクトリ ({actual_cwd}) と一致しないため、"
+                        f"タスク Worker コンテキスト ({worker_pane}) から呼び出し元を自動解決しました。",
+                        file=sys.stderr,
+                    )
+                    return w_snap, recovery
+            except LiveAgentError:
+                pass
+        return None
+
+    def _try_recover_requester() -> tuple[LiveAgentSnapshot, dict[str, Any]] | None:
+        if requester_pane and check_cwd_affinity(requester_cwd, actual_cwd):
+            try:
+                r_snap = get_live_agent(requester_pane)
+                if check_cwd_affinity(r_snap.foreground_cwd, actual_cwd) and r_snap.agent_status != "none":
+                    reason = "requester_cwd_affinity_contaminated" if env_pane_id else "requester_cwd_affinity_missing_env"
+                    recovery = {
+                        "recovered": True,
+                        "reason": reason,
+                        "env_pane_id": env_pane_id or None,
+                        "resolved_pane_id": requester_pane,
+                        "message": (
+                            f"環境変数 HERDR_PANE_ID ({env_pane_id or '未設定'}) が作業ディレクトリと矛盾していたため、"
+                            f"タスク Requester コンテキスト ({requester_pane}) から呼び出し元を自動解決しました。"
+                        ),
+                    }
+                    print(
+                        f"警告: HERDR_PANE_ID ({env_pane_id or '未設定'}) が作業ディレクトリ ({actual_cwd}) と一致しないため、"
+                        f"タスク Requester コンテキスト ({requester_pane}) から呼び出し元を自動解決しました。",
+                        file=sys.stderr,
+                    )
+                    return r_snap, recovery
+            except LiveAgentError:
+                pass
+        return None
+
+    order = [_try_recover_worker, _try_recover_requester]
+    if preferred_role == "requester":
+        order = [_try_recover_requester, _try_recover_worker]
+
+    for try_fn in order:
+        res = try_fn()
+        if res is not None:
+            return res
+
+    # If recovery failed but we had an initial snapshot (even if mismatched), return it for normal fail-closed rejection
+    if initial_snap is not None:
+        return initial_snap, None
+
+    # Neither env nor recovery succeeded
+    raise LiveAgentError("caller HERDR_PANE_ID unavailable")
+
+
+def resolve_caller_live_agent_for_worker(
+    *,
+    expected_pane: str,
+    expected_cwd: Path,
+    proc_cwd: Path | None = None,
+) -> tuple[LiveAgentSnapshot, dict[str, Any] | None]:
+    """
+    Resolve caller LiveAgentSnapshot for Worker result-submit with fallback recovery.
+    """
+    actual_cwd = (proc_cwd or Path.cwd()).resolve()
+    env_pane_id = (os.environ.get("HERDR_PANE_ID") or "").strip()
+
+    initial_snap: LiveAgentSnapshot | None = None
+    cwd_affinity_ok = False
+
+    if env_pane_id:
+        try:
+            initial_snap = get_live_agent(env_pane_id)
+            cwd_affinity_ok = check_cwd_affinity(initial_snap.foreground_cwd, actual_cwd)
+        except LiveAgentError:
+            initial_snap = None
+
+    if initial_snap is not None and cwd_affinity_ok:
+        return initial_snap, None
+
+    if expected_pane and check_cwd_affinity(expected_cwd, actual_cwd):
+        try:
+            w_snap = get_live_agent(expected_pane)
+            if check_cwd_affinity(w_snap.foreground_cwd, actual_cwd) and w_snap.agent_status != "none":
+                reason = "worker_cwd_affinity_contaminated" if env_pane_id else "worker_cwd_affinity_missing_env"
+                recovery = {
+                    "recovered": True,
+                    "reason": reason,
+                    "env_pane_id": env_pane_id or None,
+                    "resolved_pane_id": expected_pane,
+                    "message": (
+                        f"環境変数 HERDR_PANE_ID ({env_pane_id or '未設定'}) が作業ディレクトリと矛盾していたため、"
+                        f"Worker コンテキスト ({expected_pane}) から呼び出し元を自動解決しました。"
+                    ),
+                }
+                print(
+                    f"警告: HERDR_PANE_ID ({env_pane_id or '未設定'}) が作業ディレクトリ ({actual_cwd}) と一致しないため、"
+                    f"Worker コンテキスト ({expected_pane}) から呼び出し元を自動解決しました。",
+                    file=sys.stderr,
+                )
+                return w_snap, recovery
+        except LiveAgentError:
+            pass
+
+    if initial_snap is not None:
+        return initial_snap, None
+
+    raise LiveAgentError("caller HERDR_PANE_ID unavailable")
 
 
 def verify_live_party_cwd(

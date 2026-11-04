@@ -2,7 +2,9 @@
 
 - **対象 Issue**: [#74 — ワークスペース跨ぎ配送・グローバルロール・日本語ロール名・ペイン自動追従への対応](https://github.com/okinawa-systembit/herdr-orchestration/issues/74)
 - **ステータス**: 実装完了（[PR #75](https://github.com/okinawa-systembit/herdr-orchestration/pull/75) / v0.4.0 にてマージ済み）
-- **関連 Issue**: [#72 — herdr agent rename 依存を廃止し pane_id ベースの Role Binding 管理へ移行](https://github.com/okinawa-systembit/herdr-orchestration/issues/72)
+- **関連 Issue**:
+  - [#72 — herdr agent rename 依存を廃止し pane_id ベースの Role Binding 管理へ移行](https://github.com/okinawa-systembit/herdr-orchestration/issues/72)
+  - [#121 — 呼び出し元ペイン判定の耐障害性向上（Codex共有デーモン汚染・Cursor環境変数欠落への対応）](https://github.com/okinawa-systembit/herdr-orchestration/issues/121)
 - **関連ドキュメント**:
   - [02-roles-and-task-contract.md](herdr-orchestrator/02-roles-and-task-contract.md#sec-4) (§4: 論理 Role と Routing Identity)
   - [03-task-registry.md](herdr-orchestrator/03-task-registry.md#sec-6) (§6: Task Registry / Canonical Schema)
@@ -550,6 +552,36 @@ Requester の `context.worktree.path` と Worker の `worker.cwd` は異なっ�
 2. **`--result-ref` を指定した場合の基準パス（曖昧さの排除）**:
    - `--result-ref` に相対パスが指定された場合の基準ディレクトリは、従来通り **「Task Registry の `context.worktree.path`（依頼元 worktree）」に一意固定** とする。
    - クロスワークスペース（`worker.cwd != context.worktree.path`）のタスクでは、Worker は原則として `--result-ref` を省略し `--summary` で結果を返却する。
+
+<a id="sec-7-6"></a>
+
+### 7.6 環境変数汚染・欠落時の呼び出し元自己回復機構（Issue #121）
+
+#### 1. 背景と課題
+
+エージェントの実行環境（特に Codex CLI の共有デーモン `codex app-server --managed-daemon` や Cursor の一部ツール子プロセス）では、環境変数 `HERDR_PANE_ID` が最初に起動した別ペインの値に汚染されたり、子プロセスに環境変数が引き継がれず欠落する事象が発生する（[Issue #121](https://github.com/okinawa-systembit/herdr-orchestration/issues/121) / [Issue #122](https://github.com/okinawa-systembit/herdr-orchestration/issues/122) / Herdr 公式 [#4649](https://github.com/herdrdev/herdr/issues/4649)）。
+
+これに対し、`get_caller_live_agent()` が `os.environ["HERDR_PANE_ID"]` のみを単一の信頼源としていると、タスクが正しい Worker ペインに配送され正しい作業ディレクトリで実行されているにもかかわらず、`recipient_verification` で `verified: false`（`caller_not_task_participant`）となり誤って停止してしまう。
+
+#### 2. 多層的な呼び出し元判定と自己回復ロジック
+
+プロセスの実作業ディレクトリ（`proc_cwd = Path.cwd().resolve()`）と Task Registry のコンテキスト（`expected_worker` および `expected_requester`）をクロスチェックし、環境変数の汚染または欠落を能動的に検知して真の Caller を安全に逆引き・回復する：
+
+1. **通常解決（最速・互換パス）**:
+   - `os.environ.get("HERDR_PANE_ID")` が存在し、そのペインの `foreground_cwd` と `proc_cwd` にディレクトリ親和性（`check_cwd_affinity`）がある場合は、通常通りそのペインを Caller として採用する。
+2. **汚染検知または欠落時のフォールバック回復**:
+   - `HERDR_PANE_ID` のペインの `cwd` と `proc_cwd` が乖離している場合（環境変数汚染）、または `HERDR_PANE_ID` が空の場合（環境変数欠落）：
+     - **Worker コンテキストの照合**:
+       - タスクの `expected_worker` の `worker.cwd` と `proc_cwd` に親和性があるかを検査。
+       - 親和性があり、かつ `worker.pane_id` のペインでエージェントが稼働中（`agent_status != "none"`）であれば、真の Caller を `worker.pane_id` として自動解決・回復する。
+     - **Requester コンテキストの照合**:
+       - Worker 照合に合致しない場合、タスクの `expected_requester`（`context.worktree.path`）と `proc_cwd` に親和性があるかを検査。
+       - 親和性があり、かつ `requester.pane_id` のペインでエージェントが稼働中であれば、真の Caller を `requester.pane_id` として自動解決・回復する。
+3. **安全制約の堅持（フェイルクローズ）**:
+   - `proc_cwd` が Worker にも Requester にも一致しない場合、または関係ペインでエージェントが稼働していない場合は回復を行わず、従来通り `verified: false`（`caller_not_task_participant` または `recipient_role_or_cwd_mismatch`）として安全停止する。
+4. **可観測性の担保（原則 2・指針 10）**:
+   - 回復が行われた場合、`recipient_verification` に `caller_recovery` 情報を記録し、標準エラー（`sys.stderr`）に環境変数汚染・欠落からの回復警告を出力する。
+   - `result-submit` の提出前コンテキスト検証（`verify_worker_submit_context`）においても同一の回復ロジックを適用し、結果提出を安全に完了させる。
 
 ---
 

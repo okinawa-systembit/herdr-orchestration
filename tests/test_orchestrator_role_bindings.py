@@ -1556,6 +1556,80 @@ raise SystemExit(99)
             self.assertEqual(data_pos["role"], "implementer")
             self.assertEqual(data_pos["pane_id"], "w15:p1")
 
+    def test_issue121_caller_pane_resilience_and_self_recovery(self) -> None:
+        """
+        Verify Issue #121: Fallback self-recovery for recipient verification and result-submit
+        when HERDR_PANE_ID is contaminated (e.g. shared Codex daemon) or missing (e.g. Cursor).
+        """
+        _run_cli("role", "set", "実装者", "w15:p1", env=self.env, cwd=self.repo_a)
+        _run_cli("role", "set", "レビュワー", "w15:p2", env=self.env, cwd=self.repo_a)
+
+        res_h = _run_cli(
+            "handoff",
+            "--mode",
+            "async",
+            "--to",
+            "レビュワー",
+            "--instruction",
+            "test resilience",
+            env=self.env,
+            cwd=self.repo_a,
+        )
+        self.assertEqual(res_h.returncode, 0, res_h.stdout)
+        task_id = json.loads(res_h.stdout)["task_id"]
+
+        # 1. Contaminated HERDR_PANE_ID (w16:p1 pointing to ticket_dir) but running in repo_a
+        # Simulates Codex running in worker pane w15:p2 whose tool process carries w16:p1 from shared daemon.
+        contaminated_env = {**self.env, "HERDR_PANE_ID": "w16:p1"}
+        st_res = _run_cli("task-status", task_id, env=contaminated_env, cwd=self.repo_a)
+        self.assertEqual(st_res.returncode, 0, st_res.stderr)
+        st_json = json.loads(st_res.stdout)
+        rec = st_json["recipient_verification"]
+        self.assertTrue(rec["verified"], "Must recover verified=True via cwd affinity")
+        self.assertEqual(rec["caller_role_in_task"], "worker")
+        self.assertEqual(rec["actual_caller"]["pane_id"], "w15:p2")
+        self.assertIn("caller_recovery", rec)
+        self.assertTrue(rec["caller_recovery"]["recovered"])
+        self.assertEqual(rec["caller_recovery"]["reason"], "worker_cwd_affinity_contaminated")
+        self.assertEqual(rec["caller_recovery"]["resolved_pane_id"], "w15:p2")
+        self.assertIn("警告: HERDR_PANE_ID", st_res.stderr)
+
+        # 2. Result-submit under contaminated environment
+        sub_res = _run_cli(
+            "result-submit",
+            task_id,
+            "--result-status",
+            "succeeded",
+            "--summary",
+            "Review finished under contaminated env",
+            env=contaminated_env,
+            cwd=self.repo_a,
+        )
+        self.assertEqual(sub_res.returncode, 0, sub_res.stderr + sub_res.stdout)
+        sub_json = json.loads(sub_res.stdout)
+        self.assertEqual(sub_json["result"]["status"], "succeeded")
+
+        # 3. Missing HERDR_PANE_ID (Cursor subshell scenario) on requester pane
+        missing_env = {k: v for k, v in self.env.items() if k != "HERDR_PANE_ID"}
+        req_res = _run_cli("task-result", task_id, env=missing_env, cwd=self.repo_a)
+        self.assertEqual(req_res.returncode, 0, req_res.stderr)
+        req_json = json.loads(req_res.stdout)
+        rec_req = req_json["recipient_verification"]
+        self.assertTrue(rec_req["verified"])
+        self.assertEqual(rec_req["caller_role_in_task"], "requester")
+        self.assertEqual(rec_req["actual_caller"]["pane_id"], "w15:p1")
+        self.assertTrue(rec_req["caller_recovery"]["recovered"])
+        self.assertEqual(rec_req["caller_recovery"]["reason"], "requester_cwd_affinity_missing_env")
+
+        # 4. Fail-closed security preserved: Unrelated cwd (ticket_dir) under w16:p1 must NOT recover
+        st_unrelated = json.loads(
+            _run_cli("task-status", task_id, env=contaminated_env, cwd=self.ticket_dir).stdout
+        )
+        self.assertFalse(st_unrelated["recipient_verification"]["verified"])
+        self.assertEqual(st_unrelated["recipient_verification"]["caller_role_in_task"], "other")
+        self.assertEqual(st_unrelated["recipient_verification"]["reason"], "caller_not_task_participant")
+        self.assertNotIn("caller_recovery", st_unrelated["recipient_verification"])
+
 
 if __name__ == "__main__":
     unittest.main()

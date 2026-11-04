@@ -340,7 +340,7 @@ Herdr への prompt 配送（[§6.11](03-task-registry.md#sec-6-11) 手順 7）�
 ```text
 1. prompt から task.id を取得
 2. herdr-orchestrator task-status <task.id>（正本は Registry）
-3. recipient_verification.verified == true かつ caller_role_in_task == "worker"（Registry worker.agent_name == 自分の live agent.name または HERDR_PANE_ID、かつ cwd・バインドロールが一致）であることを確認（不一致 → 作業や result-submit を一切行わず、自身のチャット画面で人間に報告して即停止。[クロスワークスペース設計書 §7.4](../herdr-orchestrator-cross-workspace.md#sec-7-4)）
+3. recipient_verification.verified == true かつ caller_role_in_task == "worker"（Registry worker.agent_name == 自分の live agent.name または HERDR_PANE_ID、かつ cwd・バインドロールが一致）であることを確認（不一致 → 作業や result-submit を一切行わず、自身のチャット画面で人間に報告して即停止。[クロスワークスペース設計書 §7.4](../herdr-orchestrator-cross-workspace.md#sec-7-4)；環境変数汚染・欠落時の自己回復機構は [§7.6](../herdr-orchestrator-cross-workspace.md#sec-7-6) 参照）
 4. dispatch.status の扱い:
    a. pending → 同一 task.id で task-status を **bounded 再 poll**（[§10.2](#sec-10-2) と同型: 推奨 最大 10 回、指数バックオフ初回 1 秒・上限 30 秒）。sent / uncertain になったら 5 へ
    b. sent / uncertain → 5 へ（task / result 状態が当該 role の作業開始を許可することを確認）
