@@ -255,21 +255,6 @@ do_check() {
     exit 1
   fi
 
-  # コードブロック (``` および ~~~) の開閉不一致（閉じ忘れ）の検査
-  local code_block_count
-  code_block_count="$(grep -c -E "^[[:space:]]*\`\`\`" "${target_file}" || true)"
-  if (( code_block_count % 2 != 0 )); then
-    echo "エラー: ドラフトファイル内でコードブロック（\`\`\`）が閉じられていません（開閉の数が一致しません: ${code_block_count} 個）。" >&2
-    exit 1
-  fi
-
-  local tilde_block_count
-  tilde_block_count="$(grep -c -E "^[[:space:]]*~~~" "${target_file}" || true)"
-  if (( tilde_block_count % 2 != 0 )); then
-    echo "エラー: ドラフトファイル内でコードブロック（~~~）が閉じられていません（開閉の数が一致しません: ${tilde_block_count} 個）。" >&2
-    exit 1
-  fi
-
   # メタデータ部の抽出（最初の見出し '## ' より前のヘッダー部分）
   local metadata
   metadata="$(awk '/^## /{exit} {print}' "${target_file}")"
@@ -511,7 +496,11 @@ create_pull_request() {
       local copy_tmp
       copy_tmp="$(create_temp_file "pr-body-copy")"
       temp_files+=("${copy_tmp}")
-      cp "${body_file_val}" "${copy_tmp}"
+      if [[ "${body_file_val}" == "-" ]]; then
+        cat > "${copy_tmp}"
+      else
+        cp "${body_file_val}" "${copy_tmp}"
+      fi
       format_markdown_file "${copy_tmp}"
       args+=("--body-file" "${copy_tmp}")
     else

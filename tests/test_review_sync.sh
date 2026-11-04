@@ -62,6 +62,11 @@ elif [[ "$*" == *"pr review --comment --body-file"* ]]; then
   exit "${MOCK_GH_EXIT:-0}"
 elif [[ "$*" == *"pr create"* ]]; then
   echo "mock-pr-create: GH_TOKEN=${GH_TOKEN:-none} args=$*" >> "${MOCK_GH_LOG:-/dev/null}"
+  for arg in "$@"; do
+    if [[ -f "$arg" ]]; then
+      cat "$arg" > "${MOCK_LAST_BODY:-/dev/null}"
+    fi
+  done
   echo "https://github.com/example/repo/pull/123"
   exit 0
 elif [[ "$*" == *"issue comment"* ]]; then
@@ -503,7 +508,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Test 12f: check - コードブロック未閉じ（開閉奇数個: ```）のドラフトで停止
+# Test 12f: check - コードブロックやチルダが混在するドラフトでも正常通過すること (Issue #110 / #113)
 # ---------------------------------------------------------------------------
 TEST_ENV=$(setup_mock_env "t12f")
 DRAFT_PATH="${TEST_ENV}/worktree/.input/review/reviewer-draft.md"
@@ -515,39 +520,19 @@ cat <<'EOF' > "${DRAFT_PATH}"
 - Status: Approved
 ## Summary
 ```markdown
-コードブロックが閉じられていない本文
-EOF
-
-cd "${TEST_ENV}/worktree"
-ERR_OUTPUT=$(PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh check reviewer 2>&1 || true)
-if [[ "${ERR_OUTPUT}" == *"コードブロック（\`\`\`）が閉じられていません"* ]]; then
-  pass "Reject draft with unclosed backtick code block"
-else
-  fail "Reject draft with unclosed backtick code block" "Output: ${ERR_OUTPUT}"
-fi
-
-# ---------------------------------------------------------------------------
-# Test 12g: check - チルダによるコードブロック未閉じ（開閉奇数個: ~~~）のドラフトで停止 (RV082 P3-2)
-# ---------------------------------------------------------------------------
-TEST_ENV=$(setup_mock_env "t12g")
-DRAFT_PATH="${TEST_ENV}/worktree/.input/review/reviewer-draft.md"
-
-cat <<'EOF' > "${DRAFT_PATH}"
-# Draft
-- Role: reviewer
-- Round: 1
-- Status: Approved
-## Summary
+コードブロック内の引用:
 ~~~bash
-チルダブロックが閉じられていない本文
+echo "nested"
+~~~
+```
 EOF
 
 cd "${TEST_ENV}/worktree"
-ERR_OUTPUT=$(PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh check reviewer 2>&1 || true)
-if [[ "${ERR_OUTPUT}" == *"コードブロック（~~~）が閉じられていません"* ]]; then
-  pass "Reject draft with unclosed tilde code block (RV082 P3-2)"
+OUTPUT=$(PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh check reviewer 2>&1 || true)
+if [[ "${OUTPUT}" == *"OK: check passed (reviewer)"* ]]; then
+  pass "Pass draft with mixed code blocks without mechanical parse error (Issue #110 / #113)"
 else
-  fail "Reject draft with unclosed tilde code block" "Output: ${ERR_OUTPUT}"
+  fail "Pass draft with mixed code blocks without mechanical parse error" "Output: ${OUTPUT}"
 fi
 
 # ---------------------------------------------------------------------------
@@ -1163,6 +1148,33 @@ if [[ "${CURRENT_CONTENT}" == "${ORIGINAL_CONTENT}" ]] && [[ "${REMAINING_TMP_CO
   pass "Protect original body-file and clean up temporary files on pr-create (RV082 P3-1)"
 else
   fail "Protect original body-file and clean up temporary files" "Content changed: $(( CURRENT_CONTENT != ORIGINAL_CONTENT )), Remaining tmp files: ${REMAINING_TMP_COUNT}"
+fi
+
+# ---------------------------------------------------------------------------
+# Test 30: pr-create - --body-file - で標準入力から本文を受け取り整形して渡すこと (RV083 P3-1 / RV085 P3-3 / Issue #110)
+# ---------------------------------------------------------------------------
+TEST_ENV=$(setup_mock_env "t30")
+cd "${TEST_ENV}/worktree"
+
+cat <<'EOF' > "${TEST_ENV}/worktree/scripts/lib/github_app_auth.py"
+import sys
+sys.exit(0)
+EOF
+
+MOCK_LOG="${TEST_ENV}/gh.log"
+MOCK_BODY="${TEST_ENV}/gh-body.txt"
+OUTPUT=$(printf '*  stdin item 1\n*  stdin item 2\n' | env -u GH_TOKEN -u GITHUB_TOKEN MOCK_GH_LOG="${MOCK_LOG}" MOCK_LAST_BODY="${MOCK_BODY}" PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh pr-create --title "Stdin PR" --body-file - 2>&1 || true)
+
+REMAINING_TMP_COUNT=$(find "${TEST_ENV}/worktree/.input/tmp" -type f | wc -l)
+CAPTURED_BODY="$(cat "${MOCK_BODY}" 2>/dev/null || true)"
+
+if grep -q "mock-pr-create: GH_TOKEN=none args=pr create --title Stdin PR --body-file ${TEST_ENV}/worktree/.input/tmp/pr-body-copy." "${MOCK_LOG}" 2>/dev/null \
+  && [[ "${REMAINING_TMP_COUNT}" -eq 0 ]] \
+  && [[ "${CAPTURED_BODY}" == *"- stdin item 1"* ]] \
+  && [[ "${CAPTURED_BODY}" != *"*  stdin item 1"* ]]; then
+  pass "Accept --body-file - from stdin, format with prettier, and clean up temp files (RV083 P3-1 / RV085 P3-3 / Issue #110)"
+else
+  fail "Accept --body-file - from stdin" "Log: $(cat "${MOCK_LOG}" 2>/dev/null || true), Remaining tmp: ${REMAINING_TMP_COUNT}, Body: ${CAPTURED_BODY}, Output: ${OUTPUT}"
 fi
 
 echo "=========================================="

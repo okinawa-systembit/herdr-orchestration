@@ -12,6 +12,7 @@ __pycache__/
 
 # 非公開内部レビュー領域（Phase 1）
 docs/reviews/internal/
+.inbox/
 
 # 分散型レビュー作業バッファ・一時ファイル領域（Phase 2 / Issue #108）
 .input/
