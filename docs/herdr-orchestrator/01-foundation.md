@@ -167,7 +167,7 @@ AI エージェント専用のブラックボックスな構造を作らない�
 ### 2.10 機械検査とエージェント判断の境界分離・実践指針
 
 致命的事故の防止や固定形式は機械で止め、自由な文章の意味や妥当性はエージェント判断に任せる（[正本: 指針 8](../core-principles.md#guideline-8)）。
-機械制御値と本文の自由記述を完全分離し、本文パースや自動挿入を行わないテンプレート主導を適用する（[正本: 指針 9](../core-principles.md#guideline-9)、※ 現行 review-sync は [Issue #116](https://github.com/okinawa-systembit/herdr-orchestration/issues/116) で段階的移行）。
+機械制御値と本文の自由記述を完全分離し、本文パースや自動挿入を行わないテンプレート主導を適用する（[正本: 指針 9](../core-principles.md#guideline-9)、※ review-sync の第 1 段階移行は [Issue #116](https://github.com/okinawa-systembit/herdr-orchestration/issues/116) にて完了、制御値完全分離は後続 [Issue #119](https://github.com/okinawa-systembit/herdr-orchestration/issues/119) で対応）。
 補助機能スキップ時も警告を出し、テストは実際の結果を検証する（[正本: 指針 10](../core-principles.md#guideline-10)）。
 
 ---

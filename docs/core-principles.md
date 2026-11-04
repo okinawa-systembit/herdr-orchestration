@@ -74,7 +74,7 @@
 
 - **機械が使う制御値（役割、Round、判定 Status、宛先）**: スクリプトが引数や状態ファイルから決定し、外側のヘッダーとして付与する。本文に書かせて読み戻さない。
 - **本文（エージェントが書く文章）**: テンプレートに沿った自由な文章とし、スクリプトは本文の構文を一切解析しない。書く側も読む側も LLM であるため、多少の表記ゆれは読む側のエージェントが自然に吸収する。スクリプトによる本文パース・自動挿入・過剰バリデーションは行わない。
-- **移行期間中の注記**: 現行の `review-sync`（`pull_review.py` の Decision 自動挿入や `do_check` の Status 検査、`export GH_TOKEN` による全体公開）は移行期間中であり、[Issue #116](https://github.com/okinawa-systembit/herdr-orchestration/issues/116) にて段階的に本文パース・自動挿入・過剰バリデーションを廃止・軽量化し、インライン渡しへ移行する。
+- **移行期間中の注記**: `review-sync` における本文パース（Decision 自動挿入等）・本文過剰バリデーションの廃止、およびトークンインライン渡しへの移行は [Issue #116](https://github.com/okinawa-systembit/herdr-orchestration/issues/116) にて完了。残る制御値（Round、Status 等）の本文外分離および状態管理移行は後続の [Issue #119](https://github.com/okinawa-systembit/herdr-orchestration/issues/119) にて段階的に対応する。
 
 <a id="guideline-10"></a>
 

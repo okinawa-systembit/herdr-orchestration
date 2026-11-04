@@ -386,7 +386,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Test 12a: check - reviewee のドラフトに未記入目印が残っている場合は停止
+# Test 12a: check - reviewee 本文中の自由記述（プレースホルダー等含む）は機械検査で停止せず通過すること (指針8・9 / Issue #116)
 # ---------------------------------------------------------------------------
 TEST_ENV=$(setup_mock_env "t12a")
 DRAFT_PATH="${TEST_ENV}/worktree/.input/review/reviewee-draft.md"
@@ -402,15 +402,15 @@ cat <<'EOF' > "${DRAFT_PATH}"
 EOF
 
 cd "${TEST_ENV}/worktree"
-ERR_OUTPUT=$(PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh check reviewee 2>&1 || true)
-if [[ "${ERR_OUTPUT}" == *"reviewee のドラフトに未記入の項目が残っています"* ]]; then
-  pass "Reject reviewee draft with placeholder Decision"
+OUT=$(PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh check reviewee)
+if [[ "${OUT}" == *"OK: check passed (reviewee)"* ]]; then
+  pass "Pass reviewee draft containing template placeholders in freeform body (Issue #116)"
 else
-  fail "Reject reviewee draft with placeholder Decision" "Output: ${ERR_OUTPUT}"
+  fail "Pass reviewee draft containing template placeholders in freeform body" "Output: ${OUT}"
 fi
 
 # ---------------------------------------------------------------------------
-# Test 12b: check - reviewee のドラフトに不正な Decision 値がある場合は停止
+# Test 12b: check - reviewee 本文の Decision 値は過剰な機械バリデーションを行わず通過すること (指針8・9 / Issue #116)
 # ---------------------------------------------------------------------------
 TEST_ENV=$(setup_mock_env "t12b")
 DRAFT_PATH="${TEST_ENV}/worktree/.input/review/reviewee-draft.md"
@@ -421,16 +421,16 @@ cat <<'EOF' > "${DRAFT_PATH}"
 - Round: 1
 ## Findings
 ### P1-1 Title
-- Decision: invalid_decision
+- Decision: 自由記述の回答
 - レビューイ評価: 同意
 EOF
 
 cd "${TEST_ENV}/worktree"
-ERR_OUTPUT=$(PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh check reviewee 2>&1 || true)
-if [[ "${ERR_OUTPUT}" == *"不正な Decision 値が含まれています"* ]]; then
-  pass "Reject reviewee draft with invalid Decision value"
+OUT=$(PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh check reviewee)
+if [[ "${OUT}" == *"OK: check passed (reviewee)"* ]]; then
+  pass "Pass reviewee draft without mechanical validation on body decision values (Issue #116)"
 else
-  fail "Reject reviewee draft with invalid Decision value" "Output: ${ERR_OUTPUT}"
+  fail "Pass reviewee draft without mechanical validation on body decision values" "Output: ${OUT}"
 fi
 
 # ---------------------------------------------------------------------------
@@ -484,7 +484,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Test 12e: check - レビューイ評価が空欄の場合は停止 (RV080 P3-1)
+# Test 12e: check - レビューイ評価項目の省略・空欄も自由記述として通過すること (指針8・9 / Issue #116)
 # ---------------------------------------------------------------------------
 TEST_ENV=$(setup_mock_env "t12e")
 DRAFT_PATH="${TEST_ENV}/worktree/.input/review/reviewee-draft.md"
@@ -500,11 +500,11 @@ cat <<'EOF' > "${DRAFT_PATH}"
 EOF
 
 cd "${TEST_ENV}/worktree"
-ERR_OUTPUT=$(PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh check reviewee 2>&1 || true)
-if [[ "${ERR_OUTPUT}" == *"空欄のレビューイ評価行が含まれています"* ]]; then
-  pass "Reject reviewee draft with empty evaluation (RV080 P3-1)"
+OUT=$(PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh check reviewee)
+if [[ "${OUT}" == *"OK: check passed (reviewee)"* ]]; then
+  pass "Pass reviewee draft with omitted evaluation field (Issue #116)"
 else
-  fail "Reject reviewee draft with empty evaluation" "Output: ${ERR_OUTPUT}"
+  fail "Pass reviewee draft with omitted evaluation field" "Output: ${OUT}"
 fi
 
 # ---------------------------------------------------------------------------
@@ -820,7 +820,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Test 18: load_github_auth - 認証スクリプト stdout の GH_TOKEN へのエクスポート伝搬
+# Test 18: load_github_auth & run_gh - トークンの export 廃止と run_gh でのインライン渡し (原則 5 / Issue #116 / RV092 P3-1, P3-2)
 # ---------------------------------------------------------------------------
 TEST_ENV=$(setup_mock_env "t18")
 cd "${TEST_ENV}/worktree"
@@ -833,20 +833,44 @@ sys.exit(0)
 EOF
 chmod +x scripts/lib/github_app_auth.py
 
-LOADED_TOKEN=$(PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash -c '
+cat <<'EOF' > "${TEST_ENV}/bin/gh"
+#!/usr/bin/env bash
+echo "gh called with GH_TOKEN=${GH_TOKEN:-none} args=$*"
+exit 0
+EOF
+chmod +x "${TEST_ENV}/bin/gh"
+
+TEST_RESULT=$(env _REVIEW_SYNC_AUTH_TOKEN="preexisting_exported" PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash -c '
 REPO_ROOT="$(pwd)"
 TMP_DIR="${REPO_ROOT}/.input/tmp"
 mkdir -p "${TMP_DIR}"
 source <(sed -n "/^create_temp_file()/,/^}/p" scripts/review-sync.sh)
+source <(sed -n "/^# 3. GitHub 認証情報/,/^BOT_AUTH_ACTIVE=0/p" scripts/review-sync.sh)
+source <(sed -n "/^run_gh()/,/^}/p" scripts/review-sync.sh)
 source <(sed -n "/^load_github_auth()/,/^}/p" scripts/review-sync.sh)
 load_github_auth
-echo "${GH_TOKEN:-}"
+
+# 1. スクリプトの環境変数に GH_TOKEN が export されていないこと（原則 5）
+if [[ -n "${GH_TOKEN:-}" ]]; then
+  echo "FAIL_LEAKED_GH_TOKEN=${GH_TOKEN}"
+  exit 1
+fi
+
+# 2. P3-1, P3-2: 子プロセス (env) を実行しても、環境変数に取得トークンが一切出現しないこと
+CHILD_ENV=$(env)
+if echo "${CHILD_ENV}" | grep -q "ghs_mock_token_from_script"; then
+  echo "FAIL_TOKEN_LEAKED_TO_CHILD_ENV"
+  exit 1
+fi
+
+# 3. run_gh 経由でのみインラインで GH_TOKEN が渡されること（原則 5）
+run_gh auth status
 ')
 
-if [[ "${LOADED_TOKEN}" == *"ghs_mock_token_from_script"* ]]; then
-  pass "Propagate auth script stdout to GH_TOKEN (RV064 P3-3)"
+if [[ "${TEST_RESULT}" == *"gh called with GH_TOKEN=ghs_mock_token_from_script args=auth status"* ]] && [[ "${TEST_RESULT}" != *"FAIL_"* ]]; then
+  pass "Keep token private to AUTH_TOKEN and pass inline via run_gh without exporting to environment (RV064 P3-3 / Issue #116 / RV092 P3-1, P3-2)"
 else
-  fail "Propagate auth script stdout to GH_TOKEN (RV064 P3-3)" "Token: ${LOADED_TOKEN}"
+  fail "Keep token private to AUTH_TOKEN and pass inline via run_gh" "Output: ${TEST_RESULT}"
 fi
 
 # ---------------------------------------------------------------------------
