@@ -840,14 +840,12 @@ exit 0
 EOF
 chmod +x "${TEST_ENV}/bin/gh"
 
-TEST_RESULT=$(env _REVIEW_SYNC_AUTH_TOKEN="preexisting_exported" AUTH_TOKEN="preexisting_auth" PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash -c '
+TEST_RESULT=$(env _REVIEW_SYNC_AUTH_TOKEN="preexisting_exported" PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash -c '
 REPO_ROOT="$(pwd)"
 TMP_DIR="${REPO_ROOT}/.input/tmp"
 mkdir -p "${TMP_DIR}"
-unset _REVIEW_SYNC_AUTH_TOKEN 2>/dev/null || true
-declare +x _REVIEW_SYNC_AUTH_TOKEN="" 2>/dev/null || _REVIEW_SYNC_AUTH_TOKEN=""
-BOT_AUTH_ACTIVE=0
 source <(sed -n "/^create_temp_file()/,/^}/p" scripts/review-sync.sh)
+source <(sed -n "/^# 3. GitHub 認証情報/,/^BOT_AUTH_ACTIVE=0/p" scripts/review-sync.sh)
 source <(sed -n "/^run_gh()/,/^}/p" scripts/review-sync.sh)
 source <(sed -n "/^load_github_auth()/,/^}/p" scripts/review-sync.sh)
 load_github_auth
