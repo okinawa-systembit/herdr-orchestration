@@ -312,7 +312,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Test 10: check - reviewer メタデータに Status がない場合停止
+# Test 10: check - reviewer で --status オプションがない場合停止 (RV096 P3-2)
 # ---------------------------------------------------------------------------
 TEST_ENV=$(setup_mock_env "t10")
 DRAFT_PATH="${TEST_ENV}/worktree/.input/review/reviewer-draft.md"
@@ -327,10 +327,10 @@ EOF
 
 cd "${TEST_ENV}/worktree"
 ERR_OUTPUT=$(PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh check reviewer 2>&1 || true)
-if [[ "${ERR_OUTPUT}" == *"reviewer のドラフトメタデータ部に"* ]]; then
-  pass "Reject reviewer draft missing metadata Status"
+if [[ "${ERR_OUTPUT}" == *"reviewer は --status Approved または"* ]]; then
+  pass "Reject reviewer missing --status option (RV096 P3-2)"
 else
-  fail "Reject reviewer draft missing metadata Status" "Output: ${ERR_OUTPUT}"
+  fail "Reject reviewer missing --status option" "Output: ${ERR_OUTPUT}"
 fi
 
 # ---------------------------------------------------------------------------
@@ -1500,6 +1500,42 @@ if [[ "${COMMENT_NO_ROUND_ERR}" == *"Round 番号を解決できませんでし�
   pass "Refuse fallback to draft body Round line and require state.json or --round (RV095 P3-1)"
 else
   fail "Refuse fallback to draft body Round line and require state.json or --round" "Output: ${COMMENT_NO_ROUND_ERR}"
+fi
+
+# ---------------------------------------------------------------------------
+# Test 38: comment - state.json 更新失敗時に stderr に警告を出力すること (RV096 P3-1 / 指針10)
+# ---------------------------------------------------------------------------
+TEST_ENV=$(setup_mock_env "t38")
+DRAFT_PATH="${TEST_ENV}/worktree/.input/review/reviewer-draft.md"
+LAST_BODY="${TEST_ENV}/last_body.txt"
+STATE_FILE="${TEST_ENV}/worktree/.input/review/state.json"
+
+cat <<'EOF' > "${STATE_FILE}"
+{
+  "reviewer": {
+    "round": 1,
+    "target_id": "2",
+    "target_type": "pr"
+  }
+}
+EOF
+chmod 444 "${STATE_FILE}"
+
+cat <<'EOF' > "${DRAFT_PATH}"
+# Review Draft
+- Role: reviewer
+## Summary
+Draft body.
+EOF
+
+cd "${TEST_ENV}/worktree"
+COMMENT_WARN_OUT=$(MOCK_LAST_BODY="${LAST_BODY}" PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh comment reviewer --status Approved 2>&1 || true)
+chmod 644 "${STATE_FILE}" 2>/dev/null || true
+
+if [[ "${COMMENT_WARN_OUT}" == *"警告: state.json 更新失敗"* ]] && [[ "${COMMENT_WARN_OUT}" == *"OK: 送信が完了し"* ]]; then
+  pass "Emit stderr warning on state.json write failure without failing comment (RV096 P3-1)"
+else
+  fail "Emit stderr warning on state.json write failure" "Output: ${COMMENT_WARN_OUT}"
 fi
 
 echo "=========================================="

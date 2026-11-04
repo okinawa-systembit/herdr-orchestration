@@ -234,7 +234,7 @@ esac
 # ロール別バリデーション (指針8・9)
 if [[ "${ROLE}" == "reviewer" ]]; then
   if [[ "${SUBCOMMAND}" =~ ^(check|comment|comment-issue)$ && -z "${STATUS_ARG}" ]]; then
-    echo "エラー: reviewer のドラフトメタデータ部に '- Status: Approved' または '- Status: Changes requested' が必要です (または --status を指定してください)。" >&2
+    echo "エラー: reviewer は --status Approved または --status 'Changes requested' の指定が必要です。" >&2
     exit 1
   fi
 elif [[ "${ROLE}" == "reviewee" ]]; then
@@ -356,7 +356,7 @@ do_check() {
   if [[ "${ROLE}" == "reviewer" ]]; then
     # reviewer の判定 Status の検証
     if [[ -z "${STATUS_ARG}" ]]; then
-      echo "エラー: reviewer のドラフトメタデータ部に '- Status: Approved' または '- Status: Changes requested' が必要です (または --status を指定してください)。" >&2
+      echo "エラー: reviewer は --status Approved または --status 'Changes requested' の指定が必要です。" >&2
       exit 1
     fi
     if [[ "${STATUS_ARG}" != "Approved" && "${STATUS_ARG}" != "Changes requested" ]]; then
@@ -493,7 +493,7 @@ except Exception as err:
   local status_header=""
   if [[ "${ROLE}" == "reviewer" ]]; then
     if [[ -z "${STATUS_ARG}" ]]; then
-      echo "エラー: reviewer のドラフトメタデータ部に '- Status: Approved' または '- Status: Changes requested' が必要です (または --status を指定してください)。" >&2
+      echo "エラー: reviewer は --status Approved または --status 'Changes requested' の指定が必要です。" >&2
       exit 1
     fi
     status_header="- Status: ${STATUS_ARG}"$'\n\n'
@@ -561,7 +561,7 @@ try:
             f.write("\n")
 except Exception as err:
     print(f"警告: state.json 更新失敗: {err}", file=sys.stderr)
-' "${state_file}" "${ROLE}" "${round}" 2>/dev/null || true
+' "${state_file}" "${ROLE}" "${round}" || true
   fi
 
   echo "OK: 送信が完了し、ドラフトを ${dest} に退避しました。"
