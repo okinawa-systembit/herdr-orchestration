@@ -1823,8 +1823,10 @@ raise SystemExit(99)
 
         # =========================================================================
         # Scenario 6: Reviewer RV101 P2-2 regression test (F: third-party pane in worker worktree)
-        # An unrelated third-party pane w15:p1 executing inside repo_b must NOT recover as worker!
+        # An unrelated third-party pane w15:p1 executing inside repo_b must NOT recover as worker,
+        # even when w15:p2 is unique in repo_b!
         # =========================================================================
+        self._write_herdr_state(workspaces=state["workspaces"], tabs=state["tabs"], panes=state["panes"])
         third_party_env = {**self.env, "HERDR_PANE_ID": "w15:p1"}
         st_third = json.loads(_run_cli("task-status", task_id, env=third_party_env, cwd=self.repo_b).stdout)
         self.assertFalse(
@@ -1832,10 +1834,7 @@ raise SystemExit(99)
             "Unrelated third party pane in worker worktree must not recover as worker",
         )
         self.assertEqual(st_third["recipient_verification"]["caller_role_in_task"], "other")
-        self.assertIn(
-            st_third["recipient_verification"]["reason"],
-            ("caller_not_task_participant", "caller_live_agent_unavailable"),
-        )
+        self.assertEqual(st_third["recipient_verification"]["reason"], "caller_not_task_participant")
         self.assertNotIn("caller_recovery", st_third["recipient_verification"])
 
 
