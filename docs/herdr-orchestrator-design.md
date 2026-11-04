@@ -30,9 +30,10 @@
 
 ## 基本方針
 
-- Herdr の操作仕様は Herdr 公式 Skill / CLI を正とする。
-- Orchestrator は task contract、routing、状態管理、handoff、result の共通規約を担う。
-- Repository 固有の業務 workflow は個別 repository 側に残す。
+- Herdr の操作仕様は Herdr 公式 Skill / CLI を正とする（[§2.1](herdr-orchestrator/01-foundation.md#sec-2-1)）。
+- Orchestrator は task contract、routing、状態管理、handoff、result の共通規約を担う（[§2.3](herdr-orchestrator/01-foundation.md#sec-2-3)）。
+- Repository 固有の業務 workflow は個別 repository 側に残す（[§3.3](herdr-orchestrator/01-foundation.md#sec-3-3)）。
+- シンプル is ベスト、人間中心の可観測性、車輪の非再発明、開発と配布の境界分離、秘密の極小化、単一正本、機械とエージェントの境界分離を設計原則とする（[§2.4〜§2.10](herdr-orchestrator/01-foundation.md#sec-2-4)、[AGENTS.md](../AGENTS.md)）。
 
 章番号参照は分割ファイル間でリンクされている。設計内容を変更するときは [AGENTS.md](../AGENTS.md) の文書管理ルールに従う。
 
