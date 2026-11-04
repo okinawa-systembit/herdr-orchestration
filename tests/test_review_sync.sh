@@ -62,6 +62,11 @@ elif [[ "$*" == *"pr review --comment --body-file"* ]]; then
   exit "${MOCK_GH_EXIT:-0}"
 elif [[ "$*" == *"pr create"* ]]; then
   echo "mock-pr-create: GH_TOKEN=${GH_TOKEN:-none} args=$*" >> "${MOCK_GH_LOG:-/dev/null}"
+  for arg in "$@"; do
+    if [[ -f "$arg" ]]; then
+      cat "$arg" > "${MOCK_LAST_BODY:-/dev/null}"
+    fi
+  done
   echo "https://github.com/example/repo/pull/123"
   exit 0
 elif [[ "$*" == *"issue comment"* ]]; then
@@ -1146,7 +1151,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Test 30: pr-create - --body-file - で標準入力から本文を受け取り整形して渡すこと (RV083 P3-1 / Issue #110)
+# Test 30: pr-create - --body-file - で標準入力から本文を受け取り整形して渡すこと (RV083 P3-1 / RV085 P3-3 / Issue #110)
 # ---------------------------------------------------------------------------
 TEST_ENV=$(setup_mock_env "t30")
 cd "${TEST_ENV}/worktree"
@@ -1157,14 +1162,19 @@ sys.exit(0)
 EOF
 
 MOCK_LOG="${TEST_ENV}/gh.log"
-OUTPUT=$(printf '*  stdin item 1\n*  stdin item 2\n' | env -u GH_TOKEN -u GITHUB_TOKEN MOCK_GH_LOG="${MOCK_LOG}" PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh pr-create --title "Stdin PR" --body-file - 2>&1 || true)
+MOCK_BODY="${TEST_ENV}/gh-body.txt"
+OUTPUT=$(printf '*  stdin item 1\n*  stdin item 2\n' | env -u GH_TOKEN -u GITHUB_TOKEN MOCK_GH_LOG="${MOCK_LOG}" MOCK_LAST_BODY="${MOCK_BODY}" PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh pr-create --title "Stdin PR" --body-file - 2>&1 || true)
 
 REMAINING_TMP_COUNT=$(find "${TEST_ENV}/worktree/.input/tmp" -type f | wc -l)
+CAPTURED_BODY="$(cat "${MOCK_BODY}" 2>/dev/null || true)"
 
-if grep -q "mock-pr-create: GH_TOKEN=none args=pr create --title Stdin PR --body-file ${TEST_ENV}/worktree/.input/tmp/pr-body-copy." "${MOCK_LOG}" 2>/dev/null && [[ "${REMAINING_TMP_COUNT}" -eq 0 ]]; then
-  pass "Accept --body-file - from stdin and clean up temp files (RV083 P3-1 / Issue #110)"
+if grep -q "mock-pr-create: GH_TOKEN=none args=pr create --title Stdin PR --body-file ${TEST_ENV}/worktree/.input/tmp/pr-body-copy." "${MOCK_LOG}" 2>/dev/null \
+  && [[ "${REMAINING_TMP_COUNT}" -eq 0 ]] \
+  && [[ "${CAPTURED_BODY}" == *"- stdin item 1"* ]] \
+  && [[ "${CAPTURED_BODY}" != *"*  stdin item 1"* ]]; then
+  pass "Accept --body-file - from stdin, format with prettier, and clean up temp files (RV083 P3-1 / RV085 P3-3 / Issue #110)"
 else
-  fail "Accept --body-file - from stdin" "Log: $(cat "${MOCK_LOG}" 2>/dev/null || true), Remaining tmp: ${REMAINING_TMP_COUNT}, Output: ${OUTPUT}"
+  fail "Accept --body-file - from stdin" "Log: $(cat "${MOCK_LOG}" 2>/dev/null || true), Remaining tmp: ${REMAINING_TMP_COUNT}, Body: ${CAPTURED_BODY}, Output: ${OUTPUT}"
 fi
 
 echo "=========================================="
