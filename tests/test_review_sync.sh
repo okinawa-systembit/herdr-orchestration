@@ -820,7 +820,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Test 18: load_github_auth & run_gh - トークンの export 廃止と run_gh でのインライン渡し (原則 5 / Issue #116)
+# Test 18: load_github_auth & run_gh - トークンの export 廃止と run_gh でのインライン渡し (原則 5 / Issue #116 / RV092 P3-1, P3-2)
 # ---------------------------------------------------------------------------
 TEST_ENV=$(setup_mock_env "t18")
 cd "${TEST_ENV}/worktree"
@@ -840,11 +840,12 @@ exit 0
 EOF
 chmod +x "${TEST_ENV}/bin/gh"
 
-TEST_RESULT=$(PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash -c '
+TEST_RESULT=$(env _REVIEW_SYNC_AUTH_TOKEN="preexisting_exported" AUTH_TOKEN="preexisting_auth" PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash -c '
 REPO_ROOT="$(pwd)"
 TMP_DIR="${REPO_ROOT}/.input/tmp"
 mkdir -p "${TMP_DIR}"
-AUTH_TOKEN=""
+unset _REVIEW_SYNC_AUTH_TOKEN 2>/dev/null || true
+declare +x _REVIEW_SYNC_AUTH_TOKEN="" 2>/dev/null || _REVIEW_SYNC_AUTH_TOKEN=""
 BOT_AUTH_ACTIVE=0
 source <(sed -n "/^create_temp_file()/,/^}/p" scripts/review-sync.sh)
 source <(sed -n "/^run_gh()/,/^}/p" scripts/review-sync.sh)
@@ -857,12 +858,19 @@ if [[ -n "${GH_TOKEN:-}" ]]; then
   exit 1
 fi
 
-# 2. run_gh 経由でのみインラインで GH_TOKEN が渡されること（原則 5）
+# 2. P3-1, P3-2: 子プロセス (env) を実行しても、環境変数に取得トークンが一切出現しないこと
+CHILD_ENV=$(env)
+if echo "${CHILD_ENV}" | grep -q "ghs_mock_token_from_script"; then
+  echo "FAIL_TOKEN_LEAKED_TO_CHILD_ENV"
+  exit 1
+fi
+
+# 3. run_gh 経由でのみインラインで GH_TOKEN が渡されること（原則 5）
 run_gh auth status
 ')
 
-if [[ "${TEST_RESULT}" == *"gh called with GH_TOKEN=ghs_mock_token_from_script args=auth status"* ]] && [[ "${TEST_RESULT}" != *"FAIL_LEAKED"* ]]; then
-  pass "Keep token private to AUTH_TOKEN and pass inline via run_gh without exporting to environment (RV064 P3-3 / Issue #116)"
+if [[ "${TEST_RESULT}" == *"gh called with GH_TOKEN=ghs_mock_token_from_script args=auth status"* ]] && [[ "${TEST_RESULT}" != *"FAIL_"* ]]; then
+  pass "Keep token private to AUTH_TOKEN and pass inline via run_gh without exporting to environment (RV064 P3-3 / Issue #116 / RV092 P3-1, P3-2)"
 else
   fail "Keep token private to AUTH_TOKEN and pass inline via run_gh" "Output: ${TEST_RESULT}"
 fi

@@ -171,12 +171,14 @@ mkdir -p "${DRAFT_DIR}" "${SENT_DIR}" "${TMP_DIR}"
 # ---------------------------------------------------------------------------
 # 3. GitHub 認証情報の解決およびインライン実行
 # ---------------------------------------------------------------------------
-AUTH_TOKEN=""
+# P3-1: 呼び出し元で export されていた場合の属性引き継ぎを防ぐため明示的に unset / declare +x
+unset _REVIEW_SYNC_AUTH_TOKEN 2>/dev/null || true
+declare +x _REVIEW_SYNC_AUTH_TOKEN="" 2>/dev/null || _REVIEW_SYNC_AUTH_TOKEN=""
 BOT_AUTH_ACTIVE=0
 
 run_gh() {
-  if [[ -n "${AUTH_TOKEN}" ]]; then
-    GH_TOKEN="${AUTH_TOKEN}" gh "$@"
+  if [[ -n "${_REVIEW_SYNC_AUTH_TOKEN}" ]]; then
+    GH_TOKEN="${_REVIEW_SYNC_AUTH_TOKEN}" gh "$@"
   else
     gh "$@"
   fi
@@ -217,7 +219,7 @@ load_github_auth() {
   token="$(echo "${token}" | tr -d '\r\n')"
 
   if [[ -n "${token}" ]]; then
-    AUTH_TOKEN="${token}"
+    _REVIEW_SYNC_AUTH_TOKEN="${token}"
     BOT_AUTH_ACTIVE=1
     return 0
   fi
