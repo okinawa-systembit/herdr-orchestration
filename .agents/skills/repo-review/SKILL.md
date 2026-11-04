@@ -330,13 +330,13 @@ GitHub を正本とするコードレビュー運用では、以下の手順で 
      2. **自 PR 制限回避と人間の役割**: エージェントが Bot 主体として PR を作成・操作することにより、開発者本人の個人アカウントとの同一視（自 PR 制限: 422 エラー）が回避される。GitHub 公式の Approve（承認ボタンの押下）および PR のマージ操作は、エージェントの合意表明を確認した上で**人間の開発者のみが担当**する（詳細は [docs/reviews/GITHUB_APP_AND_REVIEW_POLICY.md](../../../docs/reviews/GITHUB_APP_AND_REVIEW_POLICY.md) 参照）。
 4. **レビューイ対応ワークフロー（指摘への対応・回答投稿・再レビュー依頼）**:
    - レビュワーから指摘を受領した際、**いきなりコード修正に走ることを厳禁**とする（手戻りや別不具合の誘発、PR 肥大化を防止するため、以下の必須 6 ステップを厳守する。詳細は [references.md#reviewee-response-workflow](references.md#reviewee-response-workflow) 参照）：
-     1. **ドラフト取り込み**: `bash scripts/review-sync.sh pull reviewee` で最新レビューを取り込む（各指摘 ID 見出し直下に未記入 Decision 枠が自動展開される）。
+     1. **ドラフト取り込み**: `bash scripts/review-sync.sh pull reviewee` で最新レビューを取り込む（テンプレート主導アプローチに基づき、相手の指摘本文がそのまま展開される）。
      2. **事前評価（コード修正厳禁）**: 各指摘を客観的に評価し、「同意 / 部分同意 / 不同意」および Decision（`accept` / `reject` / `defer`）を策定する。この段階でコードを 1 行も修正してはならない。
         - **複数ラウンド時の差分返信と文脈引き継ぎ**: スクリプト側で壊れやすい機械的 3-way マージを行わないため、エージェントは過去コメント履歴を参照し、**既に合意・解消した指摘はドラフトから省いて「継続論点・新規論点」に絞り込み、過去の Decision（defer / reject）の文脈を自律的に引き継いで記述する**（人間の手動コピペ不要）。
      3. **チャット提示（必須・トリアージ）**: 人間（利用者）へチャットで各指摘の評価・Decision 案・代替案を提示する。
      4. **人間との合意・方針確定**: 人間からの合意・指示を得て対応方針を確定する（`defer` を選んだ指摘の後続 Issue 化は、人間の合意後に [review-finding](../review-finding/SKILL.md) スキルの手順に従って起票する）。
      5. **修正の実施（`accept` のみ）**: 合意された `accept` の項目のみコード修正を行い、テスト（`npm run test:orchestrator`）および `npm run format:md && npm run check:md` で検証する。`reject` や `defer` の項目はコード変更しない。
-     6. **回答投稿と再レビュー依頼**: `.input/review/reviewee-draft.md` を完成させ、`bash scripts/review-sync.sh check reviewee` で未記入目印や不正値がないことを確認後、`bash scripts/review-sync.sh comment reviewee` で投稿し、レビュワーへ再レビューを依頼する（sync handoff）。
+     6. **回答投稿と再レビュー依頼**: `.input/review/reviewee-draft.md` をテンプレート（[references.md#reviewee-response-workflow](references.md#reviewee-response-workflow)）に沿って完成させ、`bash scripts/review-sync.sh check reviewee` で機密情報漏洩やメタデータ制御値の静的検証を行った後、`bash scripts/review-sync.sh comment reviewee` で投稿し、レビュワーへ再レビューを依頼する（sync handoff）。
 
 ### B. 初回 20 Scope レビュー手順
 

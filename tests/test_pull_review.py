@@ -132,8 +132,8 @@ class TestPullReview(unittest.TestCase):
         self.assertIn("一般コメント (@human_user)", content)
         self.assertIn("[scripts/foo.sh:42] ここを修正してください", content)
 
-    def test_extract_opposite_review_inserts_decision_for_reviewee(self) -> None:
-        """reviewee で pull 時に指摘 ID 見出し (### P1-1 等) の直下に未記入 Decision 枠が自動展開されること."""
+    def test_extract_opposite_review_preserves_body_without_auto_inserting_decision(self) -> None:
+        """reviewee で pull 時に相手の本文を改変せず（Decision等の自動挿入を行わず）そのまま保持すること (指針9 / Issue #116)."""
         comments_data = {
             "comments": [],
             "reviews": [
@@ -150,10 +150,10 @@ class TestPullReview(unittest.TestCase):
                         "### P3-1（Non-blocking）軽微な改善\n\n"
                         "- 問題: typo\n\n"
                         "### 実行したテストコマンド\n\n"
-                        "- 指摘 ID を持たない一般見出しには Decision 枠が入らないこと\n\n"
+                        "- 指摘 ID を持たない一般見出し\n\n"
                         "```markdown\n"
                         "### P2-1 コードブロック内の見出し\n"
-                        "コードブロック内には Decision 枠が入らないこと\n"
+                        "コードブロック内\n"
                         "```\n"
                     ),
                     "submittedAt": "2026-10-30T10:05:00Z",
@@ -174,13 +174,10 @@ class TestPullReview(unittest.TestCase):
 
         content = self.target_file.read_text(encoding="utf-8")
         self.assertIn("### P1-1 [Blocking] 重大な不具合", content)
-        self.assertIn("- Decision: <accept | reject | defer>", content)
-        self.assertIn("- レビューイ評価: <同意 | 部分同意 | 不同意>", content)
         self.assertIn("### P3-1（Non-blocking）軽微な改善", content)
-        # 指摘 ID を持つ P1-1 と P3-1 の 2 箇所にのみ Decision 枠が挿入されていること
-        self.assertEqual(content.count("- Decision: <accept | reject | defer>"), 2)
-        # 一般見出しやコードブロック内見出しの下には挿入されていないこと
-        self.assertNotIn("### 実行したテストコマンド\n- Decision:", content)
+        # 本文中に機械的な Decision 枠が自動挿入されていないこと（指針 9: テンプレート主導）
+        self.assertNotIn("- Decision: <accept | reject | defer>", content)
+        self.assertNotIn("- レビューイ評価: <同意 | 部分同意 | 不同意>", content)
 
     def test_marker_in_middle_of_body_treated_as_human_comment(self) -> None:
         """本文途中でマーカーが引用された投稿がドラフトを上書きせず人間コメントに分類されること (RV064 P2-2 回帰テスト)."""

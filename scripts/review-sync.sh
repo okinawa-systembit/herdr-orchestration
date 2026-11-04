@@ -169,8 +169,19 @@ fi
 mkdir -p "${DRAFT_DIR}" "${SENT_DIR}" "${TMP_DIR}"
 
 # ---------------------------------------------------------------------------
-# 3. GitHub 認証情報の解決
+# 3. GitHub 認証情報の解決およびインライン実行
 # ---------------------------------------------------------------------------
+AUTH_TOKEN=""
+BOT_AUTH_ACTIVE=0
+
+run_gh() {
+  if [[ -n "${AUTH_TOKEN}" ]]; then
+    GH_TOKEN="${AUTH_TOKEN}" gh "$@"
+  else
+    gh "$@"
+  fi
+}
+
 load_github_auth() {
   local err_file
   err_file="$(create_temp_file "review-auth-err")"
@@ -206,7 +217,7 @@ load_github_auth() {
   token="$(echo "${token}" | tr -d '\r\n')"
 
   if [[ -n "${token}" ]]; then
-    export GH_TOKEN="${token}"
+    AUTH_TOKEN="${token}"
     BOT_AUTH_ACTIVE=1
     return 0
   fi
@@ -220,7 +231,7 @@ load_github_auth() {
     return 0
   fi
 
-  if ! gh auth status >/dev/null 2>&1; then
+  if ! run_gh auth status >/dev/null 2>&1; then
     cat <<'EOF' >&2
 エラー: GitHub の認証情報が見つかりません。
 以下のいずれかの方法で認証を設定してください:
@@ -271,34 +282,6 @@ do_check() {
       echo "エラー: reviewee のドラフトのメタデータ部に判定 Status: 行を含めることはできません。Finding 内の Status のみ更新してください。" >&2
       exit 1
     fi
-
-    # 未記入の Decision 目印またはレビューイ評価目印が残っている場合は停止
-    local uncompleted_lines
-    uncompleted_lines="$(grep -n -E "^[[:space:]]*-?[[:space:]]*(Decision|レビューイ評価):[[:space:]]*<" "${target_file}" || true)"
-    if [[ -n "${uncompleted_lines}" ]]; then
-      echo "エラー: reviewee のドラフトに未記入の項目が残っています:" >&2
-      echo "${uncompleted_lines}" >&2
-      exit 1
-    fi
-
-    # 不正な Decision 値（accept|reject|defer 以外の指定、または空欄）の検査
-    # ※ バッククォート囲み（`accept` 等）も許容する
-    local invalid_decision_lines
-    invalid_decision_lines="$(grep -n -E "^[[:space:]]*-?[[:space:]]*Decision:" "${target_file}" | grep -E -v "^[0-9]+:[[:space:]]*-?[[:space:]]*Decision:[[:space:]]*\`?(accept|reject|defer)\`?([[:space:]]|$)" || true)"
-    if [[ -n "${invalid_decision_lines}" ]]; then
-      echo "エラー: reviewee のドラフトに不正な Decision 値が含まれています（値は accept, reject, defer のいずれかを指定してください）:" >&2
-      echo "${invalid_decision_lines}" >&2
-      exit 1
-    fi
-
-    # 空欄のレビューイ評価の検査
-    local empty_eval_lines
-    empty_eval_lines="$(grep -n -E "^[[:space:]]*-?[[:space:]]*レビューイ評価:[[:space:]]*$" "${target_file}" || true)"
-    if [[ -n "${empty_eval_lines}" ]]; then
-      echo "エラー: reviewee のドラフトに空欄のレビューイ評価行が含まれています:" >&2
-      echo "${empty_eval_lines}" >&2
-      exit 1
-    fi
   fi
 
   echo "OK: check passed (${ROLE})"
@@ -310,7 +293,7 @@ resolve_pr_number() {
   pr_err_tmp="$(create_temp_file "review-pr-err")"
   trap 'rm -f "${pr_err_tmp}"' RETURN EXIT
 
-  if ! pr_json="$(gh pr view --json number,url 2>"${pr_err_tmp}")"; then
+  if ! pr_json="$(run_gh pr view --json number,url 2>"${pr_err_tmp}")"; then
     echo "エラー: 現在のブランチに対応する PR が見つかりません。" >&2
     cat "${pr_err_tmp}" >&2
     echo "gh pr create --draft などで PR を作成してから実行してください。" >&2
@@ -369,9 +352,9 @@ EOF
 
   # 送信実行 (常に --body-file 経由)
   if [[ "${is_issue}" == "1" ]]; then
-    gh issue comment "${target_id}" --body-file "${temp_body}"
+    run_gh issue comment "${target_id}" --body-file "${temp_body}"
   else
-    gh pr review --comment --body-file "${temp_body}"
+    run_gh pr review --comment --body-file "${temp_body}"
   fi
 
   # 送信成功後の退避 (同一秒送信時の上書き防止)
@@ -418,14 +401,14 @@ pull_content() {
   trap 'rm -f "${comments_tmp}" "${inlines_tmp}" "${gh_err_tmp}"' RETURN EXIT
 
   if [[ "${is_issue}" == "1" ]]; then
-    if ! gh issue view "${target_id}" --json comments > "${comments_tmp}" 2>"${gh_err_tmp}"; then
+    if ! run_gh issue view "${target_id}" --json comments > "${comments_tmp}" 2>"${gh_err_tmp}"; then
       echo "エラー: Issue #${target_id} の取得に失敗しました:" >&2
       cat "${gh_err_tmp}" >&2
       exit 1
     fi
     echo "[]" > "${inlines_tmp}"
   else
-    if ! gh pr view "${target_id}" --json comments,reviews > "${comments_tmp}" 2>"${gh_err_tmp}"; then
+    if ! run_gh pr view "${target_id}" --json comments,reviews > "${comments_tmp}" 2>"${gh_err_tmp}"; then
       echo "エラー: PR #${target_id} の取得に失敗しました:" >&2
       cat "${gh_err_tmp}" >&2
       exit 1
@@ -433,13 +416,13 @@ pull_content() {
 
     # インラインレビューコメントの取得
     local repo_slug
-    if ! repo_slug="$(gh repo view --json nameWithOwner -q .nameWithOwner 2>"${gh_err_tmp}")"; then
+    if ! repo_slug="$(run_gh repo view --json nameWithOwner -q .nameWithOwner 2>"${gh_err_tmp}")"; then
       echo "エラー: リポジトリ情報の取得に失敗しました:" >&2
       cat "${gh_err_tmp}" >&2
       exit 1
     fi
 
-    if ! gh api --paginate --slurp "repos/${repo_slug}/pulls/${target_id}/comments" > "${inlines_tmp}" 2>"${gh_err_tmp}"; then
+    if ! run_gh api --paginate --slurp "repos/${repo_slug}/pulls/${target_id}/comments" > "${inlines_tmp}" 2>"${gh_err_tmp}"; then
       echo "エラー: PR #${target_id} のインラインコメント取得に失敗しました:" >&2
       cat "${gh_err_tmp}" >&2
       exit 1
@@ -508,7 +491,7 @@ create_pull_request() {
     fi
     i=$((i + 1))
   done
-  gh pr create "${args[@]}"
+  run_gh pr create "${args[@]}"
 }
 
 # ---------------------------------------------------------------------------
