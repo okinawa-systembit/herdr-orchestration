@@ -201,7 +201,7 @@ submit 後は `task-result` と記録を照合する。不完全な結果ファ�
 
 ## 7. 公開防止と権限
 
-`.input/` と `docs/reviews/internal/` はディレクトリ単位で Git 除外する。Git common directory 内の補助状態も Git 管理対象にしない。作成時は実行ユーザーを owner としてディレクトリ 0700、ファイル 0600 とし、アプリ側の追加暗号化は行わない。親ディレクトリ・対象ファイルの owner、symlink、実パスを確認する。既存ファイルの上書き、symlink 経由の許可領域外への書き込みを拒否する。
+`.input/` と `docs/reviews/internal/` はディレクトリ単位で Git 除外する。Git common directory 内の補助状態も Git 管理対象にしない。非公開内部レビュー領域（`.input/inbox/` および `docs/reviews/internal/`）は実行ユーザーを owner として作成（内部依頼書 0600、内部記録 0600）し、アプリ側の追加暗号化は行わない。PR 同期用の作業バッファ（`.input/review/`、`.input/tmp/`）は実行ユーザーの通常の権限で管理し、過剰なパーミッション強制は行わない。親ディレクトリ・対象ファイルの owner、symlink、実パスを確認し、既存ファイルの上書きや symlink 経由の許可領域外への書き込みを拒否する。
 
 公開前の自動検査は追跡済みファイルと staged diff の禁止パスを検出し、`git add -f` による強制追加も停止対象とする。別パスに複写された内容は、機密情報らしい文字列を検査し、検出した実値をログへ出さない。Issue、PR、コメント、ブランチ名、コミットメッセージ、差分、CI ログ、添付物は人間が公開前に最終確認する。文脈からの推測可能性は自動検査だけで判断しない。公開可否が不明なら投稿・push を停止する。
 
@@ -211,7 +211,7 @@ CI は push 後の検出であり、公開済み情報の流出防止にはな�
 
 ## 8. 移行と改修対象
 
-旧 `.review-inbox/` は廃止・削除済み（作業領域は `.input/` に一元化）。過去の検証記録（GitHub Issues）は維持する。旧・新パスを同時に履歴の正本として更新しない。
+旧 `.review-inbox/` は廃止・削除済み（作業領域は `.input/` に一元化）。既存のローカル作業ツリーに残存する旧 `.inbox/` は `.input/inbox/` に移動するか安全に削除する（互換のため `.gitignore` では除外を継続）。過去の検証記録（GitHub Issues）は維持する。旧・新パスを同時に履歴の正本として更新しない。
 
 改修対象候補は `.agents/skills/repo-review/SKILL.md` と `references.md`、`.agents/skills/repo-workflow/SKILL.md`、repository 固有の handoff・記録・採番 helper とテスト、`.gitignore`、依頼・応答テンプレート、`AGENTS.md`、`README.md`、公開可能な運用文書である。Skill と運用文書には review handoff の helper 経由を必須として記載する。旧パス参照を検索し、運用上の参照を切り替える。中央 Orchestrator の Task Registry schema、handoff、result、completion、`task-list` は変更しない。
 
