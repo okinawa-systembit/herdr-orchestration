@@ -66,15 +66,14 @@ def generate_instance_id() -> str:
 
 def check_and_enforce_permissions(
     path: Path,
-    expected_mode: int,
     is_dir: bool = False,
     base_dir: Path | None = None,
 ) -> None:
     """
-    Validate that path is not a symlink, UID ownership matches current user,
-    and strict permission mode matches expected_mode.
-    Optionally verifies that path resolves within base_dir.
-    Raises SecurityPermissionError on mismatch.
+    Validate that path is not a symlink and (optionally) resolves within base_dir.
+    Does not enforce strict 0700/0600 permissions or UID checks to allow
+    standard umask operation and container/multi-agent sandbox execution.
+    Raises SecurityPermissionError on symlink or path traversal violation.
     """
     # Check symlink on the path itself
     if os.path.islink(str(path)):
@@ -82,19 +81,6 @@ def check_and_enforce_permissions(
 
     if not path.exists():
         return
-
-    st = path.lstat()
-    current_uid = os.getuid()
-    if st.st_uid != current_uid:
-        raise SecurityPermissionError(
-            f"Security error: {path} is owned by UID {st.st_uid}, expected {current_uid}"
-        )
-    actual_mode = st.st_mode & 0o777
-    if actual_mode != expected_mode:
-        raise SecurityPermissionError(
-            f"Security error: {path} permissions are {oct(actual_mode)}, expected {oct(expected_mode)}. "
-            f"Hint: Run 'chmod {oct(expected_mode)[2:]} {path}' to fix permissions."
-        )
 
     if base_dir is not None:
         norm_base = Path(base_dir).resolve()
@@ -105,14 +91,15 @@ def check_and_enforce_permissions(
             raise SecurityPermissionError(f"Security error: {path} resolves outside base directory {base_dir}")
 
 
-def safe_ensure_dir(path: Path, mode: int = 0o700, base_dir: Path | None = None) -> None:
+def safe_ensure_dir(path: Path, base_dir: Path | None = None) -> None:
     """
-    Safely create or verify a directory and its ancestors under base_dir with strict permissions and no symlinks.
+    Safely create or verify a directory and its ancestors under base_dir with no symlinks.
+    Relies on standard OS umask rather than forcing 0700.
     """
     if os.path.islink(str(path)):
         raise SecurityPermissionError(f"Security error: {path} is a symlink")
 
-    # If base_dir provided, ensure all components between base_dir and path are created with mode and checked
+    # If base_dir provided, ensure all components between base_dir and path are created without symlinks
     parts_to_create: list[Path] = []
     curr = path
     while not curr.exists():
@@ -125,11 +112,10 @@ def safe_ensure_dir(path: Path, mode: int = 0o700, base_dir: Path | None = None)
     for p in reversed(parts_to_create):
         if os.path.islink(str(p)):
             raise SecurityPermissionError(f"Security error: {p} is a symlink")
-        p.mkdir(mode=mode, exist_ok=False)
-        os.chmod(str(p), mode)
+        p.mkdir(exist_ok=False)
 
-    # Check permissions and base_dir
-    check_and_enforce_permissions(path, mode, is_dir=True, base_dir=base_dir)
+    # Check symlink and base_dir
+    check_and_enforce_permissions(path, is_dir=True, base_dir=base_dir)
 
 
 def validate_state_dict(data: Any) -> dict[str, Any]:
@@ -160,7 +146,7 @@ def load_state(git_common_dir: str | Path) -> dict[str, Any] | None:
     """
     Load and validate state.json.
     Returns dict if valid, None if file does not exist.
-    Raises SecurityPermissionError on permission/ownership violation.
+    Raises SecurityPermissionError on symlink or path traversal violation.
     Raises CorruptedStateError on JSON decode or schema error.
     """
     state_dir = get_state_dir(git_common_dir)
@@ -169,12 +155,12 @@ def load_state(git_common_dir: str | Path) -> dict[str, Any] | None:
     if not state_dir.exists():
         return None
 
-    check_and_enforce_permissions(state_dir, 0o700, is_dir=True)
+    check_and_enforce_permissions(state_dir, is_dir=True)
 
     if not state_path.exists():
         return None
 
-    check_and_enforce_permissions(state_path, 0o600, is_dir=False)
+    check_and_enforce_permissions(state_path, is_dir=False)
 
     try:
         with open(state_path, "r", encoding="utf-8") as f:
@@ -193,11 +179,11 @@ def load_state(git_common_dir: str | Path) -> dict[str, Any] | None:
 def save_state(git_common_dir: str | Path, state: dict[str, Any]) -> None:
     """
     Atomically persist state dict to state.json using a temp file and fsync.
-    Enforces 0700 on directory and 0600 on file.
+    Relies on standard OS umask.
     """
     validated = validate_state_dict(state)
     state_dir = get_state_dir(git_common_dir)
-    safe_ensure_dir(state_dir, 0o700, base_dir=git_common_dir)
+    safe_ensure_dir(state_dir, base_dir=git_common_dir)
 
     token = secrets.token_hex(4)
     tmp_path = state_dir / f".state.json.tmp.{os.getpid()}.{token}"
@@ -205,8 +191,8 @@ def save_state(git_common_dir: str | Path, state: dict[str, Any]) -> None:
 
     payload = json.dumps(validated, indent=2, ensure_ascii=False) + "\n"
 
-    # Open with O_CREAT | O_WRONLY | O_TRUNC, mode 0600
-    fd = os.open(str(tmp_path), os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
+    # Open with O_CREAT | O_WRONLY | O_TRUNC, mode 0666 (subject to umask)
+    fd = os.open(str(tmp_path), os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o666)
     try:
         os.write(fd, payload.encode("utf-8"))
         os.fsync(fd)
@@ -214,7 +200,6 @@ def save_state(git_common_dir: str | Path, state: dict[str, Any]) -> None:
         os.close(fd)
 
     os.replace(str(tmp_path), str(state_file))
-    os.chmod(str(state_file), 0o600)
 
 
 def create_initial_state(

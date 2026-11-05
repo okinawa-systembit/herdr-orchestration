@@ -110,13 +110,13 @@ def cmd_init(args: argparse.Namespace) -> int:
 
             # Ensure .input/inbox and docs/reviews/internal/<instance-id> are initialized
             inbox_dir = worktree / ".input" / "inbox"
-            safe_ensure_dir(inbox_dir, 0o700, base_dir=worktree)
+            safe_ensure_dir(inbox_dir, base_dir=worktree)
 
             internal_root = get_internal_reviews_root(worktree)
-            safe_ensure_dir(internal_root, 0o700, base_dir=worktree)
+            safe_ensure_dir(internal_root, base_dir=worktree)
 
             reviews_dir = get_instance_reviews_dir(worktree, new_instance_id)
-            safe_ensure_dir(reviews_dir, 0o700, base_dir=worktree)
+            safe_ensure_dir(reviews_dir, base_dir=worktree)
             update_index(worktree, new_instance_id)
 
             print(f"Successfully initialized review helper: instance_id={new_instance_id}, worktree={worktree}")
@@ -219,7 +219,7 @@ def cmd_request_create(args: argparse.Namespace) -> int:
                 return 1
 
             inbox_dir = worktree / ".input" / "inbox"
-            safe_ensure_dir(inbox_dir, 0o700, base_dir=worktree)
+            safe_ensure_dir(inbox_dir, base_dir=worktree)
 
             target_commit = args.target_commit or _get_head_commit(worktree)
             tier = args.tier.upper()
@@ -284,7 +284,7 @@ def cmd_request_create(args: argparse.Namespace) -> int:
                 cand_filename = f"review-request.{token}.md"
                 cand_path = inbox_dir / cand_filename
 
-                fd = os.open(str(tmp_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+                fd = os.open(str(tmp_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o666)
                 try:
                     os.write(fd, content.encode("utf-8"))
                     os.fsync(fd)

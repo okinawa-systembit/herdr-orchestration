@@ -43,7 +43,7 @@ def scan_existing_review_numbers(reviews_dir: Path) -> list[int]:
     """Scan existing RVNNN.md files in reviews_dir and return sorted list of numbers."""
     if not reviews_dir.exists():
         return []
-    check_and_enforce_permissions(reviews_dir, 0o700, is_dir=True)
+    check_and_enforce_permissions(reviews_dir, is_dir=True)
     numbers: list[int] = []
     for entry in reviews_dir.iterdir():
         if entry.is_file():
@@ -63,7 +63,7 @@ def find_existing_record_by_task_id(
     """
     if not reviews_dir.exists():
         return None
-    check_and_enforce_permissions(reviews_dir, 0o700, is_dir=True)
+    check_and_enforce_permissions(reviews_dir, is_dir=True)
     for entry in reviews_dir.iterdir():
         if entry.is_file() and RV_PATTERN.match(entry.name):
             try:
@@ -178,10 +178,10 @@ def update_index(
     """
     current_worktree = Path(current_worktree).resolve()
     internal_root = get_internal_reviews_root(current_worktree)
-    safe_ensure_dir(internal_root, 0o700, base_dir=current_worktree)
+    safe_ensure_dir(internal_root, base_dir=current_worktree)
 
     reviews_dir = get_instance_reviews_dir(current_worktree, instance_id)
-    safe_ensure_dir(reviews_dir, 0o700, base_dir=current_worktree)
+    safe_ensure_dir(reviews_dir, base_dir=current_worktree)
 
     records: list[dict[str, Any]] = []
     for entry in sorted(reviews_dir.iterdir(), key=lambda p: p.name):
@@ -228,7 +228,7 @@ def update_index(
     tmp_path = reviews_dir / f".{INDEX_FILENAME}.tmp.{os.getpid()}.{token}"
     index_path = reviews_dir / INDEX_FILENAME
 
-    fd = os.open(str(tmp_path), os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
+    fd = os.open(str(tmp_path), os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o666)
     try:
         os.write(fd, payload.encode("utf-8"))
         os.fsync(fd)
@@ -236,7 +236,6 @@ def update_index(
         os.close(fd)
 
     os.replace(str(tmp_path), str(index_path))
-    os.chmod(str(index_path), 0o600)
     return index_path
 
 
@@ -250,7 +249,7 @@ def save_review_record(
 ) -> Path:
     """
     Atomically publish an individual review record under docs/reviews/internal/<instance-id>/RVNNN.md.
-    Enforces mode 0700 on directories and 0600 on files.
+    Relies on standard OS umask.
     Triggers derived INDEX.md rebuild atomically.
     """
     current_worktree = Path(current_worktree).resolve()
@@ -260,10 +259,10 @@ def save_review_record(
 
     instance_id = state["instance_id"]
     internal_root = get_internal_reviews_root(current_worktree)
-    safe_ensure_dir(internal_root, 0o700, base_dir=current_worktree)
+    safe_ensure_dir(internal_root, base_dir=current_worktree)
 
     reviews_dir = get_instance_reviews_dir(current_worktree, instance_id)
-    safe_ensure_dir(reviews_dir, 0o700, base_dir=current_worktree)
+    safe_ensure_dir(reviews_dir, base_dir=current_worktree)
 
     # Format document with metadata header
     final_content = content
@@ -279,7 +278,7 @@ def save_review_record(
     token = secrets.token_hex(4)
     tmp_path = reviews_dir / f".tmp.{review_id}.md.{os.getpid()}.{token}"
 
-    fd = os.open(str(tmp_path), os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
+    fd = os.open(str(tmp_path), os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o666)
     try:
         os.write(fd, final_content.encode("utf-8"))
         os.fsync(fd)
@@ -300,8 +299,6 @@ def save_review_record(
         if tmp_path.exists():
             os.unlink(str(tmp_path))
         raise
-
-    os.chmod(str(target_file), 0o600)
 
     # Derive INDEX.md
     update_index(current_worktree, instance_id)

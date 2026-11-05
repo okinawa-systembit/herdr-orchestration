@@ -38,19 +38,19 @@ Phase 1 設計書で「実装着手前の詳細実装設計で定める」と保
 
 - **Git common directory の解決**: `git rev-parse --git-common-dir` を使用して絶対パスを取得する（通常の単一 checkout では `.git`、worktree では親リポジトリの `.git` を指す）。
 - **固定共有 lock ファイル**: `<git-common-dir>/herdr-review.lock`
-  - 権限: `0600`（所有者のみ読み書き）
+  - 権限: OS 標準の umask に準拠（排他的な `0600` 強制は行わない）
   - 本ファイルは補助状態の切り離し・再初期化の対象外とし、常に同一パス・同一境界を維持する。
 - **補助状態ディレクトリ**: `<git-common-dir>/herdr-review/`
-  - 権限: `0700`（所有者のみアクセス可能）
+  - 権限: OS 標準の umask に準拠（排他的な `0700` 強制は行わない）
 - **状態ファイル**: `<git-common-dir>/herdr-review/state.json`
-  - 権限: `0600`（所有者のみ読み書き）
+  - 権限: OS 標準の umask に準拠（排他的な `0600` 強制は行わない）
 
 ### 2.2 worktree 内の作業・成果物領域（Git 除外）
 
 `.gitignore` に次のエントリを追加し、追跡対象から完全に除外する。
 
-- `.input/inbox/`: 一時依頼・応答ファイル配置領域（ディレクトリ権限 `0700`、ファイル権限 `0600`）
-- `docs/reviews/internal/`: 非公開レビュー履歴の正本領域（ディレクトリ権限 `0700`、ファイル権限 `0600`）
+- `.input/inbox/`: 一時依頼・応答ファイル配置領域（OS 標準の umask に準拠）
+- `docs/reviews/internal/`: 非公開レビュー履歴の正本領域（OS 標準の umask に準拠）
 
 <a id="sec-3"></a>
 
@@ -61,7 +61,7 @@ Phase 1 設計書で「実装着手前の詳細実装設計で定める」と保
 ### 3.1 ロック取得手順
 
 1. `lock_path = os.path.join(git_common_dir, "herdr-review.lock")` を特定する。
-2. `fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)` でオープンする。
+2. `fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o666)` でオープンする（OS 標準の umask に準拠）。
 3. `fcntl.flock(fd, fcntl.LOCK_EX)` で排他ロックを取得する（ブロッキング待機、または必要に応じてタイムアウト付きノンブロッキング試行）。
 4. **inode 照合（TOCTOU 回避）**:
    - `fstat_res = os.fstat(fd)`
@@ -109,7 +109,7 @@ Phase 1 設計書で「実装着手前の詳細実装設計で定める」と保
 1. **状態ファイルの検証**:
    - 不在の場合: 新規環境または過去の全損と判定。
    - 存在するが JSON 解析エラー、または必須キー（`version`, `instance_id`, `worktree_path`, `counter`）の欠落・型不正の場合: 破損と判定。
-   - 所有者が実行ユーザーと異なる、またはパーミッションが `0600` 以外の場合: **セキュリティ疑義として直ちに停止**し、自動初期化は行わずエラー詳細と手動復旧手順を表示する。
+   - symlink である、またはベースディレクトリ外を参照している場合: **セキュリティ疑義（symlink 悪用・パストラバーサル）として直ちに停止**し、自動初期化は行わずエラー詳細と手動復旧手順を表示する（機微情報を含まないため過剰な 0700/0600 パーミッション縛りや UID 縛りは行わない）。
 2. **残存 Task の確認（`task-list` 連携）**:
    - 初期化または再初期化が必要な場合、`herdr-orchestrator task-list --repository <identity> --type review` を実行する。
    - `complete=false` または `truncated=true` の場合: 残存なしと断定できないため、停止して人間に確認を求める。
@@ -137,7 +137,7 @@ Phase 1 設計書で「実装着手前の詳細実装設計で定める」と保
 
 1. 一時ファイル `docs/reviews/internal/<instance-id>/.tmp.RVNNN.md.<pid>.<token>` にレビュー記録本文を書き出す。
 2. `os.fsync` でディスクに確実にフラッシュする。
-3. 不可分リンク `os.link` により `docs/reviews/internal/<instance-id>/RVNNN.md` へ原子的に公開後、一時ファイルを unlink する。既存ファイルが存在する場合は上書きせず `ReviewRecordExistsError` となり、既存記録の上書き破壊を防止する。権限は `0600`。
+3. 不可分リンク `os.link` により `docs/reviews/internal/<instance-id>/RVNNN.md` へ原子的に公開後、一時ファイルを unlink する。既存ファイルが存在する場合は上書きせず `ReviewRecordExistsError` となり、既存記録の上書き破壊を防止する。権限は OS 標準の umask に準拠する。
 4. 書き込み途中の不完全ファイルが完成データとして扱われることはない。
 
 ### 5.3 INDEX の派生更新
