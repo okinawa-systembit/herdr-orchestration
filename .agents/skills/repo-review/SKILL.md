@@ -83,14 +83,14 @@ description: >-
    scripts/repo-review-helper init
    ```
    ※ 旧 Task が残存して停止した場合は人間に確認し、放棄合意があれば `--abandon-old-tasks` を付与。
-2. レビュー依頼ファイルを `.input/inbox/` に原子的作成:
+2. レビュー依頼ファイルを `.input/inbox/` に原子的作成（標準出力に作成された `.input/inbox/review-request.<token>.md` のパスが出力される）:
    ```bash
-   REQ_FILE=$(scripts/repo-review-helper request-create --tier STANDARD --summary "最新の変更内容についてのレビューを依頼します。")
+   scripts/repo-review-helper request-create --tier STANDARD --summary "最新の変更内容についてのレビューを依頼します。"
    ```
-   （必要に応じて生成された `$REQ_FILE` を編集し、重点確認事項や再レビュー参照先を追記）。
+   （必要に応じて出力された依頼ファイルを各エージェント環境の標準的なファイル操作機能で編集し、重点確認事項や再レビュー参照先を追記する。変数代入チェーンや `cat << 'EOF'` は使用しない）。
 3. テスト実行と結果確認:
    `npm run test:orchestrator`（必要なら `npm run verify:orchestrator`）を実行。
-4. 同一 worktree・requester pane から **sync handoff**（instruction は短く、inbox を指す）:
+4. 同一 worktree・requester pane から **sync handoff**（instruction は短く、作成された inbox ファイルパスを直接指す）:
    ※ 対象ペインが標準ロール名 `reviewer`（日本語表示は `--label "レビュワー"`）で Role Binding 登録されている必要があります。日本語名（例: `レビュワー`）で登録している環境では、`role show` で確認した登録名を `--worker-role` または `--to` に指定してください（例: `--to レビュワー`）。
 
 ```bash
@@ -98,7 +98,7 @@ herdr-orchestrator handoff \
   --mode sync \
   --worker-role reviewer \
   --task-type review \
-  --instruction "Read $REQ_FILE and review per repo-review SKILL. Save record via repo-review-helper record-save. DO NOT close or modify any GitHub Finding issue."
+  --instruction "Read .input/inbox/review-request.<token>.md and review per repo-review SKILL. Save record via repo-review-helper record-save. DO NOT close or modify any GitHub Finding issue."
 ```
 
 ※ **GitHub コメント投稿を明示的に依頼する場合（オプトイン）**:  
@@ -109,7 +109,7 @@ herdr-orchestrator handoff \
   --mode sync \
   --worker-role reviewer \
   --task-type review \
-  --instruction "Read $REQ_FILE and review per repo-review SKILL. Save record via repo-review-helper record-save. Post review result as comment to Finding Issue #<no> after verifying target SHA. DO NOT close or modify any GitHub issue."
+  --instruction "Read .input/inbox/review-request.<token>.md and review per repo-review SKILL. Save record via repo-review-helper record-save. Post review result as comment to Finding Issue #<no> after verifying target SHA. DO NOT close or modify any GitHub issue."
 ```
 
 5. sync 完了後:
@@ -121,15 +121,16 @@ herdr-orchestrator task-result <task.id>
 6. `result.status` / `result.ref` を確認してから人間へ報告。再依頼は新 task として実施。
 
 ※ **ワイドレビュー（総点検 / 全体点検 / 総チェック）を依頼する場合**:  
-ユーザーから「ワイドレビュー」「総点検」「全体点検」「総チェック」の指示を受けた場合は、以下のように `--tier WIDE` で依頼書を作成し、A-1〜A-8 の点検を指示する：
+ユーザーから「ワイドレビュー」「総点検」「全体点検」「総チェック」の指示を受けた場合は、以下のように `--tier WIDE` で依頼書を作成し、出力されたファイルパスを指定して A-1〜A-8 の点検を指示する：
 
 ```bash
-REQ_FILE=$(scripts/repo-review-helper request-create --tier WIDE --summary "リポジトリ全体の総点検（ワイドレビュー）を実施します。")
+scripts/repo-review-helper request-create --tier WIDE --summary "リポジトリ全体の総点検（ワイドレビュー）を実施します。"
+
 herdr-orchestrator handoff \
   --mode sync \
   --to レビュワー \
   --task-type review \
-  --instruction "Read $REQ_FILE and execute WIDE review (A-1 to A-8 per repo-review references.md). Save record via repo-review-helper record-save. Summarize findings and list any finding issue candidates. DO NOT close or modify any GitHub issue."
+  --instruction "Read .input/inbox/review-request.<token>.md and execute WIDE review (A-1 to A-8 per repo-review references.md). Save record via repo-review-helper record-save. Summarize findings and list any finding issue candidates. DO NOT close or modify any GitHub issue."
 ```
 
 handoff 失敗時: stderr を人間へ。blind 再送しない（設計 §9）。
@@ -236,44 +237,49 @@ handoff 失敗時: stderr を人間へ。blind 再送しない（設計 §9）�
 - **事実と推論の区別**:
   - 実行して確認した事実、コード読解の事実、仕様・設計に基づく判断、推測・未検証の仮説を明確に区別して記載する（ローカルテスト成功を理由にリモートActions実行成功まで保証しない）。
 - [references.md#review-principles](references.md#review-principles) に基づき重大度（P0〜P3）と確信度（高/中/低）を判定。
-- レビュー結果本文を整形し（見出し構成は [references.md#review-response-body](references.md#review-response-body) に従う）、`scripts/repo-review-helper record-save` を使って保存する（自動採番、原子的保存、INDEX.md 派生更新）：
-  ```bash
-  # 一時ファイルにレビュー本文を用意（構成は references.md に準拠）
-  TMP_BODY=$(mktemp)
-  cat << 'EOF' > "$TMP_BODY"
-  # レビュー記録 — <タイトル>
+- レビュー結果本文を整形し（見出し構成は [references.md#review-response-body](references.md#review-response-body) に従う）、各エージェント環境が持つ標準的なファイル操作機能を用いて一時ファイル（例: `.input/tmp/review-body.md`）に用意した上で、`scripts/repo-review-helper record-save` を使って保存する（自動採番、原子的保存、INDEX.md 派生更新。シェルの構文解釈不一致や承認待ち停止を避けるため、`TMP_BODY=$(mktemp)` や `cat << 'EOF'` によるヒアドキュメント書き込みは使用しない）：
+  1. 一時ファイル（例: `.input/tmp/review-body.md`）に以下の構成でレビュー本文を作成する：
+     ```markdown
+     # レビュー記録 — <タイトル>
 
-  ## レビュー条件・メタデータ
-  - レビュワーモデル: ...
-  - 対象コミットSHA: ...
+     ## レビュー条件・メタデータ
 
-  ## 判定
-  - [x] GO
+     - レビュワーモデル: ...
+     - 対象コミットSHA: ...
 
-  ## 総評
-  ...
+     ## 判定
 
-  ## Blocking 指摘
-  なし。
+     - [x] GO
 
-  ## Non-blocking 指摘
-  ...
+     ## 総評
 
-  ## テスト・検証結果
-  ...
+     ...
 
-  ## 調査範囲と未確認事項
-  ...
-  EOF
+     ## Blocking 指摘
 
-  # 採番・個別記録の原子的公開・INDEX更新（--outcome にレビュー判定 GO/要修正/NO-GO を指定）
-  scripts/repo-review-helper record-save \
-    --task-id "<task.id>" \
-    --body-file "$TMP_BODY" \
-    --outcome "GO" \
-    --target-commit "<target_commit>"
-  rm -f "$TMP_BODY"
-  ```
+     なし。
+
+     ## Non-blocking 指摘
+
+     ...
+
+     ## テスト・検証結果
+
+     ...
+
+     ## 調査範囲と未確認事項
+
+     ...
+     ```
+  2. 採番・個別記録の原子的公開・INDEX更新を実行し、一時ファイルを削除する（`--outcome` にレビュー判定 `GO` / `要修正` / `NO-GO` を指定）：
+     ```bash
+     scripts/repo-review-helper record-save \
+       --task-id "<task.id>" \
+       --body-file .input/tmp/review-body.md \
+       --outcome "GO" \
+       --target-commit "<target_commit>"
+     rm -f .input/tmp/review-body.md
+     ```
 
 ### 7. 結果登録
 
