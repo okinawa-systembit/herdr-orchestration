@@ -42,12 +42,14 @@ from repo_review_helper.state import (
     CorruptedStateError,
     SecurityPermissionError,
     WorktreeMismatchError,
+    check_and_enforce_permissions,
     create_initial_state,
     generate_instance_id,
     get_git_common_dir,
     get_state_dir,
     get_state_file_path,
     load_state,
+    safe_ensure_dir,
     save_state,
 )
 from repo_review_helper.task_checker import (
@@ -127,6 +129,29 @@ class TestReviewLock(unittest.TestCase):
             or "is a directory" in str(ctx.exception).lower()
             or "permission" in str(ctx.exception).lower()
         )
+
+    def test_lock_fifo_rejection(self):
+        """P3-1: Reject lock acquisition if lock file is a FIFO (open succeeds but not S_ISREG)."""
+        if not hasattr(os, "mkfifo"):
+            self.skipTest("os.mkfifo not available on this platform")
+        lock_file = self.common_dir / ReviewLock.LOCK_FILENAME
+        os.mkfifo(str(lock_file))
+
+        lock = ReviewLock(self.common_dir)
+        with self.assertRaises(LockAcquisitionError) as ctx:
+            lock.acquire()
+        self.assertIn("is not a regular file", str(ctx.exception))
+
+    def test_lock_non_regular_fstat_rejection(self):
+        """P3-1: Reject lock acquisition when stat.S_ISREG returns False on opened fd."""
+        lock_file = self.common_dir / ReviewLock.LOCK_FILENAME
+        lock_file.write_text("dummy", encoding="utf-8")
+
+        with patch("stat.S_ISREG", return_value=False):
+            lock = ReviewLock(self.common_dir)
+            with self.assertRaises(LockAcquisitionError) as ctx:
+                lock.acquire()
+            self.assertIn("is not a regular file", str(ctx.exception))
 
     def test_lock_fd_closed_on_rejection(self):
         """R64-08: Ensure file descriptor is closed when LockAcquisitionError is raised."""
@@ -309,6 +334,26 @@ class TestStateManagement(unittest.TestCase):
         with self.assertRaises(SecurityPermissionError) as cm:
             load_state(self.common_dir)
         self.assertIn("is a symlink", str(cm.exception))
+
+    def test_check_and_enforce_permissions_base_dir_traversal(self):
+        """P3-1: check_and_enforce_permissions rejects path resolving outside base_dir."""
+        sub_dir = self.worktree / "subdir"
+        sub_dir.mkdir()
+        outside_path = sub_dir / ".." / ".." / "outside.txt"
+        outside_path.touch()
+
+        with self.assertRaises(SecurityPermissionError) as ctx:
+            check_and_enforce_permissions(outside_path, base_dir=self.worktree)
+        self.assertIn("resolves outside base directory", str(ctx.exception))
+
+    def test_safe_ensure_dir_base_dir_traversal(self):
+        """P3-1: safe_ensure_dir rejects directory resolving outside base_dir without creating it."""
+        outside_target = self.worktree / ".." / "outside_dir"
+
+        with self.assertRaises(SecurityPermissionError) as ctx:
+            safe_ensure_dir(outside_target, base_dir=self.worktree)
+        self.assertIn("resolves outside base directory", str(ctx.exception))
+        self.assertFalse(outside_target.resolve().exists())
 
 
 class TestRecorder(unittest.TestCase):

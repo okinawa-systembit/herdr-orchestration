@@ -71,8 +71,9 @@ def check_and_enforce_permissions(
 ) -> None:
     """
     Validate that path is not a symlink and (optionally) resolves within base_dir.
-    Does not enforce strict 0700/0600 permissions or UID checks to allow
-    standard umask operation and container/multi-agent sandbox execution.
+    Does not enforce strict 0700/0600 permissions or UID checks to avoid
+    excessive halts caused by umask/permission differences within the same UID.
+    Different UID/GID environments are out of scope (requires operational setup).
     Raises SecurityPermissionError on symlink or path traversal violation.
     """
     # Check symlink on the path itself
@@ -94,10 +95,18 @@ def check_and_enforce_permissions(
 def safe_ensure_dir(path: Path, base_dir: Path | None = None) -> None:
     """
     Safely create or verify a directory and its ancestors under base_dir with no symlinks.
-    Relies on standard OS umask rather than forcing 0700.
+    Relies on standard OS umask to avoid excessive halts within the same UID.
     """
     if os.path.islink(str(path)):
         raise SecurityPermissionError(f"Security error: {path} is a symlink")
+
+    if base_dir is not None:
+        norm_base = Path(base_dir).resolve()
+        norm_path = path.resolve()
+        try:
+            norm_path.relative_to(norm_base)
+        except ValueError:
+            raise SecurityPermissionError(f"Security error: {path} resolves outside base directory {base_dir}")
 
     # If base_dir provided, ensure all components between base_dir and path are created without symlinks
     parts_to_create: list[Path] = []
