@@ -81,28 +81,47 @@ herdr-orchestrator role set 調査担当 --pane w16:p1 --label "調査担当" --
 - `--label <display_name>`: Herdr UI のペイン表示名（タブ上のラベル）を個別に指定します（先頭の `--` は自動除去されます）。
 - 出力 JSON には `label_sync`（同期成否・アクション）および `target.label_synced`（同期成功フラグ）が含まれます。
 
-### 3.2 登録内容の確認 (`role show`)
+### 3.2 登録内容とライブ状態の確認 (`role show`)
 
 ```bash
-# ローカルロール一覧
+# ローカルロール一覧（およびグローバルロール一覧）と現在のライブ状態を確認
 herdr-orchestrator role show
 
-# グローバルロール一覧
+# グローバルロール一覧のみを確認
 herdr-orchestrator role show --global
 ```
 
-### 3.3 ロールの解除 (`role clear`)
+- **読み取り専用・終了コード規則**: `role show` は Role Binding JSON を一切書き換えず、`live_status` の値（`pane_missing` / `pane_mismatch` / `unknown`）によって終了コードは変えず `0` を返します（ただし、Role ファイル自体の破損や読み込み失敗時は従来通りエラー終了コード `1` となります。詳細は [ワークスペース跨ぎ設計書 §4.4](../../../docs/herdr-orchestrator-cross-workspace.md#sec-4-4) を参照）。
+- **実機状態照合（`targets[<role>].live_status`）**:
+  - `live`: 登録ペイン（`pane_id`）が実在している状態。稼働時は指紋（`cwd`・`agent`・`terminal_id` / `agent_session_id`）が一致しており、エージェントが終了してシェル待機中の場合は `agent_status: "none"`, `reason: "agent_not_running"` が付与されます。
+  - `pane_missing`: 指定された `pane_id` が現在の Herdr 実機上に存在しない状態（`reason: "pane_not_found"`）。
+  - `pane_mismatch`: `pane_id` は存在しエージェントが稼働中であるが登録時の指紋と食い違っている状態（別ペインへの ID 再利用やディレクトリ移動：`reason: "context_changed"`）、または必須指紋を欠く旧形式（`reason: "outdated_metadata"`）。
+  - `unknown`: `HERDR_ENV=1` 外での実行（`reason: "not_in_herdr_env"`）または `herdr pane list` 取得失敗（`reason: "pane_list_unavailable"`）により判定不能な状態。
+- **非 `live` 検出時の警告**: `status != "live"` または `reason == "agent_not_running"` のロールが存在する場合、標準エラー出力（stderr）に 1 行の警告が出力され、`live_status.hint` に対処方法が表示されます。
+
+> [!NOTE]
+> **なぜ `pane_missing`（ペイン不在）を機械的に自動削除しないのか？**  
+> Herdr 全体を再起動した直後は一時的に全ロールの旧 `pane_id` が不在（`pane_missing`）となりますが、Role Binding に残された `agent_session_id`・`cwd`・`agent` の指紋が、エージェント再起動後の**新ペイン自動追従（[§5.2 ケース K](../../../docs/herdr-orchestrator-cross-workspace.md#sec-5-2)）の唯一の手がかり**となります。そのため自動削除は行わず、`role show` で状態を見える化した上で、人間またはエージェントが「完全に閉じて不要になったロール」と判断したものを `role clear <role>` で明示的に整理する方式をとっています。
+
+### 3.3 ロールの解除と不要設定の手動整理 (`role clear`)
 
 ```bash
 # 特定ロールを解除（他スコープに残存ロールがなければ Herdr UI ペイン名も --clear で解除）
 herdr-orchestrator role clear レビュワー
+herdr-orchestrator role clear チケット管理 --global
 
 # 全ロールを一括解除
 herdr-orchestrator role clear --all
 herdr-orchestrator role clear --all --global
 ```
 
-※ **残存ロールの UI ラベル保護**: 解除対象のペインが別スコープ（ローカルまたはグローバル）で他の現役ロールを兼任している場合、UI ペイン表示名は `--clear` されず残存ロールの表示名が自動維持されます。どのスコープにもロールが存在しなくなった場合のみ `--clear` が実行されます。
+- **残存ロールの UI ラベル保護**: 解除対象のペインが別スコープ（ローカルまたはグローバル）で他の現役ロールを兼任している場合、UI ペイン表示名は `--clear` されず残存ロールの表示名が自動維持されます。どのスコープにもロールが存在しなくなった場合のみ `--clear` が実行されます。
+- **閉じたペイン・不要ロールの整理手順**:
+  1. `herdr-orchestrator role show`（および `--global`）を実行し、`live_status.status` が `pane_missing` または `pane_mismatch` となっているロールを確認します。
+  2. ペインを完全に閉じて今後も使わないロールであれば、`herdr-orchestrator role clear <role>`（グローバルは `--global`）で 1 件ずつ解除します。
+- **破棄・削除済みリポジトリ（および Non-Git ディレクトリ）の Role ファイルの手動削除手順**:
+  - 各スコープのローカル Role ファイルは `${XDG_STATE_HOME:-~/.local/state}/herdr-orchestrator/roles/<repository-id>.json`（Non-Git ディレクトリの場合は `dir_<hash16>.json`）および対応する `.lock` に保存されます。他リポジトリへの誤干渉を防ぐため、別リポジトリのファイルを一括削除する CLI コマンドは設けられていません。
+  - ディスクから完全に削除・破棄したリポジトリ（またはディレクトリ）の Role ファイルを掃除する場合は、**対象スコープに対して Orchestrator のコマンドが実行中でないこと**および **JSON 内の `targets[*].cwd` のディレクトリが既に存在しないこと**を確認した上で、該当の `<repository-id>.json`（または `dir_<hash16>.json`）と対応する `.lock` を `rm` コマンドで手動削除してください（※ 全ワークスペース共通の `global.json` は削除しないでください）。
 
 ---
 
