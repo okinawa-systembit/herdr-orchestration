@@ -87,7 +87,7 @@ description: >-
    ```bash
    scripts/repo-review-helper request-create --tier STANDARD --summary "最新の変更内容についてのレビューを依頼します。"
    ```
-   （必要に応じて出力された依頼ファイルを各エージェント環境の標準的なファイル操作機能で編集し、重点確認事項や再レビュー参照先を追記する。変数代入チェーンや `cat << 'EOF'` は使用しない）。
+   （必要に応じて出力された依頼ファイルを編集し、重点確認事項や再レビュー参照先を追記する）。
 3. テスト実行と結果確認:
    `npm run test:orchestrator`（必要なら `npm run verify:orchestrator`）を実行。
 4. 同一 worktree・requester pane から **sync handoff**（instruction は短く、作成された inbox ファイルパスを直接指す）:
@@ -237,7 +237,7 @@ handoff 失敗時: stderr を人間へ。blind 再送しない（設計 §9）�
 - **事実と推論の区別**:
   - 実行して確認した事実、コード読解の事実、仕様・設計に基づく判断、推測・未検証の仮説を明確に区別して記載する（ローカルテスト成功を理由にリモートActions実行成功まで保証しない）。
 - [references.md#review-principles](references.md#review-principles) に基づき重大度（P0〜P3）と確信度（高/中/低）を判定。
-- レビュー結果本文を整形し（見出し構成は [references.md#review-response-body](references.md#review-response-body) に従う）、各エージェント環境が持つ標準的なファイル操作機能を用いて一時ファイル（例: `.input/tmp/review-body.md`）に用意した上で、`scripts/repo-review-helper record-save` を使って保存する（自動採番、原子的保存、INDEX.md 派生更新。シェルの構文解釈不一致や承認待ち停止を避けるため、`TMP_BODY=$(mktemp)` や `cat << 'EOF'` によるヒアドキュメント書き込みは使用しない）：
+- レビュー結果本文を整形し（見出し構成は [references.md#review-response-body](references.md#review-response-body) に従う）、各エージェント環境の標準的なファイル操作機能を用いて一時ファイル（例: `.input/tmp/review-body.md`）に用意した上で、`scripts/repo-review-helper record-save` を使って保存する（自動採番、原子的保存、INDEX.md 派生更新。ファイル作成原則の正本は [基本方針: 原則 1](../../../docs/core-principles.md#principle-1) 参照）：
   1. 一時ファイル（例: `.input/tmp/review-body.md`）に以下の構成でレビュー本文を作成する：
      ```markdown
      # レビュー記録 — <タイトル>

@@ -28,9 +28,7 @@ description: >-
 herdr-orchestrator --help
 ```
 
-- **ファイル作成・編集におけるエージェント標準機能の尊重**:
-  - ファイル（一時ファイル、依頼書、相談書、レビュー記録、PR 本文等）の作成・更新を行う際は、各エージェント環境が持つ標準的なファイル操作機能（ネイティブのファイル書き込み機能、または素直な OS 標準コマンド）を利用する。
-  - シェル構文の解釈不一致や不要なコマンド承認待ち停止（`worker_blocked`）を防ぐため、複雑なシェルヒアドキュメント（`cat << 'EOF'`）や変数代入チェーンによるファイル書き込みは避ける（特定のエージェント固有のツール名は強制しない）。
+- **ファイル作成・編集の原則**: ファイルの作成・更新は各エージェント環境の標準的なファイル操作機能を利用し、ヒアドキュメント等に依存しない（正本: [基本方針: 原則 1](../../../docs/core-principles.md#principle-1)）。
 - **同一 worktree 直列運用（案 B）**:
   - 本リポジトリでは、`result-submit --result-ref`（Requester worktree 基準での成果物存在検査）および `scripts/repo-review-helper`（単一 worktree 固定状態）との整合性を保つため、全ロールが同一の Git worktree を共有する。
   - **ブランチを切り替える作業は同時に 1 つだけ**とし、`メイン` が直列にスケジュール管理する。
@@ -80,6 +78,7 @@ git push -u origin <作業ブランチ名>
 bash scripts/review-sync.sh pr-create \
   --title "<type>(<scope>): <変更要約>" \
   --body-file .input/tmp/pr-body.md
+rm -f .input/tmp/pr-body.md
 ```
 
 - ※ `git push` が失敗した場合（SSH 認証エラー等を含む）は、先に進まず人間に報告する。
@@ -156,7 +155,7 @@ bash scripts/review-sync.sh pr-create \
 4. **設計 PR の作成（Bot）**:
    - レビュー GO 後、ステータス（`設計承認` 等）の更新があれば反映して `npm run format:md && npm run check:md` を通し、共通手順（[2.3](#pr-create)）に従って `git push` と `bash scripts/review-sync.sh pr-create` を実行し、`gh pr checks` を確認する。
 5. **実装依頼書の下書き作成（後続の実装 Issue がある場合）**:
-   - 各エージェント環境の標準的なファイル操作機能を用いて `.input/inbox/implementation-request-issue-<実装Issue番号>.md` を作成する（機微情報を含まない一時ファイルのため過剰なパーミッション強制は行わず、`cat << 'EOF'` も使用しない）。仕様や汎用手順は書き写さず、以下の項目をリンク中心で記載する：
+   - `.input/inbox/implementation-request-issue-<実装Issue番号>.md` を作成する（機微情報を含まない一時ファイルのため過剰なパーミッション強制は行わない）。仕様や汎用手順は書き写さず、以下の項目をリンク中心で記載する：
      - **冒頭注記**: 「本依頼書は補助資料であり、仕様・範囲の正本は GitHub Issue および設計書である（食い違いがある場合は Issue・設計書を優先する）」。
      - **対象 Issue / 設計正本**: `Closes #<実装Issue>` / `Refs #<親Issue>`、前提設計 PR `#<設計PR>`（ブランチ名・承認済み SHA）、および対象設計書の節アンカー（`#sec-X-Y`）へのリンク。
      - **作業の始め方と範囲**: 「設計 PR `#<設計PR>` が `main` にマージされた後、`main` から `issue-<N>-<topic>-impl` を新規作成すること」、およびやること・やらないこと（範囲外 Issue 番号）。
@@ -199,7 +198,7 @@ bash scripts/review-sync.sh pr-create \
 設計方針や運用ルールの整理など、レビュー判定（GO / NO-GO）を伴わないロール間の意見伺い・協議は以下の手順で行う（専用 CLI は設けず、内部レビュー RV の連番にも含めない）：
 
 1. **相談ファイルの作成（Requester）**:
-   - 各エージェント環境の標準的なファイル操作機能を用いて `.input/inbox/discussion-<topic>.md` を作成する（機微情報を含まない一時ファイルのため過剰なパーミッション強制は行わず、`cat << 'EOF'` も使用しない。`<topic>` は英小文字とハイフン、例: `role-binding-cleanup`）。
+   - `.input/inbox/discussion-<topic>.md` を作成する（機微情報を含まない一時ファイルのため過剰なパーミッション強制は行わない。`<topic>` は英小文字とハイフン、例: `role-binding-cleanup`）。
 2. **相談の送信（Requester）**:
    ```bash
    herdr-orchestrator handoff \
@@ -209,7 +208,7 @@ bash scripts/review-sync.sh pr-create \
      --instruction "Read .input/inbox/discussion-<topic>.md carefully. Write your reply to .input/inbox/discussion-<topic>-response.md and submit via result-submit. DO NOT write to GitHub, commit, or push."
    ```
 3. **回答の作成と提出（Worker）**:
-   - 各エージェント環境の標準的なファイル操作機能を用いて `.input/inbox/discussion-<topic>-response.md` を作成する（過剰なパーミッション強制は不要、`cat << 'EOF'` 不使用）。
+   - `.input/inbox/discussion-<topic>-response.md` を作成する（過剰なパーミッション強制は不要）。
    - **回答の冒頭に「結論（先に要点）」を置き**、コードやコマンドで確認した**事実**と**推論・提案**を分けて記述する。
    - `herdr-orchestrator result-submit <task.id> --result-status succeeded --result-ref .input/inbox/discussion-<topic>-response.md --summary "<200字以内の要約>"` で提出する（GitHub への投稿やコミット・push は行わない）。
 4. **正本化と片付け（Requester）**:
