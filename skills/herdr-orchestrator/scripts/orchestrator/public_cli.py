@@ -35,8 +35,11 @@ from orchestrator.identity import (
 from orchestrator.live_agent import (
     LiveAgentError,
     check_cwd_affinity,
+    compute_role_peer_context,
+    evaluate_role_target_live_status,
     format_pane_display_summary,
     inspect_pane_for_role_set,
+    list_live_panes_with_ui,
     sync_herdr_pane_label,
     verify_live_agent_context,
 )
@@ -351,15 +354,65 @@ def _resolve_role_scope_id(cwd: Path, *, is_global: bool, create_if_missing: boo
         )
 
 
-def _enrich_targets_with_summary(targets: dict[str, dict[str, object]]) -> dict[str, dict[str, object]]:
+def _enrich_targets_with_live_status(
+    targets: dict[str, dict[str, object]],
+    *,
+    roles: dict[str, str],
+    chosen_scope_id: str,
+    local_scope_id: str,
+    local_doc: dict[str, Any],
+    global_doc: dict[str, Any],
+    panes: list[dict[str, Any]] | None,
+) -> tuple[dict[str, dict[str, object]], list[tuple[str, dict[str, Any]]]]:
     enriched: dict[str, dict[str, object]] = {}
-    for role, meta in targets.items():
+    evaluations: list[tuple[str, dict[str, Any]]] = []
+    is_global = (chosen_scope_id == GLOBAL_SCOPE_ID)
+
+    all_roles = sorted(set(roles.keys()) | set(targets.keys()))
+    for role in all_roles:
+        bound_pane_id = roles.get(role)
+        meta = targets.get(role)
+        if meta is None and bound_pane_id:
+            meta = {"pane_id": bound_pane_id}
+
+        if not bound_pane_id and isinstance(meta, dict):
+            bound_pane_id = str(meta.get("pane_id") or "")
+
+        expected_cwd: Path | None = None
+        if isinstance(meta, dict) and meta.get("cwd"):
+            try:
+                expected_cwd = Path(str(meta["cwd"])).resolve()
+            except Exception:
+                expected_cwd = None
+
+        peer_ctx = compute_role_peer_context(
+            chosen_scope_id=chosen_scope_id,
+            canonical_role=role,
+            bound_pane_id=bound_pane_id or "",
+            expected_cwd=expected_cwd,
+            local_scope_id=local_scope_id,
+            local_doc=local_doc,
+            global_doc=global_doc,
+        )
+
+        live_eval = evaluate_role_target_live_status(
+            bound_pane_id=bound_pane_id or "",
+            target_meta=meta if isinstance(meta, dict) else None,
+            canonical_role=role,
+            is_global=is_global,
+            panes=panes,
+            peer_context=peer_ctx,
+        )
+        evaluations.append((role, live_eval))
+
         if isinstance(meta, dict):
             enriched[role] = {
                 **meta,
                 "display_summary": format_pane_display_summary(meta, fallback_role=role),
+                "live_status": live_eval,
             }
-    return enriched
+
+    return enriched, evaluations
 
 
 def _try_resolve_local_scope_id(dir_path: Path | str | None) -> str | None:
@@ -582,19 +635,62 @@ def _cmd_role(ns: argparse.Namespace) -> int:
                 message=exc.message,
                 exit_code=1,
             )
+
+        panes = list_live_panes_with_ui()
+        local_scope_id = GLOBAL_SCOPE_ID if is_global else scope_id
+
+        enriched_targets, local_evals = _enrich_targets_with_live_status(
+            doc["targets"],
+            roles=doc["roles"],
+            chosen_scope_id=scope_id,
+            local_scope_id=local_scope_id,
+            local_doc=doc if not is_global else {},
+            global_doc=global_doc if not is_global else doc,
+            panes=panes,
+        )
+
         show_payload: dict[str, object] = {
             "command": "role",
             "action": "show",
             "scope": "global" if is_global else "local",
             "repository_id": scope_id,
             "roles": doc["roles"],
-            "targets": _enrich_targets_with_summary(doc["targets"]),
+            "targets": enriched_targets,
             "outdated_roles": doc["outdated_roles"],
         }
+
+        all_evals_for_warning = list(local_evals)
+
         if not is_global:
+            enriched_global_targets, global_evals = _enrich_targets_with_live_status(
+                global_doc["targets"],
+                roles=global_doc["roles"],
+                chosen_scope_id=GLOBAL_SCOPE_ID,
+                local_scope_id=local_scope_id,
+                local_doc=doc,
+                global_doc=global_doc,
+                panes=panes,
+            )
             show_payload["global_roles"] = global_doc["roles"]
-            show_payload["global_targets"] = _enrich_targets_with_summary(global_doc["targets"])
+            show_payload["global_targets"] = enriched_global_targets
             show_payload["global_outdated_roles"] = global_doc["outdated_roles"]
+            all_evals_for_warning.extend(global_evals)
+
+        warn_items: list[str] = []
+        for role, live_eval in all_evals_for_warning:
+            status = live_eval.get("status")
+            reason = live_eval.get("reason")
+            if status != "live" or reason == "agent_not_running":
+                label = "agent_not_running" if reason == "agent_not_running" else status
+                warn_items.append(f"{role}: {label}")
+
+        if warn_items:
+            sys.stderr.write(
+                f"[WARN] role show: non-live or inactive role bindings detected ({', '.join(warn_items)}). "
+                "See live_status.hint in JSON output.\n"
+            )
+            sys.stderr.flush()
+
         return emit_json(show_payload)
     elif action == "clear":
         scope_id = _resolve_role_scope_id(cwd, is_global=is_global, create_if_missing=False)

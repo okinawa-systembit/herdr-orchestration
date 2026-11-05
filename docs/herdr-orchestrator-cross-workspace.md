@@ -262,9 +262,6 @@ herdr-orchestrator role clear reviewer
 
 ### 4.4 `role show` におけるライブ状態照合（`live_status`）と手動整理の設計（Issue #126）
 
-> [!NOTE]
-> **ステータス注記（Issue #126 / #127 / #128）**: 本節（§4.4）および関連する CW-24〜CW-27 は **設計承認済み・未実装** です（実装サブ Issue [#128](https://github.com/okinawa-systembit/herdr-orchestration/issues/128) の PR マージ時に本注記を解除します）。
-
 #### 1. 背景と設計原則（なぜ一括自動削除ではなく「状態の見える化＋明示的解除」とするか）
 
 - **閉鎖ペインの設定が保持される理由と自動削除のリスク**:
