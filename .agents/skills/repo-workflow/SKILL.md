@@ -28,6 +28,7 @@ description: >-
 herdr-orchestrator --help
 ```
 
+- **ファイル作成・編集の原則**: ファイルの作成・更新は各エージェント環境の標準的なファイル操作機能を利用し、ヒアドキュメント等に依存しない（正本: [基本方針: 原則 1](../../../docs/core-principles.md#principle-1)）。
 - **同一 worktree 直列運用（案 B）**:
   - 本リポジトリでは、`result-submit --result-ref`（Requester worktree 基準での成果物存在検査）および `scripts/repo-review-helper`（単一 worktree 固定状態）との整合性を保つため、全ロールが同一の Git worktree を共有する。
   - **ブランチを切り替える作業は同時に 1 つだけ**とし、`メイン` が直列にスケジュール管理する。
@@ -69,17 +70,15 @@ git switch -c <新しいブランチ名>
 
 - **理由**: PR 作成者を `<app-slug>[bot]` とすることで個人アカウントの自 PR 制限（GitHub API 422 エラー）を回避し、人間の開発者が自アカウントで公式 Approve を行えるようにするため（詳細は [GitHub App 運用規約 §4.1](../../../docs/reviews/GITHUB_APP_AND_REVIEW_POLICY.md) 参照）。
 - **実行手順（必ず作業ブランチ上で push した直後、`git switch main` に戻る前に実行する）**:
+  - PR 本文は、各エージェントの標準的なファイル操作機能で一時ファイル（例: `.input/tmp/pr-body.md`）に用意して `--body-file` で渡す（シェルのクォートや改行・バッククォート解釈の事故を防ぐため推奨。短い本文であれば `--body "..."` でもよい）：
 
 ```bash
 git push -u origin <作業ブランチ名>
 
 bash scripts/review-sync.sh pr-create \
   --title "<type>(<scope>): <変更要約>" \
-  --body "Closes #<対象Issue番号>
-Refs #<親Issue番号（ある場合）>
-
-## 変更概要
-..."
+  --body-file .input/tmp/pr-body.md
+rm -f .input/tmp/pr-body.md
 ```
 
 - ※ `git push` が失敗した場合（SSH 認証エラー等を含む）は、先に進まず人間に報告する。
@@ -142,14 +141,15 @@ Refs #<親Issue番号（ある場合）>
      npm run format:md && npm run check:md
      ```
 3. **PR 作成前のローカル設計レビュー依頼（必須）**:
-   - [repo-review](../repo-review/SKILL.md) の Requester 手順に従い、PR を作成する前にローカルレビュー（RV）を依頼して **GO（Blocking 0 件）** を獲得する：
+   - [repo-review](../repo-review/SKILL.md) の Requester 手順に従い、PR を作成する前にローカルレビュー（RV）を依頼して **GO（Blocking 0 件）** を獲得する（`request-create` の標準出力に表示された `.input/inbox/review-request.<token>.md` のパスを指定する）：
      ```bash
-     REQ_FILE=$(scripts/repo-review-helper request-create --tier STANDARD --summary "Issue #<N> の設計書レビューを依頼します。")
+     scripts/repo-review-helper request-create --tier STANDARD --summary "Issue #<N> の設計書レビューを依頼します。"
+
      herdr-orchestrator handoff \
        --mode sync \
        --to レビュワー \
        --task-type review \
-       --instruction "Read $REQ_FILE and review per repo-review SKILL. Save record via repo-review-helper record-save. DO NOT close or modify any GitHub issue."
+       --instruction "Read .input/inbox/review-request.<token>.md and review per repo-review SKILL. Save record via repo-review-helper record-save. DO NOT close or modify any GitHub issue."
      ```
    - 要件・スコープを変えない指摘（`accept`）は修正コミットを作成して再レビューを回し、スコープ変更やトレードオフ判断を伴う指摘が出た場合は一旦 `result-submit` でメインへ判断を仰ぐ。
 4. **設計 PR の作成（Bot）**:
