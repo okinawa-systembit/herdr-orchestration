@@ -37,8 +37,8 @@ description: >-
 
 - **対象**: リポジトリ内での日常的な実装支援、エージェント間の手戻り防止、sync handoff によるレビュー依頼と対応。
 - **正本・成果物**: 非公開作業領域のファイル群（Git 追跡除外）。
-  - `.input/inbox/review-request.<token>.md`: 一時依頼ファイル（機微情報を含まない一時ファイルのため過剰なパーミッション強制は行わない）
-  - `docs/reviews/internal/<instance-id>/RVNNN.md`: 個別レビュー記録の正本（過剰なパーミッション強制は行わない）
+  - `.input/inbox/review-request.<token>.md`: 一時依頼ファイル（ディレクトリ権限 0700、ファイル 0600。repo-review-helper が担保）
+  - `docs/reviews/internal/<instance-id>/RVNNN.md`: 個別レビュー記録の正本（ディレクトリ 0700、ファイル 0600。repo-review-helper が担保）
   - `docs/reviews/internal/<instance-id>/INDEX.md`: 個別記録から派生生成される履歴一覧
   - `<git-common-dir>/herdr-review/state.json`: 非公開補助状態（instance ID、worktree、採番カウンター）
   - `<git-common-dir>/herdr-review.lock`: 排他制御用共有 lock（0600、削除厳禁）
