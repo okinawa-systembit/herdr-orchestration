@@ -10,6 +10,8 @@ from orchestrator.live_agent import (
     LiveAgentError,
     get_caller_live_agent,
     is_path_within_worktree,
+    resolve_caller_live_agent_for_task,
+    resolve_caller_live_agent_for_worker,
     verify_worktree_affinity,
 )
 from orchestrator.registry.errors import RegistryError
@@ -105,7 +107,7 @@ def _check_party_cwd_matches(
     return live_cwd.resolve() == expected_cwd.resolve()
 
 
-def build_recipient_verification(doc: dict[str, Any]) -> dict[str, Any]:
+def build_recipient_verification(doc: dict[str, Any], *, command: str = "task-status") -> dict[str, Any]:
     worktree_path = Path(doc["context"]["worktree"]["path"]).resolve()
     repo_id = doc["context"]["repository"]["identity"]
     worker_info = doc["worker"]
@@ -127,7 +129,8 @@ def build_recipient_verification(doc: dict[str, Any]) -> dict[str, Any]:
     }
 
     try:
-        caller = get_caller_live_agent()
+        preferred = "requester" if command == "task-result" else "worker"
+        caller, recovery = resolve_caller_live_agent_for_task(doc, preferred_role=preferred)
     except LiveAgentError as exc:
         return {
             "verified": False,
@@ -146,6 +149,7 @@ def build_recipient_verification(doc: dict[str, Any]) -> dict[str, Any]:
     is_worker_caller = caller_pane == worker_pane or caller.name == worker_agent_name
     is_requester_caller = caller_pane == requester_pane or caller.name == requester_agent_name
 
+    result_payload: dict[str, Any]
     if is_worker_caller:
         cwd_ok = _check_party_cwd_matches(
             caller_cwd,
@@ -166,28 +170,29 @@ def build_recipient_verification(doc: dict[str, Any]) -> dict[str, Any]:
             }
             if bound_roles:
                 caller_payload["bound_roles"] = bound_roles
-            return {
+            result_payload = {
                 "verified": True,
                 "caller_role_in_task": "worker",
                 "expected_worker": expected_worker_summary,
                 "actual_caller": caller_payload,
             }
-        return {
-            "verified": False,
-            "caller_role_in_task": "worker",
-            "reason": "recipient_role_or_cwd_mismatch",
-            "action_required": "STOP_AND_REPORT_TO_HUMAN",
-            "expected_worker": expected_worker_summary,
-            "actual_caller": {
-                "bound_role": bound_role,
-                "bound_roles": bound_roles,
-                "pane_id": caller_pane,
-                "cwd": str(caller_cwd),
-            },
-            "message": "このタスクの宛先情報と現在のペインの状態が一致しません。作業を一切行わず、人間へチャットで報告して停止してください。",
-        }
+        else:
+            result_payload = {
+                "verified": False,
+                "caller_role_in_task": "worker",
+                "reason": "recipient_role_or_cwd_mismatch",
+                "action_required": "STOP_AND_REPORT_TO_HUMAN",
+                "expected_worker": expected_worker_summary,
+                "actual_caller": {
+                    "bound_role": bound_role,
+                    "bound_roles": bound_roles,
+                    "pane_id": caller_pane,
+                    "cwd": str(caller_cwd),
+                },
+                "message": "このタスクの宛先情報と現在のペインの状態が一致しません。作業を一切行わず、人間へチャットで報告して停止してください。",
+            }
 
-    if is_requester_caller:
+    elif is_requester_caller:
         cwd_ok = _check_party_cwd_matches(
             caller_cwd,
             expected_cwd=worktree_path,
@@ -195,7 +200,7 @@ def build_recipient_verification(doc: dict[str, Any]) -> dict[str, Any]:
             repository_identity=repo_id,
         )
         if cwd_ok:
-            return {
+            result_payload = {
                 "verified": True,
                 "caller_role_in_task": "requester",
                 "expected_requester": {
@@ -209,37 +214,44 @@ def build_recipient_verification(doc: dict[str, Any]) -> dict[str, Any]:
                     "cwd": str(caller_cwd),
                 },
             }
-        return {
+        else:
+            result_payload = {
+                "verified": False,
+                "caller_role_in_task": "requester",
+                "reason": "requester_cwd_mismatch",
+                "action_required": "STOP_AND_REPORT_TO_HUMAN",
+                "expected_requester": {
+                    "role": requester_role,
+                    "pane_id": requester_pane,
+                    "cwd": str(worktree_path),
+                },
+                "actual_caller": {
+                    "bound_role": bound_role,
+                    "pane_id": caller_pane,
+                    "cwd": str(caller_cwd),
+                },
+                "message": "このタスクの依頼元情報と現在のペインの状態が一致しません。作業を行わず人間へチャットで報告して停止してください。",
+            }
+
+    else:
+        result_payload = {
             "verified": False,
-            "caller_role_in_task": "requester",
-            "reason": "requester_cwd_mismatch",
+            "caller_role_in_task": "other",
+            "reason": "caller_not_task_participant",
             "action_required": "STOP_AND_REPORT_TO_HUMAN",
-            "expected_requester": {
-                "role": requester_role,
-                "pane_id": requester_pane,
-                "cwd": str(worktree_path),
-            },
+            "expected_worker": expected_worker_summary,
             "actual_caller": {
                 "bound_role": bound_role,
                 "pane_id": caller_pane,
                 "cwd": str(caller_cwd),
             },
-            "message": "このタスクの依頼元情報と現在のペインの状態が一致しません。作業を行わず人間へチャットで報告して停止してください。",
+            "message": "このペインは当タスクの宛先（Worker）でも依頼元（Requester）でもありません。誤配送の可能性があるため、作業を一切行わず人間へチャットで報告して停止してください。",
         }
 
-    return {
-        "verified": False,
-        "caller_role_in_task": "other",
-        "reason": "caller_not_task_participant",
-        "action_required": "STOP_AND_REPORT_TO_HUMAN",
-        "expected_worker": expected_worker_summary,
-        "actual_caller": {
-            "bound_role": bound_role,
-            "pane_id": caller_pane,
-            "cwd": str(caller_cwd),
-        },
-        "message": "このペインは当タスクの宛先（Worker）でも依頼元（Requester）でもありません。誤配送の可能性があるため、作業を一切行わず人間へチャットで報告して停止してください。",
-    }
+    if recovery is not None:
+        result_payload["caller_recovery"] = recovery
+
+    return result_payload
 
 
 def task_status(task_id: str) -> dict[str, Any]:
@@ -250,7 +262,7 @@ def task_status(task_id: str) -> dict[str, Any]:
         raise _registry_to_public(exc) from exc
     return {
         "command": "task-status",
-        "recipient_verification": build_recipient_verification(doc),
+        "recipient_verification": build_recipient_verification(doc, command="task-status"),
         "task": copy.deepcopy(doc),
     }
 
@@ -268,7 +280,7 @@ def task_result(task_id: str) -> dict[str, Any]:
     locator: dict[str, Any] = {
         "task_id": task_id,
         "task_status": doc["task"]["status"],
-        "recipient_verification": build_recipient_verification(doc),
+        "recipient_verification": build_recipient_verification(doc, command="task-result"),
         "result": result,
         "ref_resolved_path": None,
     }
@@ -296,9 +308,18 @@ def verify_worker_submit_context(
     expected_worker_cwd: Path | None = None,
     expected_worktree_path: Path,
     expected_repository_identity: str,
+    competing_pane: str | None = None,
+    competing_cwd: Path | None = None,
 ) -> None:
+    target_cwd = (expected_worker_cwd or expected_worktree_path).resolve()
+    target_pane = expected_worker_pane or expected_worker_agent
     try:
-        caller = get_caller_live_agent()
+        caller, _ = resolve_caller_live_agent_for_worker(
+            expected_pane=target_pane,
+            expected_cwd=target_cwd,
+            competing_pane=competing_pane,
+            competing_cwd=competing_cwd,
+        )
     except LiveAgentError as exc:
         raise ResultCommandError(
             "worker_context_unverified",
@@ -367,6 +388,8 @@ def result_submit(
 
     worktree_path = Path(doc["context"]["worktree"]["path"])
     worker_cwd = Path(doc["worker"].get("cwd") or worktree_path)
+    requester_info = doc.get("requester", {})
+    requester_pane = requester_info.get("pane_id") or requester_info.get("agent_name")
     verify_worker_submit_context(
         expected_worker_agent=doc["worker"]["agent_name"],
         expected_worker_pane=doc["worker"].get("pane_id"),
@@ -374,6 +397,8 @@ def result_submit(
         expected_worker_cwd=worker_cwd,
         expected_worktree_path=worktree_path,
         expected_repository_identity=doc["context"]["repository"]["identity"],
+        competing_pane=requester_pane,
+        competing_cwd=worktree_path,
     )
 
     before_result = copy.deepcopy(doc["result"])

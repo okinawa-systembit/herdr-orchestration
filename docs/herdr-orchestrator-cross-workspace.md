@@ -2,7 +2,9 @@
 
 - **対象 Issue**: [#74 — ワークスペース跨ぎ配送・グローバルロール・日本語ロール名・ペイン自動追従への対応](https://github.com/okinawa-systembit/herdr-orchestration/issues/74)
 - **ステータス**: 実装完了（[PR #75](https://github.com/okinawa-systembit/herdr-orchestration/pull/75) / v0.4.0 にてマージ済み）
-- **関連 Issue**: [#72 — herdr agent rename 依存を廃止し pane_id ベースの Role Binding 管理へ移行](https://github.com/okinawa-systembit/herdr-orchestration/issues/72)
+- **関連 Issue**:
+  - [#72 — herdr agent rename 依存を廃止し pane_id ベースの Role Binding 管理へ移行](https://github.com/okinawa-systembit/herdr-orchestration/issues/72)
+  - [#121 — 呼び出し元ペイン判定の耐障害性向上（Codex共有デーモン汚染・Cursor環境変数欠落への対応）](https://github.com/okinawa-systembit/herdr-orchestration/issues/121)
 - **関連ドキュメント**:
   - [02-roles-and-task-contract.md](herdr-orchestrator/02-roles-and-task-contract.md#sec-4) (§4: 論理 Role と Routing Identity)
   - [03-task-registry.md](herdr-orchestrator/03-task-registry.md#sec-6) (§6: Task Registry / Canonical Schema)
@@ -550,6 +552,39 @@ Requester の `context.worktree.path` と Worker の `worker.cwd` は異なっ�
 2. **`--result-ref` を指定した場合の基準パス（曖昧さの排除）**:
    - `--result-ref` に相対パスが指定された場合の基準ディレクトリは、従来通り **「Task Registry の `context.worktree.path`（依頼元 worktree）」に一意固定** とする。
    - クロスワークスペース（`worker.cwd != context.worktree.path`）のタスクでは、Worker は原則として `--result-ref` を省略し `--summary` で結果を返却する。
+
+<a id="sec-7-6"></a>
+
+### 7.6 環境変数汚染・欠落時の呼び出し元自己回復機構（Issue #121）
+
+#### 1. 背景と課題
+
+エージェントの実行環境（特に Codex CLI の共有デーモン `codex app-server --managed-daemon` や Cursor の一部ツール子プロセス）では、環境変数 `HERDR_PANE_ID` が最初に起動した別ペインの値に汚染されたり、子プロセスに環境変数が引き継がれず欠落する事象が発生する（[Issue #121](https://github.com/okinawa-systembit/herdr-orchestration/issues/121) / [Issue #122](https://github.com/okinawa-systembit/herdr-orchestration/issues/122) / Herdr 公式 [#4649](https://github.com/herdrdev/herdr/issues/4649)）。
+
+これに対し、`get_caller_live_agent()` が `os.environ["HERDR_PANE_ID"]` のみを単一の信頼源としていると、タスクが正しい Worker ペインに配送され正しい作業ディレクトリで実行されているにもかかわらず、`recipient_verification` で `verified: false`（`caller_not_task_participant`）となり誤って停止してしまう。
+
+#### 2. 一意性原則に基づく呼び出し元判定と自己回復ロジック
+
+作業ディレクトリ（CWD）は、同一リポジトリ・同一 worktree に複数のエージェント（Requester と Worker、または第三のペイン）が同居している場合、ペインを一意に特定する手がかりにはならない。したがって、自己回復機構は **「対象作業ディレクトリ（worktree）においてアクティブなペインが一意に特定できる場合」にのみ安全に回復を行い、曖昧性がある場合は従来通り安全停止（fail-closed）** する設計とする：
+
+1. **通常解決（最速・互換パス）**:
+   - `os.environ.get("HERDR_PANE_ID")` が存在し、そのペインの `foreground_cwd` がタスクのコンテキスト範囲（Worker または Requester の作業ディレクトリ）内にあること。
+   - プロセスの実 `proc_cwd` がタスク作業ツリーの外にある場合（外部テストハーネス等からの実行）は、環境変数ペインの CWD を信頼して通常解決（互換性確保）。
+   - プロセスの実 `proc_cwd` がタスク作業ツリー内にある場合は、環境変数ペインの CWD と `proc_cwd` が一致していることを確認する（一致していれば採用、乖離していれば汚染とみなしてフォールバック回復へ進む）。
+2. **クロスワークスペース環境での自己回復の成立条件（一意性の厳格な証明）**:
+   - `HERDR_PANE_ID` のペインの `cwd` と `proc_cwd` が乖離している場合（別ディレクトリからの環境変数汚染）、または `HERDR_PANE_ID` が空の場合（環境変数欠落）：
+     - **汚染元の限定**: 環境変数が存在する場合、汚染からの回復が許可されるのは「その環境変数のペインがタスクのもう一方の関係者（Worker 回復時は Requester、Requester 回復時は Worker）である場合」（共有デーモンによる引き継ぎの典型例）に限る。無関係な第三者ペインが Worker の worktree に移動して実行した場合は、誤回復を防止するため回復を行わず安全停止（`caller_not_task_participant`）とする。
+     - **作業ディレクトリの厳密一致**: `proc_cwd` が候補ロール（Worker または Requester）の作業ディレクトリ配下に厳密に含まれていること（git common dir 等による広義の親和性は排除し、別 worktree の混同を防止）。
+     - **タスク関係者間の競合検査**: もう一方の関係者（Worker に対する Requester 等）が存在する場合、そのペインが同一 worktree に滞在していないこと（滞在している場合はどちらのペインか判別不能なため回復不可）。
+     - **Herdr 全体でのアクティブペイン一意性の必須証明**: `herdr pane list` を介して対象 worktree に存在するアクティブペインが候補ペインただ 1 つであることを客観証明すること。`herdr pane list` の取得に失敗した場合やエラー時は、一意性が証明できないため回復を行わず安全停止（fail-closed）し、標準エラーに警告を出力する。
+     - 上記条件がすべて成立した場合に限り、真の Caller ペインとして安全に自己回復する。
+3. **安全制約の堅持（同一 worktree におけるフェイルクローズ停止）**:
+   - 同一 worktree に Requester と Worker（または第三者）が同居している場合、環境変数が欠落していてもプロセスの CWD だけでは呼び出し元を一意特定できないため、回復を諦めて安全に `verified: false`（`caller_live_agent_unavailable`）として停止する。
+   - 同一 worktree 内の別ペインによる環境変数汚染（例: Worker の環境変数が同じリポジトリの Requester ペイン ID に汚染された場合）も同様に、CWD からは汚染を客観検知できないため安全停止（または Requester と認識）となる。この場合は自己回復機構の対象外であり、[Issue #122](https://github.com/okinawa-systembit/herdr-orchestration/issues/122) に示す Codex CLI の設定（`daemon_auto_start = false`）による回避が必須となる。
+4. **`result-submit` の厳格な防護**:
+   - Registry のタスク結果を更新する `result-submit`（`verify_worker_submit_context`）においても、同様の一意性証明ルールを厳格に適用する。同一 worktree に Requester 等が同居している曖昧な環境では環境変数欠落時の提出を拒否し、第三者や Requester による誤提出・不正書き換えを完全に防護する。
+5. **可観測性の担保（原則 2・指針 10）**:
+   - 自己回復が行われた場合、`recipient_verification` に `caller_recovery` 情報を記録し、標準エラー（`sys.stderr`）に環境変数汚染・欠落からの自動回復警告を出力する。一意性検査が失敗した際も警告を出力し、黙って失敗しない。
 
 ---
 

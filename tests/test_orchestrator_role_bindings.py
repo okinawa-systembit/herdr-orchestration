@@ -619,6 +619,9 @@ if len(sys.argv) >= 3 and sys.argv[1] == "tab" and sys.argv[2] == "list":
     raise SystemExit(0)
 
 if len(sys.argv) >= 3 and sys.argv[1] == "pane" and sys.argv[2] == "list":
+    if os.environ.get("FAKE_PANE_LIST_FAIL"):
+        sys.stderr.write("fake error: pane list failed\\n")
+        raise SystemExit(1)
     print(json.dumps({"result": {"panes": state.get("panes", [])}}))
     raise SystemExit(0)
 
@@ -1555,6 +1558,284 @@ raise SystemExit(99)
             data_pos = json.loads(res_pos.stdout)
             self.assertEqual(data_pos["role"], "implementer")
             self.assertEqual(data_pos["pane_id"], "w15:p1")
+
+    def test_issue121_caller_pane_resilience_and_self_recovery(self) -> None:
+        """
+        Verify Issue #121: Fallback self-recovery for recipient verification and result-submit
+        when HERDR_PANE_ID is contaminated or missing, strictly enforcing uniqueness (fail-closed if ambiguous).
+        """
+        # =========================================================================
+        # Scenario 1: Cross-workspace setup (Unique worker pane in worker worktree)
+        # Requester w16:p1 in ticket_dir, Worker w15:p2 in repo_b (unique in repo_b!).
+        # =========================================================================
+        state = {
+            "workspaces": [
+                {"workspace_id": "w15", "label": "ws1", "number": 1},
+                {"workspace_id": "w16", "label": "ws2", "number": 2},
+            ],
+            "tabs": [
+                {"tab_id": "w15:t1", "workspace_id": "w15", "number": 1, "label": "T1"},
+                {"tab_id": "w16:t1", "workspace_id": "w16", "number": 1, "label": "T2"},
+            ],
+            "panes": [
+                {
+                    "pane_id": "w16:p1",
+                    "workspace_id": "w16",
+                    "tab_id": "w16:t1",
+                    "terminal_id": "term_16_1",
+                    "agent": "claude",
+                    "agent_status": "idle",
+                    "foreground_cwd": str(self.ticket_dir.resolve()),
+                },
+                {
+                    "pane_id": "w15:p2",
+                    "workspace_id": "w15",
+                    "tab_id": "w15:t1",
+                    "terminal_id": "term_15_2",
+                    "agent": "claude",
+                    "agent_status": "idle",
+                    "foreground_cwd": str(self.repo_b.resolve()),
+                },
+                {
+                    "pane_id": "w15:p1",
+                    "workspace_id": "w15",
+                    "tab_id": "w15:t1",
+                    "terminal_id": "term_15_1",
+                    "agent": "agy",
+                    "agent_status": "idle",
+                    "foreground_cwd": str(self.repo_a.resolve()),
+                },
+            ],
+        }
+        self._write_herdr_state(workspaces=state["workspaces"], tabs=state["tabs"], panes=state["panes"])
+
+        req_env = {**self.env, "HERDR_PANE_ID": "w16:p1"}
+        _run_cli("role", "set", "チケット管理", "w16:p1", env=req_env, cwd=self.ticket_dir)
+        _run_cli("role", "set", "レビュワー", "w15:p2", env=req_env, cwd=self.ticket_dir)
+
+        res_h = _run_cli(
+            "handoff",
+            "--mode",
+            "async",
+            "--to",
+            "レビュワー",
+            "--instruction",
+            "test cross-workspace resilience",
+            env=req_env,
+            cwd=self.ticket_dir,
+        )
+        self.assertEqual(res_h.returncode, 0, res_h.stdout)
+        task_id = json.loads(res_h.stdout)["task_id"]
+
+        # 1-A. Worker contaminated HERDR_PANE_ID (w16:p1 from requester/shared daemon) in repo_b
+        # Because only w15:p2 is in repo_b and w16:p1 is in ticket_dir, uniqueness holds -> self-recovery succeeds!
+        contaminated_env = {**self.env, "HERDR_PANE_ID": "w16:p1"}
+        st_res = _run_cli("task-status", task_id, env=contaminated_env, cwd=self.repo_b)
+        self.assertEqual(st_res.returncode, 0, st_res.stderr)
+        st_json = json.loads(st_res.stdout)
+        rec = st_json["recipient_verification"]
+        self.assertTrue(rec["verified"], "Must recover verified=True when worker is uniquely determinable")
+        self.assertEqual(rec["caller_role_in_task"], "worker")
+        self.assertEqual(rec["actual_caller"]["pane_id"], "w15:p2")
+        self.assertTrue(rec["caller_recovery"]["recovered"])
+        self.assertEqual(rec["caller_recovery"]["reason"], "worker_cwd_affinity_contaminated")
+        self.assertIn("警告: HERDR_PANE_ID", st_res.stderr)
+
+        # 1-B. Worker missing HERDR_PANE_ID in repo_b -> recovers uniquely
+        missing_env = {k: v for k, v in self.env.items() if k != "HERDR_PANE_ID"}
+        st_res2 = _run_cli("task-status", task_id, env=missing_env, cwd=self.repo_b)
+        self.assertEqual(st_res2.returncode, 0, st_res2.stderr)
+        rec2 = json.loads(st_res2.stdout)["recipient_verification"]
+        self.assertTrue(rec2["verified"])
+        self.assertEqual(rec2["caller_role_in_task"], "worker")
+        self.assertEqual(rec2["caller_recovery"]["reason"], "worker_cwd_affinity_missing_env")
+
+        # 1-C. Result-submit under contaminated environment in unique worktree -> succeeds
+        sub_res = _run_cli(
+            "result-submit",
+            task_id,
+            "--result-status",
+            "succeeded",
+            "--summary",
+            "Review finished under cross-workspace recovery",
+            env=contaminated_env,
+            cwd=self.repo_b,
+        )
+        self.assertEqual(sub_res.returncode, 0, sub_res.stderr + sub_res.stdout)
+        sub_json = json.loads(sub_res.stdout)
+        self.assertEqual(sub_json["result"]["status"], "succeeded")
+
+        # 1-D. Requester missing HERDR_PANE_ID in ticket_dir -> recovers uniquely as requester
+        req_res = _run_cli("task-result", task_id, env=missing_env, cwd=self.ticket_dir)
+        self.assertEqual(req_res.returncode, 0, req_res.stderr)
+        rec_req = json.loads(req_res.stdout)["recipient_verification"]
+        self.assertTrue(rec_req["verified"])
+        self.assertEqual(rec_req["caller_role_in_task"], "requester")
+        self.assertEqual(rec_req["caller_recovery"]["reason"], "requester_cwd_affinity_missing_env")
+
+        # =========================================================================
+        # Scenario 2: Same-worktree setup (Requester & Worker both in repo_a)
+        # Reviewer finding P1-1: Missing HERDR_PANE_ID must FAIL CLOSED when ambiguous!
+        # =========================================================================
+        same_state = {
+            "workspaces": [{"workspace_id": "w15", "label": "ws1", "number": 1}],
+            "tabs": [{"tab_id": "w15:t1", "workspace_id": "w15", "number": 1, "label": "T1"}],
+            "panes": [
+                {
+                    "pane_id": "w15:p1",
+                    "workspace_id": "w15",
+                    "tab_id": "w15:t1",
+                    "terminal_id": "term_15_1",
+                    "agent": "agy",
+                    "agent_status": "idle",
+                    "foreground_cwd": str(self.repo_a.resolve()),
+                },
+                {
+                    "pane_id": "w15:p2",
+                    "workspace_id": "w15",
+                    "tab_id": "w15:t1",
+                    "terminal_id": "term_15_2",
+                    "agent": "claude",
+                    "agent_status": "idle",
+                    "foreground_cwd": str(self.repo_a.resolve()),
+                },
+            ],
+        }
+        self._write_herdr_state(workspaces=same_state["workspaces"], tabs=same_state["tabs"], panes=same_state["panes"])
+
+        impl_env = {**self.env, "HERDR_PANE_ID": "w15:p1"}
+        _run_cli("role", "set", "実装者", "w15:p1", env=impl_env, cwd=self.repo_a)
+        _run_cli("role", "set", "レビュワー", "w15:p2", env=impl_env, cwd=self.repo_a)
+
+        res_same = _run_cli(
+            "handoff",
+            "--mode",
+            "async",
+            "--to",
+            "レビュワー",
+            "--instruction",
+            "test same-worktree ambiguity",
+            env=impl_env,
+            cwd=self.repo_a,
+        )
+        self.assertEqual(res_same.returncode, 0, res_same.stdout)
+        same_task_id = json.loads(res_same.stdout)["task_id"]
+
+        same_missing_env = {k: v for k, v in self.env.items() if k != "HERDR_PANE_ID"}
+
+        # 2-A. task-status with missing env in repo_a -> FAIL CLOSED (verified: False)
+        st_same = json.loads(_run_cli("task-status", same_task_id, env=same_missing_env, cwd=self.repo_a).stdout)
+        self.assertFalse(st_same["recipient_verification"]["verified"])
+        self.assertEqual(st_same["recipient_verification"]["reason"], "caller_live_agent_unavailable")
+        self.assertNotIn("caller_recovery", st_same["recipient_verification"])
+
+        # 2-B. task-status in subdirectory repo_a/sub -> FAIL CLOSED
+        sub_dir = self.repo_a / "sub"
+        sub_dir.mkdir(exist_ok=True)
+        st_sub = json.loads(_run_cli("task-status", same_task_id, env=same_missing_env, cwd=sub_dir).stdout)
+        self.assertFalse(st_sub["recipient_verification"]["verified"])
+
+        # 2-C. result-submit with missing env in same worktree -> FAIL CLOSED (rejected)
+        sub_same = _run_cli(
+            "result-submit",
+            same_task_id,
+            "--result-status",
+            "succeeded",
+            "--summary",
+            "Should be rejected",
+            env=same_missing_env,
+            cwd=self.repo_a,
+        )
+        self.assertNotEqual(sub_same.returncode, 0, "Must reject result-submit when ambiguous")
+
+        # 2-D. task-result with missing env in same worktree -> FAIL CLOSED
+        tr_same = json.loads(_run_cli("task-result", same_task_id, env=same_missing_env, cwd=self.repo_a).stdout)
+        self.assertFalse(tr_same["recipient_verification"]["verified"])
+
+        # =========================================================================
+        # Scenario 3: Third pane w15:p3 sharing worker worktree -> FAIL CLOSED
+        # =========================================================================
+        multi_state = {
+            "workspaces": [{"workspace_id": "w15", "label": "ws1", "number": 1}],
+            "tabs": [{"tab_id": "w15:t1", "workspace_id": "w15", "number": 1, "label": "T1"}],
+            "panes": [
+                {
+                    "pane_id": "w16:p1",
+                    "workspace_id": "w16",
+                    "tab_id": "w16:t1",
+                    "terminal_id": "term_16_1",
+                    "agent": "claude",
+                    "agent_status": "idle",
+                    "foreground_cwd": str(self.ticket_dir.resolve()),
+                },
+                {
+                    "pane_id": "w15:p2",
+                    "workspace_id": "w15",
+                    "tab_id": "w15:t1",
+                    "terminal_id": "term_15_2",
+                    "agent": "claude",
+                    "agent_status": "idle",
+                    "foreground_cwd": str(self.repo_b.resolve()),
+                },
+                {
+                    "pane_id": "w15:p3",
+                    "workspace_id": "w15",
+                    "tab_id": "w15:t1",
+                    "terminal_id": "term_15_3",
+                    "agent": "claude",
+                    "agent_status": "idle",
+                    "foreground_cwd": str(self.repo_b.resolve()),
+                },
+            ],
+        }
+        self._write_herdr_state(workspaces=multi_state["workspaces"], tabs=multi_state["tabs"], panes=multi_state["panes"])
+        multi_missing_env = {k: v for k, v in self.env.items() if k != "HERDR_PANE_ID"}
+        st_multi = json.loads(_run_cli("task-status", task_id, env=multi_missing_env, cwd=self.repo_b).stdout)
+        self.assertFalse(st_multi["recipient_verification"]["verified"], "Must fail closed when multiple panes share tree")
+
+        # =========================================================================
+        # Scenario 4: Unrelated directory / third-party caller -> FAIL CLOSED
+        # =========================================================================
+        other_env = {**self.env, "HERDR_PANE_ID": "w17:p1"}
+        st_unrelated = json.loads(
+            _run_cli("task-status", task_id, env=other_env, cwd=self.nogit_dir).stdout
+        )
+        self.assertFalse(st_unrelated["recipient_verification"]["verified"])
+        self.assertEqual(st_unrelated["recipient_verification"]["caller_role_in_task"], "other")
+        self.assertIn(
+            st_unrelated["recipient_verification"]["reason"],
+            ("caller_not_task_participant", "caller_live_agent_unavailable"),
+        )
+        self.assertNotIn("caller_recovery", st_unrelated["recipient_verification"])
+
+        # =========================================================================
+        # Scenario 5: Reviewer RV101 P2-1 regression test (G1: pane list fails)
+        # When herdr pane list fails, uniqueness CANNOT be proven -> FAIL CLOSED!
+        # =========================================================================
+        fail_pane_list_env = {**self.env, "FAKE_PANE_LIST_FAIL": "1"}
+        del fail_pane_list_env["HERDR_PANE_ID"]
+        st_fail_list = json.loads(_run_cli("task-status", task_id, env=fail_pane_list_env, cwd=self.repo_b).stdout)
+        self.assertFalse(
+            st_fail_list["recipient_verification"]["verified"],
+            "Must fail closed when herdr pane list fails (uniqueness unproven)",
+        )
+        self.assertNotIn("caller_recovery", st_fail_list["recipient_verification"])
+
+        # =========================================================================
+        # Scenario 6: Reviewer RV101 P2-2 regression test (F: third-party pane in worker worktree)
+        # An unrelated third-party pane w15:p1 executing inside repo_b must NOT recover as worker,
+        # even when w15:p2 is unique in repo_b!
+        # =========================================================================
+        self._write_herdr_state(workspaces=state["workspaces"], tabs=state["tabs"], panes=state["panes"])
+        third_party_env = {**self.env, "HERDR_PANE_ID": "w15:p1"}
+        st_third = json.loads(_run_cli("task-status", task_id, env=third_party_env, cwd=self.repo_b).stdout)
+        self.assertFalse(
+            st_third["recipient_verification"]["verified"],
+            "Unrelated third party pane in worker worktree must not recover as worker",
+        )
+        self.assertEqual(st_third["recipient_verification"]["caller_role_in_task"], "other")
+        self.assertEqual(st_third["recipient_verification"]["reason"], "caller_not_task_participant")
+        self.assertNotIn("caller_recovery", st_third["recipient_verification"])
 
 
 if __name__ == "__main__":

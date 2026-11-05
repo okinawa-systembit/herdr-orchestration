@@ -1054,6 +1054,7 @@ class TestCliIntegration(unittest.TestCase):
         self.assertNotIn("ワイドレビュー", req_text)
 
         # 2. WIDE tier: should include A-1 to A-8
+        before_wide = set(inbox_dir.glob("review-request.*.md"))
         code = cli_main([
             "request-create",
             "--worktree", wt_str,
@@ -1061,14 +1062,16 @@ class TestCliIntegration(unittest.TestCase):
             "--summary", "Wide inspection request",
         ])
         self.assertEqual(code, 0)
-        req_files = sorted(inbox_dir.glob("review-request.*.md"), key=lambda p: p.stat().st_mtime)
-        self.assertEqual(len(req_files), 2)
-        wide_text = req_files[-1].read_text(encoding="utf-8")
+        new_wide = set(inbox_dir.glob("review-request.*.md")) - before_wide
+        self.assertEqual(len(new_wide), 1)
+        wide_file = list(new_wide)[0]
+        wide_text = wide_file.read_text(encoding="utf-8")
         self.assertIn("ワイドレビュー（総点検 / 全体点検 / 総チェック）確認事項", wide_text)
         self.assertIn("A-1", wide_text)
         self.assertIn("A-8", wide_text)
 
         # 3. LIGHT tier: should include D-1 (P3-4)
+        before_light = set(inbox_dir.glob("review-request.*.md"))
         code = cli_main([
             "request-create",
             "--worktree", wt_str,
@@ -1076,9 +1079,10 @@ class TestCliIntegration(unittest.TestCase):
             "--summary", "Light review request",
         ])
         self.assertEqual(code, 0)
-        req_files = sorted(inbox_dir.glob("review-request.*.md"), key=lambda p: p.stat().st_mtime)
-        self.assertEqual(len(req_files), 3)
-        light_text = req_files[-1].read_text(encoding="utf-8")
+        new_light = set(inbox_dir.glob("review-request.*.md")) - before_light
+        self.assertEqual(len(new_light), 1)
+        light_file = list(new_light)[0]
+        light_text = light_file.read_text(encoding="utf-8")
         self.assertIn("差分外波及確認（D-1）", light_text)
         self.assertIn("D-1", light_text)
         self.assertNotIn("D-2", light_text)

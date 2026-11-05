@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -217,6 +218,19 @@ def is_path_within_worktree(candidate_cwd: Path, worktree_path: Path) -> bool:
         return False
 
 
+def is_strictly_within_directory(child: Path, parent: Path) -> bool:
+    """
+    Check if child path is identical to parent path, or is a subdirectory of parent.
+    Does NOT match via git common dir (prevents cross-worktree false positives).
+    """
+    try:
+        c = child.resolve()
+        p = parent.resolve()
+        return c == p or c.is_relative_to(p)
+    except (OSError, ValueError):
+        return False
+
+
 def check_cwd_affinity(pane_cwd: Path | str, current_cwd: Path | str) -> bool:
     """
     Check if pane_cwd and current_cwd have directory affinity:
@@ -248,6 +262,262 @@ def check_cwd_affinity(pane_cwd: Path | str, current_cwd: Path | str) -> bool:
         pass
 
     return False
+
+
+def _find_active_panes_in_worktree(target_cwd: Path) -> list[str] | None:
+    """
+    Find pane_ids of active agents located in target_cwd.
+    Returns None if Herdr pane listing is unsupported.
+    """
+    panes = list_live_panes_with_ui()
+    if panes is None:
+        return None
+    matched_panes: list[str] = []
+    for p in panes:
+        if p.get("agent_status") == "none":
+            continue
+        p_cwd_raw = p.get("cwd")
+        pid = p.get("pane_id")
+        if not p_cwd_raw or not pid:
+            continue
+        try:
+            p_cwd = Path(p_cwd_raw).resolve()
+            if is_strictly_within_directory(p_cwd, target_cwd) or is_strictly_within_directory(target_cwd, p_cwd):
+                matched_panes.append(pid)
+        except (OSError, ValueError):
+            continue
+    return matched_panes
+
+
+def _try_recover_unique_party(
+    *,
+    candidate_pane: str | None,
+    candidate_cwd: Path,
+    other_pane: str | None = None,
+    other_cwd: Path | None = None,
+    proc_cwd: Path,
+    role_label: str,  # "worker" or "requester"
+    env_pane_id: str | None,
+) -> tuple[LiveAgentSnapshot, dict[str, Any]] | None:
+    """
+    Attempt to recover caller LiveAgentSnapshot strictly when candidate party is UNIQUE in the worktree.
+    Fails closed if another active participant or pane shares the same worktree (ambiguous).
+    """
+    if not candidate_pane:
+        return None
+
+    # If HERDR_PANE_ID is present, only permit recovery if the contaminated pane
+    # matches the other task participant (e.g. shared daemon carrying requester wZ:p1).
+    # Unrelated third-party panes must NOT recover to candidate party.
+    if env_pane_id:
+        if not other_pane or env_pane_id != other_pane:
+            return None
+
+    actual_cwd = proc_cwd.resolve()
+    target_cwd = candidate_cwd.resolve()
+
+    # 1. actual_cwd must strictly belong to the candidate's target worktree
+    if not is_strictly_within_directory(actual_cwd, target_cwd):
+        return None
+
+    # 2. Candidate live agent must exist, be active, and stay within target_cwd
+    try:
+        cand_snap = get_live_agent(candidate_pane)
+        if cand_snap.agent_status == "none":
+            return None
+        if not is_strictly_within_directory(cand_snap.foreground_cwd, target_cwd):
+            return None
+    except LiveAgentError:
+        return None
+
+    # 3. Conflict check with the other task participant:
+    # If the other participant also resides in this worktree, actual_cwd cannot distinguish them!
+    if other_pane and other_pane != candidate_pane:
+        try:
+            other_snap = get_live_agent(other_pane)
+            if other_snap.agent_status != "none":
+                other_actual_cwd = (other_cwd or other_snap.foreground_cwd).resolve()
+                if is_strictly_within_directory(actual_cwd, other_actual_cwd):
+                    # Both candidate and other participant share the worktree -> Ambiguous! Fail closed.
+                    return None
+        except LiveAgentError:
+            pass
+
+    # 4. Herdr-wide uniqueness across all active panes (MUST be proven via pane list)
+    active_in_tree = _find_active_panes_in_worktree(actual_cwd)
+    if active_in_tree is None:
+        print(
+            f"警告: Herdr ペイン一覧を取得できないため、{actual_cwd} における呼び出し元の一意性を確認できず自己回復をスキップしました。",
+            file=sys.stderr,
+        )
+        return None
+
+    if len(active_in_tree) != 1 or candidate_pane not in active_in_tree:
+        # Multiple active panes in this worktree -> Ambiguous! Fail closed.
+        return None
+
+    # Proven unique! Safe to recover.
+    reason = f"{role_label}_cwd_affinity_contaminated" if env_pane_id else f"{role_label}_cwd_affinity_missing_env"
+    recovery = {
+        "recovered": True,
+        "reason": reason,
+        "env_pane_id": env_pane_id or None,
+        "resolved_pane_id": candidate_pane,
+        "message": (
+            f"環境変数 HERDR_PANE_ID ({env_pane_id or '未設定'}) が作業ディレクトリと矛盾していたため、"
+            f"タスク {role_label.capitalize()} コンテキスト ({candidate_pane}) から呼び出し元を一意に自己回復しました。"
+        ),
+    }
+    print(
+        f"警告: HERDR_PANE_ID ({env_pane_id or '未設定'}) が作業ディレクトリ ({actual_cwd}) と一致しないため、"
+        f"タスク {role_label.capitalize()} コンテキスト ({candidate_pane}) から呼び出し元を一意に自己回復しました。",
+        file=sys.stderr,
+    )
+    return cand_snap, recovery
+
+
+def resolve_caller_live_agent_for_task(
+    doc: dict[str, Any],
+    *,
+    preferred_role: str = "worker",
+    proc_cwd: Path | None = None,
+) -> tuple[LiveAgentSnapshot, dict[str, Any] | None]:
+    """
+    Resolve caller LiveAgentSnapshot with fallback recovery when HERDR_PANE_ID is contaminated
+    (e.g., shared Codex daemon retaining another pane) or missing (e.g., Cursor subshell).
+    Only recovers if the caller pane is uniquely determinable from worktree affinity.
+    Returns (snapshot, recovery_info_or_none).
+    """
+    actual_cwd = (proc_cwd or Path.cwd()).resolve()
+    env_pane_id = (os.environ.get("HERDR_PANE_ID") or "").strip()
+
+    worktree_path = Path(doc["context"]["worktree"]["path"]).resolve()
+    worker_info = doc.get("worker", {})
+    requester_info = doc.get("requester", {})
+
+    worker_pane = worker_info.get("pane_id") or worker_info.get("agent_name")
+    worker_cwd = Path(worker_info.get("cwd") or worktree_path).resolve()
+
+    requester_pane = requester_info.get("pane_id") or requester_info.get("agent_name")
+    requester_cwd = worktree_path
+
+    initial_snap: LiveAgentSnapshot | None = None
+    if env_pane_id:
+        try:
+            initial_snap = get_live_agent(env_pane_id)
+        except LiveAgentError:
+            initial_snap = None
+
+    # Fast path: environment variable pane exists and its foreground_cwd matches task context (worker or requester cwd)
+    proc_inside_worker = is_strictly_within_directory(actual_cwd, worker_cwd)
+    proc_inside_requester = is_strictly_within_directory(actual_cwd, requester_cwd)
+    proc_in_task = proc_inside_worker or proc_inside_requester
+
+    if initial_snap is not None:
+        snap_cwd = initial_snap.foreground_cwd.resolve()
+        snap_inside_worker = is_strictly_within_directory(snap_cwd, worker_cwd)
+        snap_inside_requester = is_strictly_within_directory(snap_cwd, requester_cwd)
+        snap_in_task = snap_inside_worker or snap_inside_requester
+
+        if snap_in_task:
+            if proc_in_task:
+                # If process runs inside task worktree, it must match the snap's cwd.
+                # If snap points to requester (ticket_dir) but process runs in worker (repo_b), it's contaminated!
+                if is_strictly_within_directory(actual_cwd, snap_cwd):
+                    return initial_snap, None
+            else:
+                # Process runs outside task worktree (e.g. test harness runner) -> trust snap_in_task
+                return initial_snap, None
+
+    # Fallback recovery: environment variable is missing or mismatched (contaminated with another cwd)
+    def _try_worker():
+        return _try_recover_unique_party(
+            candidate_pane=worker_pane,
+            candidate_cwd=worker_cwd,
+            other_pane=requester_pane,
+            other_cwd=requester_cwd,
+            proc_cwd=actual_cwd,
+            role_label="worker",
+            env_pane_id=env_pane_id,
+        )
+
+    def _try_requester():
+        return _try_recover_unique_party(
+            candidate_pane=requester_pane,
+            candidate_cwd=requester_cwd,
+            other_pane=worker_pane,
+            other_cwd=worker_cwd,
+            proc_cwd=actual_cwd,
+            role_label="requester",
+            env_pane_id=env_pane_id,
+        )
+
+    order = [_try_worker, _try_requester]
+    if preferred_role == "requester":
+        order = [_try_requester, _try_worker]
+
+    for try_fn in order:
+        res = try_fn()
+        if res is not None:
+            return res
+
+    # If recovery failed but we had an initial snapshot, return it for normal fail-closed rejection
+    if initial_snap is not None:
+        return initial_snap, None
+
+    # Neither env nor recovery succeeded
+    raise LiveAgentError("caller HERDR_PANE_ID unavailable")
+
+
+def resolve_caller_live_agent_for_worker(
+    *,
+    expected_pane: str,
+    expected_cwd: Path,
+    competing_pane: str | None = None,
+    competing_cwd: Path | None = None,
+    proc_cwd: Path | None = None,
+) -> tuple[LiveAgentSnapshot, dict[str, Any] | None]:
+    """
+    Resolve caller LiveAgentSnapshot for Worker result-submit with fallback recovery.
+    Only recovers if the Worker pane is uniquely determinable from worktree affinity.
+    """
+    actual_cwd = (proc_cwd or Path.cwd()).resolve()
+    env_pane_id = (os.environ.get("HERDR_PANE_ID") or "").strip()
+
+    initial_snap: LiveAgentSnapshot | None = None
+    if env_pane_id:
+        try:
+            initial_snap = get_live_agent(env_pane_id)
+        except LiveAgentError:
+            initial_snap = None
+
+    # Fast path: environment variable pane matches expected worker cwd
+    proc_inside_worker = is_strictly_within_directory(actual_cwd, expected_cwd.resolve())
+    if initial_snap is not None:
+        snap_cwd = initial_snap.foreground_cwd.resolve()
+        if is_strictly_within_directory(snap_cwd, expected_cwd.resolve()):
+            if proc_inside_worker:
+                if is_strictly_within_directory(actual_cwd, snap_cwd):
+                    return initial_snap, None
+            else:
+                return initial_snap, None
+
+    res = _try_recover_unique_party(
+        candidate_pane=expected_pane,
+        candidate_cwd=expected_cwd,
+        other_pane=competing_pane,
+        other_cwd=competing_cwd,
+        proc_cwd=actual_cwd,
+        role_label="worker",
+        env_pane_id=env_pane_id,
+    )
+    if res is not None:
+        return res
+
+    if initial_snap is not None:
+        return initial_snap, None
+
+    raise LiveAgentError("caller HERDR_PANE_ID unavailable")
 
 
 def verify_live_party_cwd(
