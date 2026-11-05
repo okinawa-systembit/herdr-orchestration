@@ -37,8 +37,8 @@ description: >-
 
 - **対象**: リポジトリ内での日常的な実装支援、エージェント間の手戻り防止、sync handoff によるレビュー依頼と対応。
 - **正本・成果物**: 非公開作業領域のファイル群（Git 追跡除外）。
-  - `.input/inbox/review-request.<token>.md`: 一時依頼ファイル（ディレクトリ権限 0700、ファイル 0600）
-  - `docs/reviews/internal/<instance-id>/RVNNN.md`: 個別レビュー記録の正本（ディレクトリ 0700、ファイル 0600）
+  - `.input/inbox/review-request.<token>.md`: 一時依頼ファイル（機微情報を含まない一時ファイルのため過剰なパーミッション強制は行わない）
+  - `docs/reviews/internal/<instance-id>/RVNNN.md`: 個別レビュー記録の正本（過剰なパーミッション強制は行わない）
   - `docs/reviews/internal/<instance-id>/INDEX.md`: 個別記録から派生生成される履歴一覧
   - `<git-common-dir>/herdr-review/state.json`: 非公開補助状態（instance ID、worktree、採番カウンター）
   - `<git-common-dir>/herdr-review.lock`: 排他制御用共有 lock（0600、削除厳禁）
@@ -330,6 +330,9 @@ GitHub を正本とするコードレビュー運用では、以下の手順で 
      git switch main
      ```
    - 原則として `--comment` でレビュー結果を投稿する（Blocking 指摘時も `--request-changes` は使用せず、`- Status: Changes requested` を含む `--comment` で表明する）。
+   - **`scripts/review-sync.sh` や `scripts/lib/` 変更時の改ざん検知対応**:
+     - PR が `scripts/lib/*.md`（ドキュメントのみ）を変更している場合は、`git diff --quiet origin/main -- scripts/review-sync.sh scripts/lib/*.py`（実行ファイル）および未追跡ファイルがないことを確認した上で、`ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh comment reviewer ...` で投稿する（投稿本文にもその理由を明記する）。
+     - 実行コード（`*.py` や `review-sync.sh`）自体を変更している PR のブランチでは `review-sync.sh` を実行せず、内部レビュー（RV）記録を正本として人間に報告する。
    - **安全制約（承認とマージの分離）**:
      1. **AI エージェントの禁止事項**: GitHub App (Bot) 認証下であっても、AI エージェントによる GitHub 公式の承認（`gh pr review --approve`）、変更要求（`--request-changes`）、およびマージ（`gh pr merge`）の実行は**厳格に禁止**する。レビューの合意形成は、常に `--comment` 投稿本文の先頭メタデータ（`- Status: Approved` または `- Status: Changes requested`）にて行う（判定との対応表は [references.md#review-status-mapping](references.md#review-status-mapping) 参照）。
      2. **自 PR 制限回避と人間の役割**: エージェントが Bot 主体として PR を作成・操作することにより、開発者本人の個人アカウントとの同一視（自 PR 制限: 422 エラー）が回避される。GitHub 公式の Approve（承認ボタンの押下）および PR のマージ操作は、エージェントの合意表明を確認した上で**人間の開発者のみが担当**する（詳細は [docs/reviews/GITHUB_APP_AND_REVIEW_POLICY.md](../../../docs/reviews/GITHUB_APP_AND_REVIEW_POLICY.md) 参照）。

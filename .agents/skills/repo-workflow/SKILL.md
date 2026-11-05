@@ -55,6 +55,7 @@ git switch main && git pull --ff-only
 git switch -c <新しいブランチ名>
 ```
 
+- ※ `git pull` が失敗した場合（SSH 認証エラー等を含む）は、先に進まず人間に報告する。
 - ブランチ命名例:
   - 設計タスク: `issue-<N>-<topic>-design`
   - 実装タスク: `issue-<N>-<topic>-impl`
@@ -81,6 +82,7 @@ Refs #<親Issue番号（ある場合）>
 ..."
 ```
 
+- ※ `git push` が失敗した場合（SSH 認証エラー等を含む）は、先に進まず人間に報告する。
 - PR 作成後、`gh pr checks` で CI の通過を確認し、ローカルレビュー（`repo-review`）で GO を得たコミット SHA と PR の HEAD SHA が一致していることを確認してから、`git switch main` で作業ツリーを `main` に戻す。
   - ※ **GO 後の追加コミットの例外（D-1 PR 番号反映）**: ローカルレビュー GO 後に許容される追加コミットは、D-1 における設計書ヘッダーへの PR 番号反映（ステータス行の `PR #NN` 更新）のみとし、その差分は PR 最終判定コメント時にレビュワーへ伝える（それ以外の変更が入った場合は再度ローカルレビューを受ける）。
 
@@ -153,7 +155,7 @@ Refs #<親Issue番号（ある場合）>
 4. **設計 PR の作成（Bot）**:
    - レビュー GO 後、ステータス（`設計承認` 等）の更新があれば反映して `npm run format:md && npm run check:md` を通し、共通手順（[2.3](#pr-create)）に従って `git push` と `bash scripts/review-sync.sh pr-create` を実行し、`gh pr checks` を確認する。
 5. **実装依頼書の下書き作成（後続の実装 Issue がある場合）**:
-   - `umask 077`（権限 `0600`）で `.input/inbox/implementation-request-issue-<実装Issue番号>.md` を作成する。仕様や汎用手順は書き写さず、以下の項目をリンク中心で記載する：
+   - `.input/inbox/implementation-request-issue-<実装Issue番号>.md` を作成する（機微情報を含まない一時ファイルのため過剰なパーミッション強制は行わない）。仕様や汎用手順は書き写さず、以下の項目をリンク中心で記載する：
      - **冒頭注記**: 「本依頼書は補助資料であり、仕様・範囲の正本は GitHub Issue および設計書である（食い違いがある場合は Issue・設計書を優先する）」。
      - **対象 Issue / 設計正本**: `Closes #<実装Issue>` / `Refs #<親Issue>`、前提設計 PR `#<設計PR>`（ブランチ名・承認済み SHA）、および対象設計書の節アンカー（`#sec-X-Y`）へのリンク。
      - **作業の始め方と範囲**: 「設計 PR `#<設計PR>` が `main` にマージされた後、`main` から `issue-<N>-<topic>-impl` を新規作成すること」、およびやること・やらないこと（範囲外 Issue 番号）。
@@ -196,7 +198,7 @@ Refs #<親Issue番号（ある場合）>
 設計方針や運用ルールの整理など、レビュー判定（GO / NO-GO）を伴わないロール間の意見伺い・協議は以下の手順で行う（専用 CLI は設けず、内部レビュー RV の連番にも含めない）：
 
 1. **相談ファイルの作成（Requester）**:
-   - `umask 077`（権限 `0600`）で `.input/inbox/discussion-<topic>.md` を作成する（`<topic>` は英小文字とハイフン、例: `role-binding-cleanup`）。
+   - `.input/inbox/discussion-<topic>.md` を作成する（機微情報を含まない一時ファイルのため過剰なパーミッション強制は行わない。`<topic>` は英小文字とハイフン、例: `role-binding-cleanup`）。
 2. **相談の送信（Requester）**:
    ```bash
    herdr-orchestrator handoff \
@@ -206,7 +208,7 @@ Refs #<親Issue番号（ある場合）>
      --instruction "Read .input/inbox/discussion-<topic>.md carefully. Write your reply to .input/inbox/discussion-<topic>-response.md and submit via result-submit. DO NOT write to GitHub, commit, or push."
    ```
 3. **回答の作成と提出（Worker）**:
-   - `umask 077`（権限 `0600`）で `.input/inbox/discussion-<topic>-response.md` を作成する。
+   - `.input/inbox/discussion-<topic>-response.md` を作成する（過剰なパーミッション強制は不要）。
    - **回答の冒頭に「結論（先に要点）」を置き**、コードやコマンドで確認した**事実**と**推論・提案**を分けて記述する。
    - `herdr-orchestrator result-submit <task.id> --result-status succeeded --result-ref .input/inbox/discussion-<topic>-response.md --summary "<200字以内の要約>"` で提出する（GitHub への投稿やコミット・push は行わない）。
 4. **正本化と片付け（Requester）**:
@@ -219,7 +221,7 @@ Refs #<親Issue番号（ある場合）>
 
 ## 7. GitHub 書き込み表（ロール別手段マトリクス）
 
-本リポジトリでは、GitHub 公式のルールセット設定（**PR 必須、人間の承認 1 件必須 `required_approving_review_count: 1`、直列履歴必須 `required_linear_history`、マージ時ブランチ自動削除 `delete_branch_on_merge`**）により、`main` ブランチの安全性と直列性をプラットフォーム側で担保している（詳細は [GitHub App 運用規約](../../../docs/reviews/GITHUB_APP_AND_REVIEW_POLICY.md) 参照）。
+本リポジトリでは、GitHub 公式のルールセット設定（**PR 必須、人間の承認 1 件必須 `required_approving_review_count: 1`、直列履歴必須 `required_linear_history`、マージ時ブランチ自動削除 `delete_branch_on_merge`**）により、`main` ブランチの安全性と直列性をプラットフォーム側で担保している（詳細は [GitHub App 運用規約](../../../docs/reviews/GITHUB_APP_AND_REVIEW_POLICY.md) 参照。※ `required_linear_history` は現在 `main` ブランチのみで運用しているため有効化されているが、将来 `develop` ブランチ等を導入してマージコミット運用を行う場合は本設定の適用・解除を再検討すること）。
 
 各ロールが GitHub に書き込みを行う際は、以下の手段に従う：
 
