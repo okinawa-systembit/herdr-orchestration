@@ -44,6 +44,7 @@ description: >-
   - `<git-common-dir>/herdr-review.lock`: 排他制御用共有 lock（0600、削除厳禁）
   - ※ 旧 `.review-inbox/` は廃止・削除済み（作業領域は `.input/` に一元化）。
 - **運用原則**: エージェント間で完結する閉じたローカルループであり、**Herdr 内部レビューはローカルの非公開成果物への記録を標準とし、既定（デフォルト）では GitHub への外部書き込みを行わない**。
+  - **PR 最終判定コメントとの役割分担**: PR 作成前および修正ラウンド途中のやり取りはローカルの内部レビュー（RV）で完結させ、**PR の最終判定（マージ可否）のみを GitHub の PR コメント（1 ラウンド 1 件、内部レビュー RV 経緯の 3〜5 行要約を含む）に記録する**（ロール別の GitHub 書き込み手段と Issue/PR 使い分けの正本は [repo-workflow §7・§8](../repo-workflow/SKILL.md#github-write-matrix) を参照）。
   - **GitHub Finding Issue へのコメント投稿条件（明示的指示時のみ許可）**:
     1. **投稿トリガー**: 依頼元から明示的な指示（`review-request` または handoff の `--instruction` での指定）がある場合に限り、対象 Finding Issue へのレビュー結果コメント投稿（`gh issue comment`）を許可する。
     2. **事前確認**: コメント投稿前に、対象 Finding Issue の番号・リポジトリ・レビュー対象コミット SHA が一致していることを確認する。
@@ -301,13 +302,11 @@ GitHub を正本とするコードレビュー運用では、以下の手順で 
 ### A. 通常 Pull Request の継続的レビュー手順
 
 0. **Pull Request の作成（Bot 認証）**:
-   - エージェントが PR を作成する際は、自 PR 制限を回避するため `scripts/review-sync.sh pr-create` を使用する（PR 作成者が `<app-slug>[bot]` となり、人間が自アカウントで公式 Approve できるようになる）：
+   - エージェントによる PR 作成手順の正本は **[repo-workflow §2.3 Pull Request の作成](../repo-workflow/SKILL.md#pr-create)** を参照（必ず `bash scripts/review-sync.sh pr-create` を使用し、個人の `gh pr create` は使用しない）。
+1. **差分とメタデータの確認・ドラフト取り込み（一時的ブランチ switch）**:
+   - `scripts/review-sync.sh` はカレントブランチから PR 番号を自動解決する。同一 worktree 運用（通常時は `main`）においてレビュワーが PR レビュー・最終判定コメントを行う際は、`git status` が clean であることを確認して**一時的に対象 PR のブランチへ switch** し、ドラフトを取り込む：
      ```bash
-     bash scripts/review-sync.sh pr-create --title "..." --body "..."
-     ```
-1. **差分とメタデータの確認・ドラフト取り込み**:
-   - レビュー対象ブランチをチェックアウトし、ドラフトを取り込む（※ PR 番号は現在のブランチから自動解決されるため引数にはロール名のみを指定する）：
-     ```bash
+     git switch <対象PRのブランチ名>
      bash scripts/review-sync.sh pull reviewer
      ```
    - 差分と CI チェックの確認：
@@ -318,14 +317,17 @@ GitHub を正本とするコードレビュー運用では、以下の手順で 
      ```
 2. **2段階レビューの実施**:
    - `repo-review` 基準に沿って、第 1 段階（仕様・設計整合性）および第 2 段階（批判的不具合探索）を実施。
-   - `.input/review/reviewer-draft.md` を編集し、指摘事項（P0〜P3）、総合判定（GO / 要修正 / NO-GO）、未実施検証を記載。
-3. **レビュー結果の投稿**:
-   - レビュー投稿は `scripts/review-sync.sh comment reviewer` を使用する（※ PR 番号は現在のブランチから自動解決される。判定 Status は `--status Approved` または `--status "Changes requested"` を CLI 引数で明示的に指定する）：
+   - `.input/review/reviewer-draft.md` を編集し、指摘事項（P0〜P3）、総合判定（GO / 要修正 / NO-GO）、**内部レビュー（RV）の経緯要約（3〜5 行。RV ファイル自体は Git 追跡外のため人間が PR だけで経緯を追えるようにする）**、および未実施検証を記載。
+3. **レビュー結果の投稿と `main` への即時復帰**:
+   - レビュー投稿は `scripts/review-sync.sh comment reviewer` を使用する（※ PR 番号は現在のブランチから自動解決される。判定 Status は `--status Approved` または `--status "Changes requested"` を CLI 引数で明示的に指定する）。投稿完了後は、**直ちに `git switch main` を実行して作業ツリーを `main` に戻す**：
      ```bash
      # 判定 Status を CLI オプションで指定して投稿 (必須)
      bash scripts/review-sync.sh comment reviewer --status Approved
      # または
      bash scripts/review-sync.sh comment reviewer --status "Changes requested"
+
+     # 投稿後は直ちに main へ戻す（同一 worktree 共有のため必須）
+     git switch main
      ```
    - 原則として `--comment` でレビュー結果を投稿する（Blocking 指摘時も `--request-changes` は使用せず、`- Status: Changes requested` を含む `--comment` で表明する）。
    - **安全制約（承認とマージの分離）**:
