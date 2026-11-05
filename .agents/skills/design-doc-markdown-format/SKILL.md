@@ -11,7 +11,7 @@ description: >-
 
 Herdr Orchestrator の設計書を**作成・変更・修正したら、作業完了前に必ず** Markdown の整形と lint を通す。
 
-文書構造・アンカー・目次などの編集ルールは [AGENTS.md](../../../AGENTS.md) に従う。
+文書構造・アンカー・目次などの編集ルールは [AGENTS.md](../../../AGENTS.md) に従う。設計作業全体のワークフロー（ブランチ作成、ローカル設計レビュー、設計 PR 作成、実装依頼書下書き）は [repo-workflow §4 Worker（設計担当）](../repo-workflow/SKILL.md#worker-designer) を参照する。
 
 ## 対象ファイル
 

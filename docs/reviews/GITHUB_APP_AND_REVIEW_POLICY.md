@@ -67,6 +67,9 @@ GitHub App 自動認証基盤（Phase 1）および安全な連携ラッパー�
    - AI レビュワーが `- Status: Approved`（または Herdr レビュー記録で `GO`）を表明したことを確認し、人間の開発者が自アカウントで PR を確認した上で、GitHub 公式の Approve を実行する。
 2. **PR マージの最終決定**:
    - CI チェック（`checks`）の通過、および公式 Approve の完了を確認し、人間の開発者が PR をマージ（`gh pr merge`）する。
+3. **GitHub ルールセットによるプラットフォーム側の安全担保**:
+   - `main` ブランチのルールセット（`protect-main`）により、**PR 必須、人間の承認 1 件必須（`required_approving_review_count: 1`）、直列履歴必須（`required_linear_history`）**、およびリポジトリ設定の**マージ時ブランチ自動削除（`delete_branch_on_merge: true`）**を有効化し、通常のマージ操作や履歴汚染を GitHub 公式機能で防止する（※ ルールセットに `bypass_actors` として `internal-dev` Team 等が残されている場合は個人認証の `--admin` 等で技術的にバイパスし得るため、エージェントによる `gh pr merge`・`--admin` の使用禁止を併用し、bypass 設定自体の維持・解除は人間の管理判断とする。また、`required_linear_history` は現在 `main` ブランチのみで運用しているため有効化されているが、将来 `develop` ブランチ等を導入してマージコミット運用を行う場合は本設定の適用・解除を再検討すること）。
+   - 各ロール（`メイン`、`設計担当`、`実装担当`、`レビュワー`）が GitHub に書き込む際の対象と手段のマトリクス（正本）は **[repo-workflow §7 GitHub 書き込み表](../../.agents/skills/repo-workflow/SKILL.md#github-write-matrix)** を参照する。
 
 ### 2.3 ブランチ保護設定とコミット push 主体に関する留意事項
 
@@ -106,7 +109,7 @@ Phase 2 で実装された `scripts/review-sync.sh` は、本規約に完全に�
 
 ### 4.1 Bot トークンを利用した PR 作成手順 (`review-sync.sh pr-create`)
 
-エージェントが Bot を主体として PR を作成する場合は、`scripts/review-sync.sh pr-create` を使用する。
+エージェントが Bot を主体として PR を作成する場合は、`scripts/review-sync.sh pr-create` を使用する（実運用におけるブランチ作成・push・PR 作成・`main` 復帰の一連の手順正本は **[repo-workflow §2.3 Pull Request の作成](../../.agents/skills/repo-workflow/SKILL.md#pr-create)** を参照）。
 内部で改ざん検知を実施した上で、`github_app_auth.py` より発行された Installation Access Token を `GH_TOKEN` に自動設定して `gh pr create` を安全に呼び出す。認証エラー時は個人認証へ暗黙にフォールバックさせず、直ちに停止する：
 
 ```bash
