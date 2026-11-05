@@ -9,6 +9,7 @@ from typing import Any
 from orchestrator.env import HerdrEnvError, require_herdr_env
 from orchestrator.herdr_cli import HerdrCliError, run_herdr
 from orchestrator.identity import (
+    GLOBAL_SCOPE_ID,
     RepositoryIdentityError,
     get_repository_identity,
     is_valid_uuid_v4,
@@ -758,4 +759,187 @@ def inspect_pane_for_role_set(pane_id: str, *, display_name: str, bound_at: str)
         "tab_id": snap.tab_id,
         "tab_number": snap.tab_number,
         "bound_at": bound_at,
+    }
+
+
+def _non_empty_str_match(a: str | None, b: str | None) -> bool:
+    """RV020 N-1: null or empty strings never match each other."""
+    return bool(
+        isinstance(a, str)
+        and isinstance(b, str)
+        and a.strip()
+        and b.strip()
+        and a.strip() == b.strip()
+    )
+
+
+@dataclass(frozen=True)
+class RolePeerContext:
+    is_unique_cwd_role: bool
+    other_expected_sessions: set[str]
+    other_bound_panes: set[str]
+
+    def __iter__(self):
+        yield self.is_unique_cwd_role
+        yield self.other_expected_sessions
+        yield self.other_bound_panes
+
+
+def compute_role_peer_context(
+    *,
+    chosen_scope_id: str,
+    canonical_role: str,
+    bound_pane_id: str,
+    expected_cwd: Path | None,
+    local_scope_id: str,
+    local_doc: dict[str, Any],
+    global_doc: dict[str, Any],
+) -> RolePeerContext:
+    same_cwd_other_roles = 0
+    other_expected_sessions: set[str] = set()
+    other_bound_panes: set[str] = set()
+
+    for s_id, s_doc in ((local_scope_id, local_doc), (GLOBAL_SCOPE_ID, global_doc)):
+        for r_name, p_id in s_doc.get("roles", {}).items():
+            if s_id == chosen_scope_id and r_name == canonical_role:
+                continue
+            if p_id == bound_pane_id:
+                # 同一ペインに登録された他スコープの兼任ロールは別ペインからの侵入ではないため除外
+                continue
+            other_bound_panes.add(p_id)
+            m = s_doc.get("targets", {}).get(r_name)
+            if isinstance(m, dict):
+                cwd_val = m.get("cwd")
+                if isinstance(cwd_val, str) and cwd_val.strip():
+                    try:
+                        if expected_cwd is not None and Path(cwd_val).resolve() == expected_cwd:
+                            same_cwd_other_roles += 1
+                    except OSError:
+                        pass
+                sess_val = m.get("agent_session_id")
+                if isinstance(sess_val, str) and sess_val.strip():
+                    other_expected_sessions.add(sess_val.strip())
+
+    is_unique_cwd_role = (same_cwd_other_roles == 0)
+    return RolePeerContext(
+        is_unique_cwd_role=is_unique_cwd_role,
+        other_expected_sessions=other_expected_sessions,
+        other_bound_panes=other_bound_panes,
+    )
+
+
+def evaluate_role_target_live_status(
+    *,
+    bound_pane_id: str,
+    target_meta: dict[str, Any] | None,
+    canonical_role: str,
+    is_global: bool,
+    panes: list[dict[str, Any]] | None,
+    peer_context: RolePeerContext | None = None,
+    herdr_env: bool | None = None,
+) -> dict[str, Any]:
+    """
+    Evaluate the live runtime status of a single role target binding without modifying any state.
+    Returns: {"status": str, "agent_status": str | None, "reason": str | None, "hint": str | None}
+    """
+    from orchestrator.role_bindings import is_target_meta_valid
+
+    global_suffix = " --global" if is_global else ""
+
+    # 1. 旧形式チェック: not is_target_meta_valid(target_meta)（必須項目 cwd, agent 欠落）
+    if target_meta is None or not is_target_meta_valid(target_meta):
+        return {
+            "status": "pane_mismatch",
+            "agent_status": None,
+            "reason": "outdated_metadata",
+            "hint": (
+                "ペインの状態が登録時と一致しません（別ペインへの ID 再利用またはディレクトリ移動）。"
+                f"現在のペインで 'herdr-orchestrator role set <role> <pane_id>{global_suffix}' を再実行するか、"
+                f"不要なら 'herdr-orchestrator role clear <role>{global_suffix}' で解除してください。"
+            ),
+        }
+
+    # 2. 実機一覧取得不可 / 環境外チェック
+    herdr_env_val = (os.environ.get("HERDR_ENV") == "1") if herdr_env is None else herdr_env
+    if not herdr_env_val or panes is None:
+        reason = "not_in_herdr_env" if not herdr_env_val else "pane_list_unavailable"
+        return {
+            "status": "unknown",
+            "agent_status": None,
+            "reason": reason,
+            "hint": "Herdr 実機のペイン一覧を取得できないため状態を判定できません（設定を削除しないでください）。",
+        }
+
+    # 3. ペイン不在チェック
+    matched = [p for p in panes if p.get("pane_id") == bound_pane_id]
+    if not matched:
+        return {
+            "status": "pane_missing",
+            "agent_status": None,
+            "reason": "pane_not_found",
+            "hint": (
+                "指定されたペインが実機上に存在しません。Herdr 再起動後の場合は次回 handoff 時に自動追従を試みます。"
+                f"ペインを完全に閉じて不要になったロールであれば 'herdr-orchestrator role clear <role>{global_suffix}' で解除してください。"
+            ),
+        }
+
+    live_pane = matched[0]
+    live_agent = live_pane.get("agent")
+    live_agent_status = live_pane.get("agent_status")
+
+    # 4. シェル待機チェック（エージェント未起動）
+    if not live_agent or live_agent_status == "none":
+        return {
+            "status": "live",
+            "agent_status": live_agent_status,
+            "reason": "agent_not_running",
+            "hint": (
+                "ペインは存在しますが現在エージェントが未起動（シェル状態）です。"
+                f"エージェントを起動するか、不要なら 'herdr-orchestrator role clear <role>{global_suffix}' で解除してください。"
+            ),
+        }
+
+    # 5. 稼働中ペインの指紋照合
+    try:
+        expected_cwd = Path(target_meta["cwd"]).resolve()
+    except Exception:
+        expected_cwd = None
+    expected_agent = target_meta.get("agent")
+    expected_terminal_id = target_meta.get("terminal_id")
+    expected_session_id = target_meta.get("agent_session_id")
+
+    live_cwd_raw = live_pane.get("cwd")
+    live_cwd = Path(live_cwd_raw).resolve() if live_cwd_raw else None
+    live_term = live_pane.get("terminal_id")
+    live_sess = live_pane.get("agent_session_id")
+
+    is_unique_cwd_role = peer_context.is_unique_cwd_role if peer_context is not None else True
+    other_expected_sessions = peer_context.other_expected_sessions if peer_context is not None else set()
+
+    cwd_ok = (live_cwd is not None and expected_cwd is not None and live_cwd == expected_cwd)
+    agent_ok = (live_agent == expected_agent)
+    sess_not_other = not (live_sess and live_sess in other_expected_sessions)
+    identity_ok = (
+        _non_empty_str_match(live_term, expected_terminal_id)
+        or _non_empty_str_match(live_sess, expected_session_id)
+        or is_unique_cwd_role
+    )
+
+    if cwd_ok and agent_ok and sess_not_other and identity_ok:
+        return {
+            "status": "live",
+            "agent_status": live_agent_status,
+            "reason": None,
+            "hint": None,
+        }
+
+    return {
+        "status": "pane_mismatch",
+        "agent_status": live_agent_status,
+        "reason": "context_changed",
+        "hint": (
+            "ペインの状態が登録時と一致しません（別ペインへの ID 再利用またはディレクトリ移動）。"
+            f"現在のペインで 'herdr-orchestrator role set <role> <pane_id>{global_suffix}' を再実行するか、"
+            f"不要なら 'herdr-orchestrator role clear <role>{global_suffix}' で解除してください。"
+        ),
     }

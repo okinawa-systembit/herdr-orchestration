@@ -21,6 +21,9 @@ from orchestrator.identity import (
 from orchestrator.live_agent import (
     LiveAgentError,
     LiveAgentSnapshot,
+    RolePeerContext,
+    compute_role_peer_context,
+    evaluate_role_target_live_status,
     format_pane_candidate_summary,
     format_pane_display_summary,
     get_caller_live_agent,
@@ -171,32 +174,18 @@ def _verify_or_track_bound_worker(
         target_meta, fallback_role=canonical_worker_role
     )
 
-    same_cwd_other_roles = 0
-    other_expected_sessions: set[str] = set()
-    other_bound_panes: set[str] = set()
-
-    for s_id, s_doc in ((local_scope_id, local_doc), (GLOBAL_SCOPE_ID, global_doc)):
-        for r_name, p_id in s_doc.get("roles", {}).items():
-            if s_id == chosen_scope_id and r_name == canonical_worker_role:
-                continue
-            if p_id == bound_pane_id:
-                # 同一ペインに登録された他スコープの兼任ロールは別ペインからの侵入ではないため除外
-                continue
-            other_bound_panes.add(p_id)
-            m = s_doc.get("targets", {}).get(r_name)
-            if isinstance(m, dict):
-                cwd_val = m.get("cwd")
-                if isinstance(cwd_val, str) and cwd_val.strip():
-                    try:
-                        if Path(cwd_val).resolve() == expected_cwd:
-                            same_cwd_other_roles += 1
-                    except OSError:
-                        pass
-                sess_val = m.get("agent_session_id")
-                if isinstance(sess_val, str) and sess_val.strip():
-                    other_expected_sessions.add(sess_val.strip())
-
-    is_unique_cwd_role = same_cwd_other_roles == 0
+    peer_context = compute_role_peer_context(
+        chosen_scope_id=chosen_scope_id,
+        canonical_role=canonical_worker_role,
+        bound_pane_id=bound_pane_id,
+        expected_cwd=expected_cwd,
+        local_scope_id=local_scope_id,
+        local_doc=local_doc,
+        global_doc=global_doc,
+    )
+    is_unique_cwd_role = peer_context.is_unique_cwd_role
+    other_expected_sessions = peer_context.other_expected_sessions
+    other_bound_panes = peer_context.other_bound_panes
     panes = list_live_panes_with_ui()
 
     if panes is None:
@@ -283,9 +272,29 @@ def _verify_or_track_bound_worker(
     matched_live = [p for p in panes if p.get("pane_id") == bound_pane_id]
     if matched_live and bound_pane_id != req_pane_opt:
         live_p = matched_live[0]
+        live_cwd_raw = live_p.get("cwd")
+        live_cwd = Path(live_cwd_raw).resolve() if live_cwd_raw else None
         live_agent = live_p.get("agent")
-        live_status = live_p.get("agent_status")
-        if not live_agent or live_status == "none":
+        live_term = live_p.get("terminal_id")
+        live_sess = live_p.get("agent_session_id")
+
+        live_eval = evaluate_role_target_live_status(
+            bound_pane_id=bound_pane_id,
+            target_meta=target_meta,
+            canonical_role=canonical_worker_role,
+            is_global=(chosen_scope_id == GLOBAL_SCOPE_ID),
+            panes=panes,
+            peer_context=peer_context,
+        )
+
+        if live_eval["status"] == "pane_mismatch" and live_eval.get("reason") == "outdated_metadata":
+            raise HandoffCommandError(
+                "role_binding_outdated",
+                message=f"{target_summary} は旧形式の Role Binding です。'herdr-orchestrator role set' で再登録してください。",
+                details={"target": {**target_meta, "display_summary": target_summary}},
+            )
+
+        if live_eval["status"] == "live" and live_eval.get("reason") == "agent_not_running":
             raise HandoffCommandError(
                 "worker_agent_not_running",
                 message=(
@@ -295,26 +304,16 @@ def _verify_or_track_bound_worker(
                 ),
                 details={"target": {**target_meta, "display_summary": target_summary}},
             )
+
+        live_status = live_eval.get("agent_status")
         if live_status not in ("idle", "done"):
             raise HandoffCommandError(
                 "worker_not_promptable",
                 message=f"{target_summary} が応答しません（status={live_status}）。ペインの状態を確認してください。",
                 details={"target": {**target_meta, "display_summary": target_summary}},
             )
-        live_cwd_raw = live_p.get("cwd")
-        live_cwd = Path(live_cwd_raw).resolve() if live_cwd_raw else None
-        live_term = live_p.get("terminal_id")
-        live_sess = live_p.get("agent_session_id")
 
-        cwd_ok = live_cwd is not None and live_cwd == expected_cwd
-        agent_ok = live_agent == expected_agent
-        sess_not_other = not (live_sess and live_sess in other_expected_sessions)
-        identity_ok = (
-            _non_empty_str_match(live_term, expected_terminal_id)
-            or _non_empty_str_match(live_sess, expected_session_id)
-            or is_unique_cwd_role
-        )
-        if cwd_ok and agent_ok and sess_not_other and identity_ok:
+        if live_eval["status"] == "live" and live_eval.get("reason") is None:
             updated_meta = {
                 **target_meta,
                 "pane_id": bound_pane_id,
@@ -485,6 +484,8 @@ def _verify_or_track_bound_worker(
         "worker_pane_closed_or_missing",
         message=(
             f"以前登録されていた {target_summary} は既に閉じられているか特定できないため配送できませんでした。"
+            "herdr-orchestrator role show で状態を確認し、再作成した場合は role set <role> <pane_id> で再設定、"
+            "不要なロールであれば role clear <role> で解除してください。"
         ),
         details={
             "target": {**target_meta, "display_summary": target_summary},

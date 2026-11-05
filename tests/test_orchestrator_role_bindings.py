@@ -1837,6 +1837,219 @@ raise SystemExit(99)
         self.assertEqual(st_third["recipient_verification"]["reason"], "caller_not_task_participant")
         self.assertNotIn("caller_recovery", st_third["recipient_verification"])
 
+    def test_cw24_role_show_live_status_classification_and_stderr_warning(self) -> None:
+        # CW-24: 4 live_status classifications (live [running & shell], pane_missing, pane_mismatch [context_changed & outdated], unknown)
+        # and 1-line stderr warning on non-live or inactive roles.
+        _run_cli("role", "set", "レビュワー", "w15:p2", env=self.env, cwd=self.repo_a)
+        _run_cli("role", "set", "チケット管理", "w16:p1", "--global", env=self.env, cwd=self.ticket_dir)
+
+        # 1. All live and active (idle) -> live_status is live, no stderr warning
+        res_live = _run_cli("role", "show", env=self.env, cwd=self.repo_a)
+        self.assertEqual(res_live.returncode, 0)
+        self.assertEqual(res_live.stderr, "")
+        data_live = json.loads(res_live.stdout)
+        rev_ls = data_live["targets"]["レビュワー"]["live_status"]
+        self.assertEqual(rev_ls["status"], "live")
+        self.assertEqual(rev_ls["agent_status"], "idle")
+        self.assertIsNone(rev_ls["reason"])
+        self.assertIsNone(rev_ls["hint"])
+
+        # 2. Shell state (live but agent_not_running) -> status="live", reason="agent_not_running", stderr warning
+        state = json.loads(self.herdr_state_file.read_text(encoding="utf-8"))
+        for p in state["panes"]:
+            if p["pane_id"] == "w15:p2":
+                p["agent"] = None
+                p["agent_status"] = "none"
+        self._update_panes(state["panes"])
+
+        res_shell = _run_cli("role", "show", env=self.env, cwd=self.repo_a)
+        self.assertEqual(res_shell.returncode, 0)
+        data_shell = json.loads(res_shell.stdout)
+        rev_shell_ls = data_shell["targets"]["レビュワー"]["live_status"]
+        self.assertEqual(rev_shell_ls["status"], "live")
+        self.assertEqual(rev_shell_ls["agent_status"], "none")
+        self.assertEqual(rev_shell_ls["reason"], "agent_not_running")
+        self.assertIn("エージェントが未起動（シェル状態）", rev_shell_ls["hint"])
+        self.assertIn("[WARN] role show: non-live or inactive role bindings detected (レビュワー: agent_not_running)", res_shell.stderr)
+
+        # 3. Pane missing -> status="pane_missing", reason="pane_not_found", stderr warning
+        state_no_p2 = [p for p in state["panes"] if p["pane_id"] != "w15:p2"]
+        self._update_panes(state_no_p2)
+
+        res_missing = _run_cli("role", "show", env=self.env, cwd=self.repo_a)
+        self.assertEqual(res_missing.returncode, 0)
+        data_missing = json.loads(res_missing.stdout)
+        rev_missing_ls = data_missing["targets"]["レビュワー"]["live_status"]
+        self.assertEqual(rev_missing_ls["status"], "pane_missing")
+        self.assertIsNone(rev_missing_ls["agent_status"])
+        self.assertEqual(rev_missing_ls["reason"], "pane_not_found")
+        self.assertIn("指定されたペインが実機上に存在しません", rev_missing_ls["hint"])
+        self.assertIn("[WARN] role show: non-live or inactive role bindings detected (レビュワー: pane_missing)", res_missing.stderr)
+
+        # 4. Pane mismatch (context_changed: CWD change) -> status="pane_mismatch", reason="context_changed"
+        for p in state["panes"]:
+            if p["pane_id"] == "w15:p2":
+                p["agent"] = "claude"
+                p["agent_status"] = "idle"
+                p["foreground_cwd"] = str(self.repo_b.resolve())
+        self._update_panes(state["panes"])
+
+        res_mismatch = _run_cli("role", "show", env=self.env, cwd=self.repo_a)
+        self.assertEqual(res_mismatch.returncode, 0)
+        data_mismatch = json.loads(res_mismatch.stdout)
+        rev_mismatch_ls = data_mismatch["targets"]["レビュワー"]["live_status"]
+        self.assertEqual(rev_mismatch_ls["status"], "pane_mismatch")
+        self.assertEqual(rev_mismatch_ls["agent_status"], "idle")
+        self.assertEqual(rev_mismatch_ls["reason"], "context_changed")
+        self.assertIn("ペインの状態が登録時と一致しません", rev_mismatch_ls["hint"])
+        self.assertIn("[WARN] role show: non-live or inactive role bindings detected (レビュワー: pane_mismatch)", res_mismatch.stderr)
+
+        # 5. Global role hint includes '--global'
+        state_no_w16 = [p for p in state["panes"] if p["pane_id"] != "w16:p1"]
+        self._update_panes(state_no_w16)
+        res_global = _run_cli("role", "show", "--global", env=self.env, cwd=self.ticket_dir)
+        self.assertEqual(res_global.returncode, 0)
+        data_global = json.loads(res_global.stdout)
+        t_ls = data_global["targets"]["チケット管理"]["live_status"]
+        self.assertEqual(t_ls["status"], "pane_missing")
+        self.assertIn("--global", t_ls["hint"])
+        self.assertIn("[WARN] role show: non-live or inactive role bindings detected (チケット管理: pane_missing)", res_global.stderr)
+
+        # 6. Unknown: HERDR_ENV != "1" -> not_in_herdr_env
+        no_env = self.env.copy()
+        no_env["HERDR_ENV"] = "0"
+        res_no_env = _run_cli("role", "show", env=no_env, cwd=self.repo_a)
+        self.assertEqual(res_no_env.returncode, 0)
+        data_no_env = json.loads(res_no_env.stdout)
+        self.assertEqual(data_no_env["targets"]["レビュワー"]["live_status"]["status"], "unknown")
+        self.assertEqual(data_no_env["targets"]["レビュワー"]["live_status"]["reason"], "not_in_herdr_env")
+
+        # Unknown: FAKE_PANE_LIST_FAIL=1 -> pane_list_unavailable
+        fail_list_env = {**self.env, "FAKE_PANE_LIST_FAIL": "1"}
+        res_fail_list = _run_cli("role", "show", env=fail_list_env, cwd=self.repo_a)
+        self.assertEqual(res_fail_list.returncode, 0)
+        data_fail_list = json.loads(res_fail_list.stdout)
+        self.assertEqual(data_fail_list["targets"]["レビュワー"]["live_status"]["status"], "unknown")
+        self.assertEqual(data_fail_list["targets"]["レビュワー"]["live_status"]["reason"], "pane_list_unavailable")
+
+    def test_cw25_role_show_readonly_guarantee_and_exit_code(self) -> None:
+        # CW-25: Readonly guarantee of `role show`.
+        # Non-live or mismatched roles do not modify the file, returning exit code 0.
+        # Corrupted JSON returns exit code 1.
+        _run_cli("role", "set", "レビュワー", "w15:p2", env=self.env, cwd=self.repo_a)
+        repo_id = get_or_create_repository_identity(self.repo_a)
+        role_file = self.state_home / "herdr-orchestrator" / "roles" / f"{repo_id}.json"
+        self.assertTrue(role_file.exists())
+
+        # Cause pane_missing by removing w15:p2 from panes
+        state = json.loads(self.herdr_state_file.read_text(encoding="utf-8"))
+        self._update_panes([p for p in state["panes"] if p["pane_id"] != "w15:p2"])
+
+        content_before = role_file.read_text(encoding="utf-8")
+        mtime_before = role_file.stat().st_mtime_ns
+
+        # Run role show
+        res = _run_cli("role", "show", env=self.env, cwd=self.repo_a)
+        self.assertEqual(res.returncode, 0)
+        self.assertEqual(json.loads(res.stdout)["targets"]["レビュワー"]["live_status"]["status"], "pane_missing")
+
+        # Verify role_file was untouched
+        content_after = role_file.read_text(encoding="utf-8")
+        mtime_after = role_file.stat().st_mtime_ns
+        self.assertEqual(content_before, content_after)
+        self.assertEqual(mtime_before, mtime_after)
+
+        # Corrupted JSON file causes exit code 1
+        role_file.write_text("{corrupted json", encoding="utf-8")
+        res_corrupt = _run_cli("role", "show", env=self.env, cwd=self.repo_a)
+        self.assertEqual(res_corrupt.returncode, 1)
+        self.assertEqual(json.loads(res_corrupt.stdout)["error"], "role_binding_corrupted")
+
+    def test_cw26_handoff_worker_pane_closed_or_missing_includes_cleanup_guidance(self) -> None:
+        # CW-26: `handoff` stopped by `worker_pane_closed_or_missing` must include manual cleanup guidance:
+        # role show, role set <role> <pane_id>, and role clear <role>
+        _run_cli("role", "set", "レビュワー", "w15:p2", env=self.env, cwd=self.repo_a)
+        state = json.loads(self.herdr_state_file.read_text(encoding="utf-8"))
+        # Remove w15:p2 so pane is missing, and ensure no candidate can be tracked
+        self._update_panes([p for p in state["panes"] if p["pane_id"] != "w15:p2"])
+
+        res = _run_cli(
+            "handoff",
+            "--mode",
+            "async",
+            "--to",
+            "レビュワー",
+            "--instruction",
+            "test guidance",
+            env=self.env,
+            cwd=self.repo_a,
+        )
+        self.assertEqual(res.returncode, 1)
+        data = json.loads(res.stdout)
+        self.assertEqual(data["error"], "worker_pane_closed_or_missing")
+        msg = data["message"]
+        self.assertIn("herdr-orchestrator role show", msg)
+        self.assertIn("role set <role> <pane_id>", msg)
+        self.assertIn("role clear <role>", msg)
+
+    def test_cw27_single_source_of_truth_between_role_show_and_handoff(self) -> None:
+        # CW-27: SSOT between `role show` and `handoff` under identical live pane states.
+        _run_cli("role", "set", "レビュワー", "w15:p2", env=self.env, cwd=self.repo_a)
+        state = json.loads(self.herdr_state_file.read_text(encoding="utf-8"))
+
+        # State 1: live + idle -> role show: live (reason=None) -> handoff: success
+        for p in state["panes"]:
+            if p["pane_id"] == "w15:p2":
+                p["agent"] = "claude"
+                p["agent_status"] = "idle"
+                p["foreground_cwd"] = str(self.repo_a.resolve())
+        self._update_panes(state["panes"])
+
+        show_1 = json.loads(_run_cli("role", "show", env=self.env, cwd=self.repo_a).stdout)
+        self.assertEqual(show_1["targets"]["レビュワー"]["live_status"]["status"], "live")
+        self.assertIsNone(show_1["targets"]["レビュワー"]["live_status"]["reason"])
+        res_h1 = _run_cli("handoff", "--mode", "async", "--to", "レビュワー", "--instruction", "go", env=self.env, cwd=self.repo_a)
+        self.assertEqual(res_h1.returncode, 0)
+
+        # State 2: live + shell -> role show: live (reason="agent_not_running") -> handoff: worker_agent_not_running
+        for p in state["panes"]:
+            if p["pane_id"] == "w15:p2":
+                p["agent"] = None
+                p["agent_status"] = "none"
+        self._update_panes(state["panes"])
+
+        show_2 = json.loads(_run_cli("role", "show", env=self.env, cwd=self.repo_a).stdout)
+        self.assertEqual(show_2["targets"]["レビュワー"]["live_status"]["status"], "live")
+        self.assertEqual(show_2["targets"]["レビュワー"]["live_status"]["reason"], "agent_not_running")
+        res_h2 = _run_cli("handoff", "--mode", "async", "--to", "レビュワー", "--instruction", "go", env=self.env, cwd=self.repo_a)
+        self.assertEqual(res_h2.returncode, 1)
+        self.assertEqual(json.loads(res_h2.stdout)["error"], "worker_agent_not_running")
+
+        # State 3: pane_mismatch (cwd mismatch) -> role show: pane_mismatch (reason="context_changed") -> handoff: worker_context_changed
+        for p in state["panes"]:
+            if p["pane_id"] == "w15:p2":
+                p["agent"] = "claude"
+                p["agent_status"] = "idle"
+                p["foreground_cwd"] = str(self.repo_b.resolve())
+        self._update_panes(state["panes"])
+
+        show_3 = json.loads(_run_cli("role", "show", env=self.env, cwd=self.repo_a).stdout)
+        self.assertEqual(show_3["targets"]["レビュワー"]["live_status"]["status"], "pane_mismatch")
+        self.assertEqual(show_3["targets"]["レビュワー"]["live_status"]["reason"], "context_changed")
+        res_h3 = _run_cli("handoff", "--mode", "async", "--to", "レビュワー", "--instruction", "go", env=self.env, cwd=self.repo_a)
+        self.assertEqual(res_h3.returncode, 1)
+        self.assertEqual(json.loads(res_h3.stdout)["error"], "worker_context_changed")
+
+        # State 4: pane_missing -> role show: pane_missing (reason="pane_not_found") -> handoff: worker_pane_closed_or_missing
+        self._update_panes([p for p in state["panes"] if p["pane_id"] != "w15:p2"])
+
+        show_4 = json.loads(_run_cli("role", "show", env=self.env, cwd=self.repo_a).stdout)
+        self.assertEqual(show_4["targets"]["レビュワー"]["live_status"]["status"], "pane_missing")
+        self.assertEqual(show_4["targets"]["レビュワー"]["live_status"]["reason"], "pane_not_found")
+        res_h4 = _run_cli("handoff", "--mode", "async", "--to", "レビュワー", "--instruction", "go", env=self.env, cwd=self.repo_a)
+        self.assertEqual(res_h4.returncode, 1)
+        self.assertEqual(json.loads(res_h4.stdout)["error"], "worker_pane_closed_or_missing")
+
 
 if __name__ == "__main__":
     unittest.main()
