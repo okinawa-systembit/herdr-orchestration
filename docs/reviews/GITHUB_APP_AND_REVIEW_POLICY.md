@@ -68,7 +68,7 @@ GitHub App 自動認証基盤（Phase 1）および安全な連携ラッパー�
 2. **PR マージの最終決定**:
    - CI チェック（`checks`）の通過、および公式 Approve の完了を確認し、人間の開発者が PR をマージ（`gh pr merge`）する。
 3. **GitHub ルールセットによるプラットフォーム側の安全担保**:
-   - `main` ブランチのルールセット（`protect-main`）により、**PR 必須、人間の承認 1 件必須（`required_approving_review_count: 1`）、直列履歴必須（`required_linear_history`）**、およびリポジトリ設定の**マージ時ブランチ自動削除（`delete_branch_on_merge: true`）**を有効化し、未承認マージや履歴汚染を GitHub 公式機能で防止する。
+   - `main` ブランチのルールセット（`protect-main`）により、**PR 必須、人間の承認 1 件必須（`required_approving_review_count: 1`）、直列履歴必須（`required_linear_history`）**、およびリポジトリ設定の**マージ時ブランチ自動削除（`delete_branch_on_merge: true`）**を有効化し、通常のマージ操作や履歴汚染を GitHub 公式機能で防止する（※ ルールセットに `bypass_actors` として `internal-dev` Team 等が残されている場合は個人認証の `--admin` 等で技術的にバイパスし得るため、エージェントによる `gh pr merge`・`--admin` の使用禁止を併用し、bypass 設定自体の維持・解除は人間の管理判断とする）。
    - 各ロール（`メイン`、`設計担当`、`実装担当`、`レビュワー`）が GitHub に書き込む際の対象と手段のマトリクス（正本）は **[repo-workflow §7 GitHub 書き込み表](../../.agents/skills/repo-workflow/SKILL.md#github-write-matrix)** を参照する。
 
 ### 2.3 ブランチ保護設定とコミット push 主体に関する留意事項

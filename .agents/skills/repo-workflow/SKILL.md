@@ -30,8 +30,10 @@ herdr-orchestrator --help
 
 - **同一 worktree 直列運用（案 B）**:
   - 本リポジトリでは、`result-submit --result-ref`（Requester worktree 基準での成果物存在検査）および `scripts/repo-review-helper`（単一 worktree 固定状態）との整合性を保つため、全ロールが同一の Git worktree を共有する。
-  - **ブランチを切り替える作業（設計・実装）は同時に 1 つだけ**とし、`メイン` が直列にスケジュール管理する（作業ツリーを変更しないローカルレビューや相談は並行可）。
-  - **返却時の clean & `main` 復帰義務**: `設計担当` および `実装担当` は、PR 作成（または指示された範囲の作業）を終えたら、`result-submit` を実行する直前に必ず **`git switch main`** を実行し、`git status` が空（clean）であることを確認してからタスクを返却する（未コミット差分のままレビューを依頼する特例時を除く）。
+  - **ブランチを切り替える作業は同時に 1 つだけ**とし、`メイン` が直列にスケジュール管理する。
+    - **ブランチを切り替える作業（直列）**: `設計担当` の設計ブランチ作業、`実装担当` の実装ブランチ作業、および `レビュワー` が PR 最終判定コメントを投稿する際の一時的ブランチ switch（[repo-review §A](../repo-review/SKILL.md)）。
+    - **作業ツリーを変更しない作業（並行可）**: `git archive` 等でスクラッチ展開して検証するローカルレビュー（RV）、およびエージェント間相談（[#discussion](#discussion)）。
+  - **返却時の clean & `main` 復帰義務**: 各ロールは、ブランチを切り替える作業を終えたら、`result-submit`（または完了報告）を実行する直前に必ず **`git switch main`** を実行し、`git status` が空（clean）であることを確認してからタスクを返却する（未コミット差分のままレビューを依頼する特例時を除く）。
 
 ---
 
@@ -80,6 +82,7 @@ Refs #<親Issue番号（ある場合）>
 ```
 
 - PR 作成後、`gh pr checks` で CI の通過を確認し、ローカルレビュー（`repo-review`）で GO を得たコミット SHA と PR の HEAD SHA が一致していることを確認してから、`git switch main` で作業ツリーを `main` に戻す。
+  - ※ **GO 後の追加コミットの例外（D-1 PR 番号反映）**: ローカルレビュー GO 後に許容される追加コミットは、D-1 における設計書ヘッダーへの PR 番号反映（ステータス行の `PR #NN` 更新）のみとし、その差分は PR 最終判定コメント時にレビュワーへ伝える（それ以外の変更が入った場合は再度ローカルレビューを受ける）。
 
 ### 2.4 完了報告（Worker: `result-submit`）と結果確認（Requester: `task-result`）
 
@@ -108,7 +111,8 @@ Refs #<親Issue番号（ある場合）>
    - **設計・実装の依頼**: 所要時間が既定の sync 待機時間（1800 秒 / 30 分）を超えうるため、`--mode async` を基本とする。
    - **ローカルレビュー（[repo-review](../repo-review/SKILL.md)）・相談（[#discussion](#discussion)）**: `--mode sync` を使用する。
    - ※ CLI が `git_repository_not_initialized` を返した場合は、自動で `git init` せず [handoff.md](../../../skills/herdr-orchestrator/references/handoff.md) のテンプレートに従いチャットで人間に報告する。
-3. **設計から実装への引き継ぎ（ブランチ積み重ね防止）**:
+3. **設計から実装への引き継ぎ（ブランチ積み重ね防止）と PR 最終判定依頼**:
+   - PR（設計 PR または実装 PR）が作成された後、PR 上に最終判定コメントを記録する場合は、他のロールがブランチ作業中でない（作業ツリーが `main` で clean である）ことを確認してから `レビュワー` に最終判定コメント投稿を依頼する。
    - `設計担当` から返却された実装依頼書の下書き（`.input/inbox/implementation-request-issue-<N>.md`）を確認する。
    - **原則として、設計 PR が人間によって `main` にマージされたことを確認してから**、`実装担当` へ `handoff` する（未マージの設計ブランチの上に実装ブランチを積み重ねない）。特例でマージ前に並行着手させる場合は、依頼書に「設計ブランチから切り、設計 PR マージ後に `main` へ rebase すること」を明記する。
    - 実装 PR がマージされた後、用済みとなった実装依頼書ファイルを削除して整理する。
@@ -226,7 +230,7 @@ Refs #<親Issue番号（ある場合）>
 | **レビュワー**         | PR への最終判定コメント（1 ラウンドに 1 件、内部レビュー RV の経緯要約 3〜5 行を含む）、および明示指示時の Finding Issue 投稿 | PR 判定: `bash scripts/review-sync.sh comment reviewer --status <Approved\|"Changes requested">`（Bot）<br>Finding Issue（明示指示時のみ）: [repo-review](../repo-review/SKILL.md) 手順 |
 | **全員**               | 読み取り（`view` / `list` / `checks` / `diff` / `api` の GET）                                                                | 個人の `gh` CLI でよい                                                                                                                                                                  |
 
-- **人間のみが行う操作**: PR の公式 **Approve（承認）**、**マージ（`gh pr merge`）**、および **Issue や PR のクローズ・再オープン・ラベル変更**は人間が行う（※ PR 本文の `Closes #N` によるマージ時の自動クローズは人間の操作に含まれる。初回 20 Scope レビューにおける Scope Issue クローズ等の明示手順は [repo-review](../repo-review/SKILL.md) に従う）。
+- **人間のみが行う操作**: PR の公式 **Approve（承認）**、**マージ（`gh pr merge`）**、および **Issue や PR のクローズ・再オープン・ラベル変更**は人間が行う（※ PR 本文の `Closes #N` によるマージ時の自動クローズは人間の操作に含まれる。初回 20 Scope レビューにおける Scope Issue クローズ等の明示手順は [repo-review](../repo-review/SKILL.md) に従う）。なお、ルールセットに緊急用の `bypass_actors`（`internal-dev` Team 等）が設定されている環境では、個人認証の `gh pr merge --admin` 等が技術的に通り得るため、エージェントが `gh pr merge` や `--admin` を使用することは厳禁とする（bypass の有無は人間の管理判断に委ねる）。
 
 ---
 
