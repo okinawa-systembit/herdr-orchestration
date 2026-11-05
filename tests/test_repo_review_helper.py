@@ -88,9 +88,6 @@ class TestReviewLock(unittest.TestCase):
 
         with ReviewLock(self.common_dir):
             self.assertTrue(lock_file.exists())
-            # Check permissions are 0600
-            st = lock_file.stat()
-            self.assertEqual(st.st_mode & 0o777, 0o600)
 
         # File should NOT be deleted after unlock
         self.assertTrue(lock_file.exists())
@@ -133,10 +130,6 @@ class TestReviewLock(unittest.TestCase):
 
     def test_lock_fd_closed_on_rejection(self):
         """R64-08: Ensure file descriptor is closed when LockAcquisitionError is raised."""
-        lock_file = self.common_dir / ReviewLock.LOCK_FILENAME
-        lock_file.write_text("content", encoding="utf-8")
-        os.chmod(str(lock_file), 0o644)
-
         closed_fds = []
         orig_close = os.close
 
@@ -144,10 +137,12 @@ class TestReviewLock(unittest.TestCase):
             closed_fds.append(fd)
             return orig_close(fd)
 
-        with patch("os.close", side_effect=tracking_close):
-            lock = ReviewLock(self.common_dir)
-            with self.assertRaises(LockAcquisitionError):
-                lock.acquire()
+        with patch("fcntl.flock", side_effect=OSError("simulated flock error")):
+            with patch("os.close", side_effect=tracking_close):
+                lock = ReviewLock(self.common_dir)
+                with self.assertRaises(LockAcquisitionError):
+                    lock.acquire()
+        self.assertGreater(len(closed_fds), 0)
 
         self.assertGreaterEqual(len(closed_fds), 1)
 
@@ -199,16 +194,15 @@ class TestReviewLock(unittest.TestCase):
 
         self.assertGreaterEqual(call_count, 1)
 
-    def test_lock_permission_rejection(self):
-        """N-3.1: Reject lock file if permissions are not 0600 without silently repairing."""
+    def test_lock_permission_relaxed(self):
+        """Issue #133: Ensure lock acquisition succeeds even with standard 0644/0666 permissions."""
         lock_file = self.common_dir / ReviewLock.LOCK_FILENAME
         lock_file.write_text("dummy", encoding="utf-8")
         os.chmod(str(lock_file), 0o644)
 
         lock = ReviewLock(self.common_dir)
-        with self.assertRaises(LockAcquisitionError) as cm:
-            lock.acquire()
-        self.assertIn("permissions are", str(cm.exception))
+        with lock:
+            self.assertIsNotNone(lock.fd)
 
     def test_lock_symlink_rejection(self):
         """N-2: Reject lock file if it is a symlink."""
@@ -246,8 +240,7 @@ class TestStateManagement(unittest.TestCase):
 
         state_file = get_state_file_path(self.common_dir)
         self.assertTrue(state_file.exists())
-        self.assertEqual(state_file.stat().st_mode & 0o777, 0o600)
-        self.assertEqual(state_file.parent.stat().st_mode & 0o777, 0o700)
+        self.assertTrue(state_file.parent.exists())
 
         loaded = load_state(self.common_dir)
         self.assertIsNotNone(loaded)
@@ -287,23 +280,24 @@ class TestStateManagement(unittest.TestCase):
             load_state(self.common_dir)
         self.assertIn("Unsupported 'version': 99", str(cm.exception))
 
-    def test_security_permission_error_on_insecure_mode(self):
+    def test_permission_relaxed_on_standard_modes(self):
+        """Issue #133: Standard permissions (0666, 0644, 0755, 0777) should load state successfully."""
         st = create_initial_state("inst_123456789012", self.worktree, counter=0)
         save_state(self.common_dir, st)
 
         state_file = get_state_file_path(self.common_dir)
         # Change file permission to 0666 or 0644
         os.chmod(str(state_file), 0o666)
+        loaded = load_state(self.common_dir)
+        self.assertIsNotNone(loaded)
+        self.assertEqual(loaded["instance_id"], "inst_123456789012")
 
-        with self.assertRaises(SecurityPermissionError):
-            load_state(self.common_dir)
-
-        # Fix file permission, break dir permission
-        os.chmod(str(state_file), 0o600)
+        # Change dir permission to 0777 or 0755
+        os.chmod(str(state_file), 0o644)
         os.chmod(str(state_file.parent), 0o777)
-
-        with self.assertRaises(SecurityPermissionError):
-            load_state(self.common_dir)
+        loaded2 = load_state(self.common_dir)
+        self.assertIsNotNone(loaded2)
+        self.assertEqual(loaded2["instance_id"], "inst_123456789012")
 
     def test_symlink_state_rejection(self):
         """N-2: Reject state directory or file if it is a symlink."""
@@ -392,17 +386,15 @@ class TestRecorder(unittest.TestCase):
             )
 
         self.assertTrue(saved_path.exists())
-        self.assertEqual(saved_path.stat().st_mode & 0o777, 0o600)
 
-        # N-3.3: docs/reviews/internal must also be 0700
+        # docs/reviews/internal must exist
         internal_root = get_internal_reviews_root(self.worktree)
-        self.assertEqual(internal_root.stat().st_mode & 0o777, 0o700)
+        self.assertTrue(internal_root.exists())
 
         # Verify INDEX.md
         reviews_dir = get_instance_reviews_dir(self.worktree, self.inst_id)
         index_file = reviews_dir / "INDEX.md"
         self.assertTrue(index_file.exists())
-        self.assertEqual(index_file.stat().st_mode & 0o777, 0o600)
 
         index_text = index_file.read_text(encoding="utf-8")
         self.assertIn("RV001", index_text)
@@ -947,9 +939,10 @@ class TestCliIntegration(unittest.TestCase):
         """M-3: cmd_status exits with code 2 on LockAcquisitionError instead of traceback."""
         wt_str = str(self.worktree)
         git_common_dir = get_git_common_dir(self.worktree)
+        target_file = git_common_dir / "target.lock"
+        target_file.write_text("dummy", encoding="utf-8")
         lock_file = git_common_dir / ReviewLock.LOCK_FILENAME
-        lock_file.write_text("dummy", encoding="utf-8")
-        os.chmod(str(lock_file), 0o644)
+        lock_file.symlink_to(target_file)
 
         code = cli_main(["status", "--worktree", wt_str])
         self.assertEqual(code, 2)

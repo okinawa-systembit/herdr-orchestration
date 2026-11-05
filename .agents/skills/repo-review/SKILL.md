@@ -37,11 +37,11 @@ description: >-
 
 - **対象**: リポジトリ内での日常的な実装支援、エージェント間の手戻り防止、sync handoff によるレビュー依頼と対応。
 - **正本・成果物**: 非公開作業領域のファイル群（Git 追跡除外）。
-  - `.input/inbox/review-request.<token>.md`: 一時依頼ファイル（ディレクトリ権限 0700、ファイル 0600。repo-review-helper が担保）
-  - `docs/reviews/internal/<instance-id>/RVNNN.md`: 個別レビュー記録の正本（ディレクトリ 0700、ファイル 0600。repo-review-helper が担保）
+  - `.input/inbox/review-request.<token>.md`: 一時依頼ファイル（OS 標準の umask に準拠。repo-review-helper が原子的生成）
+  - `docs/reviews/internal/<instance-id>/RVNNN.md`: 個別レビュー記録の正本（OS 標準の umask に準拠。repo-review-helper が原子的保存）
   - `docs/reviews/internal/<instance-id>/INDEX.md`: 個別記録から派生生成される履歴一覧
   - `<git-common-dir>/herdr-review/state.json`: 非公開補助状態（instance ID、worktree、採番カウンター）
-  - `<git-common-dir>/herdr-review.lock`: 排他制御用共有 lock（0600、削除厳禁）
+  - `<git-common-dir>/herdr-review.lock`: 排他制御用共有 lock（OS 標準の umask に準拠、削除厳禁）
   - ※ 旧 `.review-inbox/` は廃止・削除済み（作業領域は `.input/` に一元化）。
 - **運用原則**: エージェント間で完結する閉じたローカルループであり、**Herdr 内部レビューはローカルの非公開成果物への記録を標準とし、既定（デフォルト）では GitHub への外部書き込みを行わない**。
   - **PR 最終判定コメントとの役割分担**: PR 作成前および修正ラウンド途中のやり取りはローカルの内部レビュー（RV）で完結させ、**PR の最終判定（マージ可否）のみを GitHub の PR コメント（1 ラウンド 1 件、内部レビュー RV 経緯の 3〜5 行要約を含む）に記録する**（ロール別の GitHub 書き込み手段と Issue/PR 使い分けの正本は [repo-workflow §7・§8](../repo-workflow/SKILL.md#github-write-matrix) を参照）。
@@ -238,9 +238,8 @@ handoff 失敗時: stderr を人間へ。blind 再送しない（設計 §9）�
 - [references.md#review-principles](references.md#review-principles) に基づき重大度（P0〜P3）と確信度（高/中/低）を判定。
 - レビュー結果本文を整形し（見出し構成は [references.md#review-response-body](references.md#review-response-body) に従う）、`scripts/repo-review-helper record-save` を使って保存する（自動採番、原子的保存、INDEX.md 派生更新）：
   ```bash
-  # 安全な一時ファイル（0600）にレビュー本文を用意（構成は references.md に準拠）
+  # 一時ファイルにレビュー本文を用意（構成は references.md に準拠）
   TMP_BODY=$(mktemp)
-  chmod 0600 "$TMP_BODY"
   cat << 'EOF' > "$TMP_BODY"
   # レビュー記録 — <タイトル>
 
