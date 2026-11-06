@@ -10,18 +10,16 @@
 
 ### 20.1 現在の実機確認環境
 
-2026-10-01 の WSL 実機確認では次の状態である。これは参考環境であり、`herdr-orchestrator` の固定バージョン要件ではない。
+2026-11-06 時点の実機確認では次の状態である。これは参考環境であり、`herdr-orchestrator` の固定バージョン要件ではない。
 
 ```text
 Platform: WSL / Linux
-Herdr: 0.9.3
+Herdr: 0.9.5
 Update channel: stable
 Installation: direct install
-Previous version: 0.8.x
-Update method: herdr update
 ```
 
-実際に `herdr update` により 0.8.x から 0.9.3 へ更新され、更新後も `herdr channel show` は `stable` であることを確認した。したがって、標準運用では GitHub Releases 等の表示を独自の最新版判定基準とせず、Herdr 自身の configured update channel と update mechanism を正とする。
+Herdr 0.9.5 において `herdr channel show` が `stable` であることを確認した。したがって、標準運用では GitHub Releases 等の表示を独自の最新版判定基準とせず、Herdr 自身の configured update channel と update mechanism を正とする。
 
 <a id="sec-20-2"></a>
 
@@ -207,9 +205,16 @@ Orchestrator 側で Herdr CLI の変更を追従実装しない。
 
 ## 23. 今後の検証項目
 
-- Cursor からの Skill 利用
-- Codex からの Skill 利用
-- Antigravity からの Skill 利用
+<a id="sec-23-1"></a>
+
+### 23.1 実機確認状況（実機検証ログ参照）
+
+各 Agent からの Skill 利用および連携状況の実機確認記録は、単一正本である [実機検証ログ (verification-log.md)](../herdr-orchestrator-verification-log.md#sec-agent-verification) を参照。なお、Codex については共有デーモン無効化が必須である既知の制約が存在する（[Issue #122](https://github.com/okinawa-systembit/herdr-orchestration/issues/122)、[README.md FAQ](../../README.md#q-codex-agent-でタスク受信時に宛先不一致caller_not_task_participantエラーで停止する) を参照）。
+
+<a id="sec-23-2"></a>
+
+### 23.2 今後の継続検証・拡張項目
+
 - Agent ごとの Skill discovery 差異
 - Cursor / Codex / Antigravity ごとの approval / allowlist 設定方法
 - 固定 `herdr-orchestrator` CLI による承認回数の削減効果
