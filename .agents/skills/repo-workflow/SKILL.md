@@ -13,7 +13,7 @@ description: >-
 
 中央 Skill: [skills/herdr-orchestrator/SKILL.md](../../../skills/herdr-orchestrator/SKILL.md)
 
-本スキルは、このリポジトリで各ロール（`メイン`、`設計担当`、`実装担当`、`レビュワー`）がタスクを実行する際の**共通入口**である。個別の専門手順は [repo-review](../repo-review/SKILL.md)、[review-finding](../review-finding/SKILL.md)、[design-doc-markdown-format](../design-doc-markdown-format/SKILL.md) へリンクする。
+本スキルは、このリポジトリで各ロール（`メイン`、`設計担当`、`実装担当`、`レビュワー`）がタスクを実行する際の**共通入口**である。個別の専門手順は [repo-review](../repo-review/SKILL.md)、[review-finding](../review-finding/SKILL.md)、[review-skill-audit](../review-skill-audit/SKILL.md)、[design-doc-markdown-format](../design-doc-markdown-format/SKILL.md) へリンクする。
 
 ---
 
@@ -39,6 +39,8 @@ herdr-orchestrator --help
 ---
 
 ## 2. 共通手順（全ロール共通）
+
+<a id="worker-receive"></a>
 
 ### 2.1 タスク受信確認（Worker: §11.4）
 
@@ -110,7 +112,7 @@ rm -f .input/tmp/pr-body.md
 2. **handoff モードとロール確認**:
    - 実行前に `herdr-orchestrator role show` で登録ロール名を確認し、`--to <role>`（または `--worker-role <role>`）に指定する。
    - **設計・実装の依頼**: 所要時間が既定の sync 待機時間（1800 秒 / 30 分）を超えうるため、`--mode async` を基本とする。
-   - **ローカルレビュー（[repo-review](../repo-review/SKILL.md)）・相談（[#discussion](#discussion)）**: `--mode sync` を使用する。
+   - **ローカルレビュー（[repo-review](../repo-review/SKILL.md)、レビュースキル自体の改修検証時は [review-skill-audit](../review-skill-audit/SKILL.md)）・相談（[#discussion](#discussion)）**: `--mode sync` を使用する。
    - ※ CLI が `git_repository_not_initialized` を返した場合は、自動で `git init` せず [handoff.md](../../../skills/herdr-orchestrator/references/handoff.md) のテンプレートに従いチャットで人間に報告する。
 3. **設計から実装への引き継ぎ（ブランチ積み重ね防止）と PR 最終判定依頼**:
    - PR（設計 PR または実装 PR）が作成された後、PR 上に最終判定コメントを記録する場合は、他のロールがブランチ作業中でない（作業ツリーが `main` で clean である）ことを確認してから `レビュワー` に最終判定コメント投稿を依頼する。
@@ -141,7 +143,7 @@ rm -f .input/tmp/pr-body.md
      npm run format:md && npm run check:md
      ```
 3. **PR 作成前のローカル設計レビュー依頼（必須）**:
-   - [repo-review](../repo-review/SKILL.md) の Requester 手順に従い、PR を作成する前にローカルレビュー（RV）を依頼して **GO（Blocking 0 件）** を獲得する（`request-create` の標準出力に表示された `.input/inbox/review-request.<token>.md` のパスを指定する）：
+   - [repo-review](../repo-review/SKILL.md) の Requester 手順に従い、PR を作成する前にローカルレビュー（RV）を依頼して **GO（Blocking 0 件）** を獲得する（`request-create` の標準出力に表示された `.input/inbox/review-request.<token>.md` のパスを指定する。※ レビュースキルや関連レビュー文書自体を見直し・改修する場合は、`repo-review` ではなく [review-skill-audit](../review-skill-audit/SKILL.md) モード B を使用する）：
      ```bash
      scripts/repo-review-helper request-create --tier STANDARD --summary "Issue #<N> の設計書レビューを依頼します。"
 
@@ -181,7 +183,7 @@ rm -f .input/tmp/pr-body.md
    - 依頼書で指定された **差分外波及チェック（D-1〜D-3）** の更新（設計書ヘッダーの `実装完了（PR #NN にてマージ済み）` 更新、節冒頭の「未実装」注記の解除、`public-cli.md` / `--help` 整合など）を行う。
    - `npm run test:orchestrator`（必要に応じ `npm run verify:orchestrator`）、および Markdown を変更した場合は `npm run format:md && npm run check:md` を実行し、すべてパスした状態で**ローカルコミット（未 push）**を作成する。
 4. **PR 作成前のローカル実装レビュー依頼（必須）**:
-   - [repo-review](../repo-review/SKILL.md) の Requester 手順に従い、`scripts/repo-review-helper request-create` で依頼書を作成してレビュワーへ `sync handoff` し、**GO（Blocking 0 件）** を獲得する（指摘修正時は修正コミットを作成し再レビューを受ける）。
+   - [repo-review](../repo-review/SKILL.md) の Requester 手順（レビュースキルや関連レビュー文書自体の改修時は [review-skill-audit](../review-skill-audit/SKILL.md) モード B）に従い、`scripts/repo-review-helper request-create` で依頼書を作成してレビュワーへ `sync handoff` し、**GO（Blocking 0 件）** を獲得する（指摘修正時は修正コミットを作成し再レビューを受ける。ただし `review-skill-audit` B-1 の 3 に定める軽量経路を除く）。
 5. **実装 PR の作成（Bot）**:
    - レビュー GO 後（依頼書で push・PR 作成が許可されている場合）、共通手順（[2.3](#pr-create)）に従って `git push -u origin <作業ブランチ>` と **`bash scripts/review-sync.sh pr-create`**（**個人の `gh pr create` 直接実行は厳禁**）を実行する。
    - D-1 で設計書ヘッダーに実際の PR 番号（`PR #NN`）を反映する必要がある場合は、PR 作成直後に番号を更新して `npm run format:md && npm run check:md` を通し、追加コミット＆ push する。
@@ -273,4 +275,5 @@ rm -f .input/tmp/pr-body.md
 - [roles.md](../../../skills/herdr-orchestrator/references/roles.md)
 - [repo-review SKILL.md](../repo-review/SKILL.md)
 - [review-finding SKILL.md](../review-finding/SKILL.md)
+- [review-skill-audit SKILL.md](../review-skill-audit/SKILL.md)
 - [design-doc-markdown-format SKILL.md](../design-doc-markdown-format/SKILL.md)
