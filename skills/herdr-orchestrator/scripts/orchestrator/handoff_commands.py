@@ -166,11 +166,14 @@ def _verify_project_bound_worker(
     canonical_worker_role: str,
     bound_pane_id: str,
     target_meta: dict[str, Any],
+    target_doc: dict[str, Any],
     req_pane_opt: str | None,
 ) -> LiveAgentSnapshot:
     """Verify worker in a cross-project target without mutating target role bindings."""
     expected_cwd = Path(target_meta["cwd"]).resolve()
     expected_agent = target_meta["agent"]
+    expected_terminal_id = target_meta.get("terminal_id")
+    expected_session_id = target_meta.get("agent_session_id")
     target_summary = format_pane_display_summary(
         target_meta, fallback_role=canonical_worker_role
     )
@@ -182,10 +185,31 @@ def _verify_project_bound_worker(
             details={"target": {**target_meta, "display_summary": target_summary}, "project": project_alias},
         )
 
+    peer_context = compute_role_peer_context(
+        chosen_scope_id=target_scope_id,
+        canonical_role=canonical_worker_role,
+        bound_pane_id=bound_pane_id,
+        expected_cwd=expected_cwd,
+        local_scope_id=target_scope_id,
+        local_doc=target_doc,
+        global_doc={},
+    )
+
     panes = list_live_panes_with_ui()
     if panes is not None:
-        target_pane = next((p for p in panes if p.get("pane_id") == bound_pane_id), None)
-        if target_pane is None:
+        live_eval = evaluate_role_target_live_status(
+            bound_pane_id=bound_pane_id,
+            target_meta=target_meta,
+            canonical_role=canonical_worker_role,
+            is_global=False,
+            panes=panes,
+            peer_context=peer_context,
+        )
+        st = live_eval.get("status")
+        reason = live_eval.get("reason")
+        agent_status = live_eval.get("agent_status")
+
+        if st == "pane_missing":
             raise HandoffCommandError(
                 "worker_pane_closed_or_missing",
                 message=(
@@ -194,13 +218,34 @@ def _verify_project_bound_worker(
                 ),
                 details={"target": {**target_meta, "display_summary": target_summary}, "project": project_alias},
             )
-        live_agent = target_pane.get("agent")
-        agent_status = target_pane.get("agent_status")
-        if agent_status == "none" or not live_agent:
+        if reason == "agent_not_running":
             raise HandoffCommandError(
                 "worker_agent_not_running",
                 message=f"{target_summary} に配送できませんでした（現在エージェントが起動しておらずシェル状態です）。",
                 details={"target": {**target_meta, "display_summary": target_summary}, "project": project_alias},
+            )
+        if st == "pane_mismatch":
+            target_pane = next((p for p in panes if p.get("pane_id") == bound_pane_id), None)
+            actual_info: dict[str, Any] = {}
+            if target_pane:
+                actual_info = {
+                    "pane_id": bound_pane_id,
+                    "cwd": str(Path(target_pane["cwd"]).resolve()) if target_pane.get("cwd") else None,
+                    "agent": target_pane.get("agent"),
+                    "terminal_id": target_pane.get("terminal_id"),
+                    "agent_session_id": target_pane.get("agent_session_id"),
+                }
+            raise HandoffCommandError(
+                "worker_context_changed",
+                message=(
+                    f"{target_summary} の状態が登録時と変わっています。"
+                    f"相手先プロジェクト（'{project_alias}'）の環境でエージェントを起動・確認し、必要に応じて role set で再設定してください。"
+                ),
+                details={
+                    "target": {**target_meta, "display_summary": target_summary},
+                    "project": project_alias,
+                    "actual": actual_info,
+                },
             )
         if agent_status not in ("idle", "done"):
             raise HandoffCommandError(
@@ -208,27 +253,9 @@ def _verify_project_bound_worker(
                 message=f"{target_summary} が応答可能な状態ではありません（status={agent_status}）。",
                 details={"target": {**target_meta, "display_summary": target_summary}, "project": project_alias},
             )
-        live_cwd = Path(target_pane["cwd"]).resolve()
-        if live_cwd != expected_cwd or live_agent != expected_agent:
-            raise HandoffCommandError(
-                "worker_context_changed",
-                message=(
-                    f"{target_summary} の状態が登録時と変わっています"
-                    f"（登録時: {expected_cwd} / {expected_agent}、現在: {live_cwd} / {live_agent}）。"
-                    f"相手先プロジェクト（'{project_alias}'）の環境でエージェントを起動・確認し、必要に応じて role set で再設定してください。"
-                ),
-                details={
-                    "target": {**target_meta, "display_summary": target_summary},
-                    "project": project_alias,
-                    "actual": {
-                        "pane_id": bound_pane_id,
-                        "cwd": str(live_cwd),
-                        "agent": live_agent,
-                        "terminal_id": target_pane.get("terminal_id"),
-                        "agent_session_id": target_pane.get("agent_session_id"),
-                    },
-                },
-            )
+
+        target_pane = next((p for p in panes if p.get("pane_id") == bound_pane_id), None)
+        assert target_pane is not None
         return _snapshot_from_pane_dict(target_pane)
 
     # Fallback when list_live_panes_with_ui() is None (e.g., minimal test harnesses)
@@ -258,7 +285,19 @@ def _verify_project_bound_worker(
         )
     live_cwd = snap.foreground_cwd.resolve()
     live_agent = snap.agent
-    if live_cwd != expected_cwd or live_agent != expected_agent:
+    live_term = snap.terminal_id
+    live_sess = snap.agent_session_id
+
+    cwd_ok = (live_cwd == expected_cwd)
+    agent_ok = (live_agent == expected_agent)
+    sess_not_other = not (live_sess and live_sess in peer_context.other_expected_sessions)
+    identity_ok = (
+        _non_empty_str_match(live_term, expected_terminal_id)
+        or _non_empty_str_match(live_sess, expected_session_id)
+        or peer_context.is_unique_cwd_role
+    )
+
+    if not (cwd_ok and agent_ok and sess_not_other and identity_ok):
         raise HandoffCommandError(
             "worker_context_changed",
             message=(
@@ -273,8 +312,8 @@ def _verify_project_bound_worker(
                     "pane_id": bound_pane_id,
                     "cwd": str(live_cwd),
                     "agent": live_agent,
-                    "terminal_id": snap.terminal_id,
-                    "agent_session_id": snap.agent_session_id,
+                    "terminal_id": live_term,
+                    "agent_session_id": live_sess,
                 },
             },
         )
@@ -787,6 +826,7 @@ def _resolve_parties(
             canonical_worker_role=canonical_worker_role,
             bound_pane_id=bound_worker_pane,
             target_meta=target_meta,
+            target_doc=target_doc,
             req_pane_opt=req_pane_opt,
         )
         _require_live_pane_id(requester, party="requester")

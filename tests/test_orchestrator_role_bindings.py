@@ -2315,6 +2315,70 @@ raise SystemExit(99)
         self.assertEqual(show_g.returncode, 0)
         self.assertIn("チケット管理", json.loads(show_g.stdout)["roles"])
 
+    def test_cw37_cross_project_peer_fingerprint_mismatch_prevents_misrouting(self) -> None:
+        # CW-37 (RV131 P1-1): When pane IDs are swapped in a multi-role same-CWD project,
+        # cross-project handoff must detect fingerprint mismatch (peer_context) and stop with worker_context_changed
+        # rather than misrouting to another role's pane silently.
+        state = json.loads(self.herdr_state_file.read_text(encoding="utf-8"))
+        state["panes"].extend([
+            {
+                "pane_id": "w15:p3",
+                "workspace_id": "w15",
+                "tab_id": "w15:t1",
+                "terminal_id": "term_15_3",
+                "agent": "claude",
+                "agent_status": "idle",
+                "agent_session": {"value": "sess_b_impl"},
+                "foreground_cwd": str(self.repo_b.resolve()),
+            },
+            {
+                "pane_id": "w15:p4",
+                "workspace_id": "w15",
+                "tab_id": "w15:t1",
+                "terminal_id": "term_15_4",
+                "agent": "claude",
+                "agent_status": "idle",
+                "agent_session": {"value": "sess_b_rev"},
+                "foreground_cwd": str(self.repo_b.resolve()),
+            },
+        ])
+        self._update_panes(state["panes"])
+
+        _run_cli("role", "set", "設計担当", "w15:p1", env=self.env, cwd=self.repo_a)
+        _run_cli("role", "set", "実装担当", "w15:p3", env=self.env, cwd=self.repo_b)
+        _run_cli("role", "set", "レビュワー", "w15:p4", env=self.env, cwd=self.repo_b)
+        res_reg = _run_cli("project", "register", "remote-b", env=self.env, cwd=self.repo_b)
+        self.assertEqual(res_reg.returncode, 0)
+        scope_b = json.loads(res_reg.stdout)["scope_id"]
+        binding_file_b = self.state_home / "herdr-orchestrator" / "roles" / f"{scope_b}.json"
+        content_before = binding_file_b.read_text(encoding="utf-8")
+
+        # Simulate restart swap: w15:p4 is closed, and w15:p3 now has reviewer's session/terminal
+        swapped_panes = [p for p in state["panes"] if p["pane_id"] != "w15:p4"]
+        for p in swapped_panes:
+            if p["pane_id"] == "w15:p3":
+                p["terminal_id"] = "term_15_4"
+                p["agent_session"] = {"value": "sess_b_rev"}
+        self._update_panes(swapped_panes)
+
+        # Handoff to 実装担当 must fail with worker_context_changed (cannot misroute to reviewer session)
+        res_swap = _run_cli(
+            "handoff",
+            "--mode", "async",
+            "--project", "remote-b",
+            "--to", "実装担当",
+            "--instruction", "work",
+            env=self.env,
+            cwd=self.repo_a,
+        )
+        self.assertEqual(res_swap.returncode, 1)
+        err = json.loads(res_swap.stdout)
+        self.assertEqual(err["error"], "worker_context_changed")
+
+        # Target role binding MUST NOT be mutated
+        content_after = binding_file_b.read_text(encoding="utf-8")
+        self.assertEqual(content_before, content_after)
+
 
 if __name__ == "__main__":
     unittest.main()

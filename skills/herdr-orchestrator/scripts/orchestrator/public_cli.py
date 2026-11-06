@@ -831,7 +831,8 @@ def _cmd_project(ns: argparse.Namespace) -> int:
             reg_at = p_info.get("registered_at")
             try:
                 p_doc = get_role_binding_document(p_scope_id)
-            except RoleBindingError:
+            except RoleBindingError as exc:
+                sys.stderr.write(f"warning: cannot read role binding for project {alias!r} ({p_scope_id}): {exc.message}\n")
                 p_doc = {"roles": {}, "targets": {}, "outdated_roles": []}
 
             enriched_targets, _ = _enrich_targets_with_live_status(

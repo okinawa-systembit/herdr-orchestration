@@ -533,8 +533,11 @@ def _read_project_catalog_unlocked() -> dict[str, Any]:
         scope_id = v.get("scope_id")
         reg_at = v.get("registered_at")
         if isinstance(scope_id, str) and scope_id.strip():
+            clean_sid = scope_id.strip().lower()
+            if not (is_valid_uuid_v4(clean_sid) or is_dir_scope_id(clean_sid)):
+                continue
             projects[norm_k] = {
-                "scope_id": scope_id.strip(),
+                "scope_id": clean_sid,
                 "registered_at": str(reg_at) if reg_at else _utc_now_iso(),
             }
     return {
@@ -616,7 +619,12 @@ def register_project(alias: str, scope_id: str) -> dict[str, Any]:
     norm_alias = validate_project_alias(alias)
     if not isinstance(scope_id, str) or not scope_id.strip():
         raise RoleBindingError("invalid_input", message="scope_id must be a non-empty string")
-    clean_scope_id = scope_id.strip()
+    clean_scope_id = scope_id.strip().lower()
+    if not (is_valid_uuid_v4(clean_scope_id) or is_dir_scope_id(clean_scope_id)):
+        raise RoleBindingError(
+            "invalid_input",
+            message=f"scope_id must be a valid UUID v4 or dir_<hash16> scope ID (got {clean_scope_id!r})",
+        )
 
     with _projects_mutation_lock():
         catalog = _read_project_catalog_unlocked()
