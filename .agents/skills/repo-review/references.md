@@ -45,7 +45,7 @@
 5. **レビューイ（Reviewee）対応手順**: **[references/reviewee.md](references/reviewee.md)**
    - 即時修正禁止、事前トリアージ、Decision 3 態、回答ドラフトテンプレート（[#reviewee-response-workflow](references/reviewee.md#reviewee-response-workflow)）
 6. **GitHub PR 連携手順**: **[references/github-pr.md](references/github-pr.md)**
-   - PR レビュー手順、一時的ブランチ switch と main 復帰、安全制約（Approve/Merge 禁止）（[#github-pr-review](references/github-pr.md#github-pr-review)）
+   - PR レビュー手順（--pr 明示指定による main 維持）、安全制約（Approve/Merge 禁止）（[#github-pr-review](references/github-pr.md#github-pr-review)）
 
 ---
 

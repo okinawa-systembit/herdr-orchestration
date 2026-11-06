@@ -11,40 +11,38 @@
 
 ## 2. レビュワーによる PR レビュー手順
 
-### 2.1 差分とメタデータの確認・ドラフト取り込み（一時的ブランチ switch）
+### 2.1 差分とメタデータの確認・ドラフト取り込み（--pr 明示指定による main 維持）
 
-`scripts/review-sync.sh` はカレントブランチから PR 番号を自動解決する。同一 worktree 運用（通常時は `main`）においてレビュワーが PR レビュー・最終判定コメントを行う際は、`git status` が clean であることを確認して**一時的に対象 PR のブランチへ switch** し、ドラフトを取り込む：
+`scripts/review-sync.sh` は `--pr <PR番号>` オプションをサポートしている。同一 worktree 運用（通常時は `main`）においてレビュワーが PR レビュー・最終判定コメントを行う際は、対象 PR のブランチへ switch する必要はなく、**`main` ブランチに留まったまま `--pr <PR番号>` を指定**してドラフトを取り込む：
 
 ```bash
-git switch <対象PRのブランチ名>
-bash scripts/review-sync.sh pull reviewer
+bash scripts/review-sync.sh pull reviewer --pr <対象PR番号>
 ```
 
 差分と CI チェックの確認：
 
 ```bash
-gh pr view --json number,title,baseRefName,headRefOid,commits
-gh pr diff
-gh pr checks
+gh pr view <対象PR番号> --json number,title,baseRefName,headRefOid,commits
+gh pr diff <対象PR番号>
+gh pr checks <対象PR番号>
 ```
+
+ローカルでテスト実行やファイル内容の検証が必要な場合は、ブランチ switch を行わず、スクラッチ領域へ展開して検証する（例: `git archive origin/<branch> | tar -x -C <一時ディレクトリ>`。repo-workflow §1 の作業ツリー不変ルールに準拠）。
 
 ### 2.2 2段階レビューの実施
 
 - `repo-review` 基準に沿って、第 1 段階（仕様・設計整合性）および第 2 段階（批判的不具合探索）を実施。
 - `.input/review/reviewer-draft.md` を編集し、指摘事項（P0〜P3）、総合判定（GO / 要修正 / NO-GO）、**内部レビュー（RV）の経緯要約（3〜5 行。RV ファイル自体は Git 追跡外のため人間が PR だけで経緯を追えるようにする）**、および未実施検証を記載。
 
-### 2.3 レビュー結果の投稿と `main` への即時復帰
+### 2.3 レビュー結果の投稿（main に留まったまま実行）
 
-レビュー投稿は `scripts/review-sync.sh comment reviewer` を使用する（判定 Status は `--status Approved` または `--status "Changes requested"` を CLI 引数で明示的に指定する）。投稿完了後は、**直ちに `git switch main` を実行して作業ツリーを `main` に戻す**：
+レビュー投稿は `scripts/review-sync.sh comment reviewer --pr <対象PR番号>` を使用する（判定 Status は `--status Approved` または `--status "Changes requested"` を CLI 引数で明示的に指定する）。レビュワーは `main` に留まったまま直接 PR 番号を指定して投稿できるため、ブランチ切り替え（`git switch`）は不要である：
 
 ```bash
-# 判定 Status を CLI オプションで指定して投稿
-bash scripts/review-sync.sh comment reviewer --status Approved
+# 判定 Status と対象 PR 番号を CLI オプションで指定して投稿
+bash scripts/review-sync.sh comment reviewer --pr <対象PR番号> --status Approved
 # または
-bash scripts/review-sync.sh comment reviewer --status "Changes requested"
-
-# 投稿後は直ちに main へ戻す（同一 worktree 共有のため必須）
-git switch main
+bash scripts/review-sync.sh comment reviewer --pr <対象PR番号> --status "Changes requested"
 ```
 
 - 原則として `--comment` でレビュー結果を投稿する（Blocking 指摘時も `--request-changes` は使用せず、`- Status: Changes requested` を含む `--comment` で表明する）。
@@ -52,6 +50,7 @@ git switch main
 ### 2.4 改ざん検知と安全制約
 
 - **`scripts/review-sync.sh` や `scripts/lib/` 変更時の改ざん検知対応**:
+  - ※ レビュワーが `main` に留まったまま `--pr` オプションで実行する場合は作業ツリーに差分が生じないため、通常この例外対応は不要である。PR ブランチ上で直接テスト実行・投稿を行う場合のみ以下が該当する：
   - PR が `scripts/lib/*.md`（ドキュメントのみ）を変更している場合は、`git diff --quiet origin/main -- scripts/review-sync.sh scripts/lib/*.py`（実行ファイル）および未追跡ファイルがないことを確認した上で、`ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh comment reviewer ...` で投稿する（投稿本文にもその理由を明記する）。
   - 実行コード（`*.py` や `review-sync.sh`）自体を変更している PR のブランチでは `review-sync.sh` を実行せず、内部レビュー（RV）記録を正本として人間に報告する。
 - **安全制約（承認とマージの分離）**:

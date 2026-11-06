@@ -98,22 +98,23 @@ check_tamper
 usage() {
   cat <<'EOF' >&2
 使用方法:
-  bash scripts/review-sync.sh pull <reviewer|reviewee>
-  bash scripts/review-sync.sh comment <reviewer|reviewee> [オプション...]
+  bash scripts/review-sync.sh pull <reviewer|reviewee> [--pr <PR番号>]
+  bash scripts/review-sync.sh comment <reviewer|reviewee> [--pr <PR番号>] [オプション...]
   bash scripts/review-sync.sh check <reviewer|reviewee> [オプション...]
   bash scripts/review-sync.sh pull-issue <reviewer|reviewee> <issue-number>
   bash scripts/review-sync.sh comment-issue <reviewer|reviewee> <issue-number> [オプション...]
   bash scripts/review-sync.sh pr-create [gh pr create のオプション...]
 
 説明:
-  pull          : PR から最新レビューを取り込みドラフトに展開 (PR番号は自動解決)
-  comment       : ドラフトを PR レビューコメントとして送信 (PR番号は自動解決)
+  pull          : PR から最新レビューを取り込みドラフトに展開 (PR番号は自動解決または --pr で指定)
+  comment       : ドラフトを PR レビューコメントとして送信 (PR番号は自動解決または --pr で指定)
   check         : ドラフトの構文・メタデータ・機密情報を静的検証 (オフライン実行)
   pull-issue    : Issue から指摘・回答を取り込みドラフトに展開
   comment-issue : Issue へドラフト内容をコメントとして送信
   pr-create     : GitHub App (Bot) 認証を利用して PR を作成 (自 PR 制限を回避)
 
 オプション:
+  --pr <N>      : 対象 PR 番号を明示指定 (省略時はカレントブランチから自動解決)
   --status <val>: reviewer の判定 Status (Approved または 'Changes requested') を指定 (reviewer 必須)
   --round <N>   : 送信時の Round 番号を明示的に指定 (comment / comment-issue のみ有効)
 EOF
@@ -131,6 +132,7 @@ ROLE=""
 ISSUE_NUMBER=""
 STATUS_ARG=""
 ROUND_ARG=""
+PR_ARG=""
 
 parse_options() {
   while [[ $# -gt 0 ]]; do
@@ -155,6 +157,22 @@ parse_options() {
         ROUND_ARG="$2"
         shift 2
         ;;
+      --pr)
+        if [[ "${SUBCOMMAND}" == "check" || "${SUBCOMMAND}" =~ -issue$ ]]; then
+          echo "エラー: ${SUBCOMMAND} コマンドでは --pr オプションは使用できません。" >&2
+          exit 1
+        fi
+        if [[ $# -lt 2 ]]; then
+          echo "エラー: --pr には PR 番号 (正の整数) が必要です。" >&2
+          exit 1
+        fi
+        if [[ ! "$2" =~ ^[0-9]+$ ]]; then
+          echo "エラー: --pr には半角数字を指定してください (指定値: $2)" >&2
+          exit 1
+        fi
+        PR_ARG="$2"
+        shift 2
+        ;;
       *)
         echo "エラー: 未知のオプション '$1' です。" >&2
         usage
@@ -168,15 +186,17 @@ case "${SUBCOMMAND}" in
     # PR 作成: 引数はそのまま gh pr create へ渡す
     ;;
   pull)
-    if [[ $# -ne 1 ]]; then
-      echo "エラー: サブコマンド 'pull' は引数 <role> のみ受け付けます (PR番号は自動解決されます)。" >&2
+    if [[ $# -lt 1 ]]; then
+      echo "エラー: サブコマンド 'pull' には引数 <role> が必要です。" >&2
       usage
     fi
     ROLE="$1"
+    shift
     if [[ "${ROLE}" != "reviewer" && "${ROLE}" != "reviewee" ]]; then
       echo "エラー: ロールは 'reviewer' または 'reviewee' を指定してください (指定値: ${ROLE})" >&2
       exit 1
     fi
+    parse_options "$@"
     ;;
   comment|check)
     if [[ $# -lt 1 ]]; then
@@ -378,8 +398,13 @@ do_check() {
   echo "OK: check passed (${ROLE})"
 }
 
-# PR 番号の自動解決
+# PR 番号の解決 (明示指定時はそのまま使用、省略時は自動解決)
 resolve_pr_number() {
+  if [[ -n "${PR_ARG}" ]]; then
+    echo "${PR_ARG}"
+    return 0
+  fi
+
   local pr_json pr_err_tmp
   pr_err_tmp="$(create_temp_file "review-pr-err")"
   trap 'rm -f "${pr_err_tmp}"' RETURN EXIT
@@ -527,7 +552,7 @@ EOF
   if [[ "${is_issue}" == "1" ]]; then
     run_gh issue comment "${target_id}" --body-file "${temp_body}"
   else
-    run_gh pr review --comment --body-file "${temp_body}"
+    run_gh pr review "${target_id}" --comment --body-file "${temp_body}"
   fi
 
   # 送信成功後の退避 (同一秒送信時の上書き防止)
