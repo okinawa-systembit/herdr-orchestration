@@ -676,7 +676,7 @@ Requester の `context.worktree.path` と Worker の `worker.cwd` は異なっ�
 > **RV018 B-2 の解消とワーカー側スコープ導出の読み取り専用規則（P1-1 対応）**:
 > 上表の行 3 の通り、**Requester（`caller == requester.pane_id`）が `task-status` または `task-result` を実行した場合は、`caller_role_in_task: "requester"` として Requester 自身の `context.worktree.path` と照合されるため、`verified = true` となり正常に完了確認・処理続行できる**（誤って停止しない）。
 > 一方、もし Worker として作業しようとしたエージェントが実際には `requester` や無関係な `"other"` ペインであった場合や、`cwd` が変わっていた場合は、即座に不一致を検知して停止できる。
-> また、上表の行 2 における「ワーカー側 `worker.cwd` から解決したスコープ」の導出は、**完全な読み取り専用**（Git 管理下なら `get_repository_identity`、Non-Git なら `derive_directory_scope_id`）で行い、新規スコープファイルの生成（`create_if_missing=True`）や Role Binding ファイルの更新は一切行わない。スコープファイルが存在しない場合や未登録の場合は単に一致候補なし（`verified = false`）として安全停止する。
+> また、上表の行 2 における「ワーカー側 `worker.cwd` から解決したスコープ」の導出は、**完全な読み取り専用**（Git 管理下なら `get_repository_identity`、Non-Git なら `derive_directory_scope_id`）で行い、新規スコープファイルの生成（`create_if_missing=True`）や Role Binding ファイルの更新は一切行わない。スコープファイルが存在しない場合や未登録の場合は当該スコープからの追加候補なしとして扱い、全体の判定は既存の規則（依頼元スコープ・グローバルロール・Pattern A 解決）に従う。
 
 <a id="sec-7-4"></a>
 
