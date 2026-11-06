@@ -156,7 +156,7 @@ repository 固有の操作をカプセル化する CLI として `scripts/repo-r
 | ---------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
 | `init`           | 補助状態の初期化・検証                        | `--worktree <path>`, `--abandon-old-tasks`（不確定時の強制初期化）, `--force`（既存状態の上書き初期化）                              |
 | `status`         | 現在の補助状態・worktree 登録・最新採番を表示 | 出力は JSON または人向けサマリ                                                                                                       |
-| `request-create` | 配送依頼ファイルを一時領域に原子的作成        | `--tier <LIGHT\|STANDARD\|DEEP>`, `--target-commit <SHA>`, `--summary <text>`, `--output-token`（作成パス出力）                      |
+| `request-create` | 配送依頼ファイルを一時領域に原子的作成        | `--tier <LIGHT\|STANDARD\|DEEP\|WIDE>`, `--target-commit <SHA>`, `--summary <text>`, `--output-token`（作成パス出力）                |
 | `record-save`    | 採番、個別記録の原子的保存、INDEX更新         | `--task-id <ID>`, `--body-file <path>` (または `--body <text>`), `--outcome <GO\|要修正\|NO-GO>` (必須), `--task-status <status>` 等 |
 | `reindex`        | 個別記録から INDEX.md を再生成                | `--instance-id <ID>`（省略時は現 active instance）                                                                                   |
 

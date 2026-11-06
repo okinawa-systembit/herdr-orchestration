@@ -147,7 +147,7 @@ def parse_review_metadata(file_path: Path) -> dict[str, Any]:
                     if k in meta:
                         meta[k] = v
             # Backwards compatibility: if outcome not set but status is a review outcome
-            if meta["outcome"] == "UNKNOWN" and meta["status"] in ("GO", "要修正", "NO-GO", "CONDITIONAL GO"):
+            if meta["outcome"] == "UNKNOWN" and meta["status"] in ("GO", "要修正", "NO-GO"):
                 meta["outcome"] = meta["status"]
                 meta["status"] = "succeeded"
 
@@ -333,7 +333,6 @@ def record_save_atomic(
     *,
     outcome: str = "GO",
     task_status: str = "succeeded",
-    result_status: str | None = None,
     target_commit: str = "unknown",
 ) -> tuple[str, Path, bool]:
     """
@@ -341,11 +340,6 @@ def record_save_atomic(
     Returns (review_id, file_path, is_new).
     Raises TaskRecordConflictError if task_id already recorded with different content, commit, or outcome.
     """
-    if result_status is not None:
-        if result_status in ("GO", "要修正", "NO-GO", "CONDITIONAL GO"):
-            outcome = result_status
-        else:
-            task_status = result_status
     current_worktree = Path(current_worktree).resolve()
     state = load_state(git_common_dir)
     if state is None:

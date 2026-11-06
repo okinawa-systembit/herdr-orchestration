@@ -44,7 +44,7 @@ herdr-orchestrator --help
 
 ### 2.1 タスク受信確認（Worker: §11.4）
 
-[worker-receive.md](../../../skills/herdr-orchestrator/references/worker-receive.md) に従う（prompt 単体を信頼せず Registry を正本とする）。
+[worker-receive.md](../../../skills/herdr-orchestrator/references/worker-receive.md)（[設計 §11.4](../../../docs/herdr-orchestrator/06-results-and-workflows.md#sec-11-4)）に従う（prompt 単体を信頼せず Registry を正本とする）。
 
 1. `herdr-orchestrator task-status <task.id>` を実行する。
 2. `recipient_verification.verified == true` かつ `recipient_verification.caller_role_in_task == "worker"`、`dispatch.status`（`sent` / `uncertain`）、および `worker.cwd` 一致を確認してから作業を開始する（不一致時は作業せず人間に報告して停止）。
@@ -98,7 +98,7 @@ rm -f .input/tmp/pr-body.md
       --summary "<200字以内の要約（PR番号・ローカルレビューRV番号等）>"
     ```
   - `--result-ref` には URL を指定できないため、リポジトリ内の相対パス（実装依頼書下書きや相談回答ファイル等）を指定するか、該当ファイルがない場合は `--summary` のみで提出する。
-- **Requester（completion 後: §11.4 / §9.12）**:
+- **Requester（completion 後: [§11.4](../../../docs/herdr-orchestrator/06-results-and-workflows.md#sec-11-4) / [§9.12](../../../docs/herdr-orchestrator/05-completion-and-recovery.md#sec-9-12)）**:
   - [requester-receive.md](../../../skills/herdr-orchestrator/references/requester-receive.md) に従い、`herdr-orchestrator task-status <task.id>` / `task-result <task.id>` で result が terminal（`succeeded` / `failed`）になったことを確認してから次作業を開始する。
 
 ---
@@ -230,11 +230,11 @@ rm -f .input/tmp/pr-body.md
 | ロール                 | 書くもの                                                                                                                      | 手段                                                                                                                                                                                    |
 | :--------------------- | :---------------------------------------------------------------------------------------------------------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **メイン**             | サブ Issue・Finding Issue の起票、親 Issue の進捗管理・コメント                                                               | 起票: [review-finding](../review-finding/SKILL.md) の手順（個人の `gh issue create`）<br>コメント: `bash scripts/review-sync.sh comment-issue`（Bot）                                   |
-| **設計担当・実装担当** | PR の作成と本文（`Closes #<対象Issue>`、`Refs #<親Issue>`）                                                                   | `bash scripts/review-sync.sh pr-create`（Bot）<br>※ Issue への個別の完了報告コメントは不要（PR のリンクで代替）                                                                         |
+| **設計担当・実装担当** | PR の作成と本文（通常の設計・実装 Issue は `Closes #<対象Issue>`、親 Issue や Finding Issue は `Refs #<Issue>`）              | `bash scripts/review-sync.sh pr-create`（Bot）<br>※ Issue への個別の完了報告コメントは不要（PR のリンクで代替）                                                                         |
 | **レビュワー**         | PR への最終判定コメント（1 ラウンドに 1 件、内部レビュー RV の経緯要約 3〜5 行を含む）、および明示指示時の Finding Issue 投稿 | PR 判定: `bash scripts/review-sync.sh comment reviewer --status <Approved\|"Changes requested">`（Bot）<br>Finding Issue（明示指示時のみ）: [repo-review](../repo-review/SKILL.md) 手順 |
 | **全員**               | 読み取り（`view` / `list` / `checks` / `diff` / `api` の GET）                                                                | 個人の `gh` CLI でよい                                                                                                                                                                  |
 
-- **人間のみが行う操作**: PR の公式 **Approve（承認）**、**マージ（`gh pr merge`）**、および **Issue や PR のクローズ・再オープン・ラベル変更**は人間が行う（※ PR 本文の `Closes #N` によるマージ時の自動クローズは人間の操作に含まれる。初回 20 Scope レビューにおける Scope Issue クローズ等の明示手順は [repo-review](../repo-review/SKILL.md) に従う）。なお、ルールセットに緊急用の `bypass_actors`（`internal-dev` Team 等）が設定されている環境では、個人認証の `gh pr merge --admin` 等が技術的に通り得るため、エージェントが `gh pr merge` や `--admin` を使用することは厳禁とする（bypass の有無は人間の管理判断に委ねる）。
+- **人間のみが行う操作**: PR の公式 **Approve（承認）**、**マージ（`gh pr merge`）**、および **Issue や PR のクローズ・再オープン・ラベル変更**は人間が行う（※ 通常 Issue は PR 本文の `Closes #N` によるマージ時の自動クローズを含み、Finding Issue は原則 `Refs #N` として PR マージ・再検証完了後に人間がクローズする。[review-finding](../review-finding/SKILL.md) 参照）。なお、ルールセットに緊急用の `bypass_actors`（`internal-dev` Team 等）が設定されている環境では、個人認証の `gh pr merge --admin` 等が技術的に通り得るため、エージェントが `gh pr merge` や `--admin` を使用することは厳禁とする（bypass の有無は人間の管理判断に委ねる）。
 
 ---
 
@@ -257,7 +257,6 @@ rm -f .input/tmp/pr-body.md
 | この差分の最終レビュー結果、マージしてよいかの判定  | **PR コメント**（`review-sync.sh comment reviewer`）           | 「この変更をどうするか」。内部レビュー（RV）の経緯を 3〜5 行で要約して載せる（※ PR 本文を書き換えてレビュー結果を書かない） |
 | 特定の行への指摘                                    | **PR のインラインコメント**                                    |                                                                                                                             |
 | `defer` した指摘、PR の範囲外で見つけた不具合       | **Finding Issue**（PR から番号でリンク）                       | PR を閉じても残る必要がある（起票は [review-finding](../review-finding/SKILL.md)）                                          |
-| 初回 20 Scope レビュー                              | **その Scope の Issue**                                        | 差分 PR がない監査レビューのため例外として現行運用を継続                                                                    |
 
 ---
 
