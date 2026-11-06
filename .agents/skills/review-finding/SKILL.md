@@ -103,15 +103,13 @@ GitHub への書き込み（`gh issue create`）を実行する前に、以下�
 gh issue create \
   --title "[Finding] <PR/ScopeID>-<連番>: <指摘概要>" \
   --body-file .input/tmp/finding-<id>.md \
-  --label "review-finding,severity:<pX>,blocking:yes"
-rm -f .input/tmp/finding-<id>.md
+  --label "review-finding,severity:<pX>,blocking:yes,status:ready-to-fix" && rm -f .input/tmp/finding-<id>.md
 
 # Blocking: No の場合（通常の P2, P3）
 gh issue create \
   --title "[Finding] <PR/ScopeID>-<連番>: <指摘概要>" \
   --body-file .input/tmp/finding-<id>.md \
-  --label "review-finding,severity:<pX>"
-rm -f .input/tmp/finding-<id>.md
+  --label "review-finding,severity:<pX>,status:ready-to-fix" && rm -f .input/tmp/finding-<id>.md
 ```
 
 ### 2. 検出元への相互リンク記録 (RF-01)

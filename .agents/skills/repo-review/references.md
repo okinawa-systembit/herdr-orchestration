@@ -340,7 +340,7 @@ GitHub 管理対象レビュー（Pull Request レビュー等）において、
 
 ### 6. レビューイ回答ドラフトテンプレート（`.input/review/reviewee-draft.md` 用）
 
-※ テンプレート主導アプローチおよび制御値の完全分離（[基本方針: 指針 9](../../../docs/core-principles.md#guideline-9)）に基づき、外側の制御値（`<!-- review-sync ... -->` マーカーや `- Role:` / `- Round:` ヘッダー）は `scripts/review-sync.sh` が送信時に自動付与します。エージェントは本文に制御値やマーカーを手書きせず、以下のテンプレートに沿って回答（Decision、レビューイ評価、対応内容/理由）を自由記述として記述します。
+※ テンプレート主導アプローチおよび制御値の完全分離（[基本方針: 指針 9](../../../docs/core-principles.md#guideline-9)）に基づき、外側の制御値（送信時に `scripts/review-sync.sh` が自動付与する `<!-- review-sync ... -->` マーカー等）は機械側で処理されます。エージェントは本文に制御値（`Role` / `Round` 等）やマーカーを手書きせず、以下のテンプレートに沿って回答（Decision、レビューイ評価、対応内容/理由）を自由記述として記述します。
 
 ```markdown
 # レビュー指摘への回答 (PR #<pr_number>)
