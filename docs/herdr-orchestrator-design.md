@@ -26,7 +26,7 @@
 
 - [Repository Identity UUID化 設計書 (Issue #50)](herdr-orchestrator-identity-uuid.md): リモート origin 未設定のローカルリポジトリへの対応および UUID v4 移行
 - [Task 一覧参照コマンド `task-list` 設計書 (Issue #62)](herdr-orchestrator-task-list.md): Task Registry に残存する task を読み取り専用で一覧取得する公開 CLI
-- [ワークスペース跨ぎ配送・グローバルロール・日本語ロール名・ペイン自動追従 設計書 (Issue #74)](herdr-orchestrator-cross-workspace.md): 別ワークスペース専任エージェント連携、Non-Git 対応、日本語ロール名、ペイン自動追従と人間向け UI 識別表示
+- [ワークスペース跨ぎ配送・グローバルロール・日本語ロール名・ペイン自動追従 設計書 (Issue #74, #151)](herdr-orchestrator-cross-workspace.md): 別ワークスペース専任エージェント連携、Non-Git 対応、日本語ロール名、ペイン自動追従、プロジェクトカタログと `--project` によるプロジェクト跨ぎ配送、人間向け UI 識別表示
 
 ## 基本方針
 
