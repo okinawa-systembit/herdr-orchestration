@@ -26,7 +26,7 @@ Herdr Orchestrator の設計書を**作成・変更・修正したら、作業�
 
 1. 内容の編集を終える（章番号・アンカー `sec-N` / `sec-N-M`、目次リンクなど）。
 2. 整形する: `npm run format:md`
-3. 確認する: `npm run check:md`（Prettier + markdownlint-cli2）
+3. 確認する: `npm run check:md`（Prettier + markdownlint-cli2 + check_docs_status + check_markdown_links）
 4. `check:md` が失敗したら原因を直し、2–3 を繰り返す。**成功するまでタスク完了にしない。**
 
 `node_modules` が無い場合は先に `npm ci` する（依存の新規追加時以外は `npm install` を使わない）。
