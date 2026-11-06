@@ -32,7 +32,7 @@ herdr-orchestrator --help
 - **同一 worktree 直列運用（案 B）**:
   - 本リポジトリでは、`result-submit --result-ref`（Requester worktree 基準での成果物存在検査）および `scripts/repo-review-helper`（単一 worktree 固定状態）との整合性を保つため、全ロールが同一の Git worktree を共有する。
   - **ブランチを切り替える作業は同時に 1 つだけ**とし、`メイン` が直列にスケジュール管理する。
-    - **ブランチを切り替える作業（直列）**: `設計担当` の設計ブランチ作業、`実装担当` の実装ブランチ作業、および `レビュワー` が PR 最終判定コメントを投稿する際の一時的ブランチ switch（[repo-review §A](../repo-review/SKILL.md)）。
+    - **ブランチを切り替える作業（直列）**: `設計担当` の設計ブランチ作業、`実装担当` の実装ブランチ作業（※ `レビュワー` は `review-sync.sh` の `--pr` オプションにより `main` に留まったまま作業するためブランチ switch は行わない）。
     - **作業ツリーを変更しない作業（並行可）**: `git archive` 等でスクラッチ展開して検証するローカルレビュー（RV）、およびエージェント間相談（[#discussion](#discussion)）。
   - **返却時の clean & `main` 復帰義務**: 各ロールは、ブランチを切り替える作業を終えたら、`result-submit`（または完了報告）を実行する直前に必ず **`git switch main`** を実行し、`git status` が空（clean）であることを確認してからタスクを返却する（未コミット差分のままレビューを依頼する特例時を除く）。
 
@@ -231,12 +231,12 @@ rm -f .input/tmp/pr-body.md
 
 各ロールが GitHub に書き込みを行う際は、以下の手段に従う：
 
-| ロール                 | 書くもの                                                                                                                      | 手段                                                                                                                                                                                    |
-| :--------------------- | :---------------------------------------------------------------------------------------------------------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **メイン**             | サブ Issue・Finding Issue の起票、親 Issue の進捗管理・コメント                                                               | 起票: [review-finding](../review-finding/SKILL.md) の手順（個人の `gh issue create`）<br>コメント: `bash scripts/review-sync.sh comment-issue`（Bot）                                   |
-| **設計担当・実装担当** | PR の作成と本文（通常の設計・実装 Issue は `Closes #<対象Issue>`、親 Issue や Finding Issue は `Refs #<Issue>`）              | `bash scripts/review-sync.sh pr-create`（Bot）<br>※ Issue への個別の完了報告コメントは不要（PR のリンクで代替）                                                                         |
-| **レビュワー**         | PR への最終判定コメント（1 ラウンドに 1 件、内部レビュー RV の経緯要約 3〜5 行を含む）、および明示指示時の Finding Issue 投稿 | PR 判定: `bash scripts/review-sync.sh comment reviewer --status <Approved\|"Changes requested">`（Bot）<br>Finding Issue（明示指示時のみ）: [repo-review](../repo-review/SKILL.md) 手順 |
-| **全員**               | 読み取り（`view` / `list` / `checks` / `diff` / `api` の GET）                                                                | 個人の `gh` CLI でよい                                                                                                                                                                  |
+| ロール                 | 書くもの                                                                                                                      | 手段                                                                                                                                                                                                      |
+| :--------------------- | :---------------------------------------------------------------------------------------------------------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **メイン**             | サブ Issue・Finding Issue の起票、親 Issue の進捗管理・コメント                                                               | 起票: [review-finding](../review-finding/SKILL.md) の手順（個人の `gh issue create`）<br>コメント: `bash scripts/review-sync.sh comment-issue`（Bot）                                                     |
+| **設計担当・実装担当** | PR の作成と本文（通常の設計・実装 Issue は `Closes #<対象Issue>`、親 Issue や Finding Issue は `Refs #<Issue>`）              | `bash scripts/review-sync.sh pr-create`（Bot）<br>※ Issue への個別の完了報告コメントは不要（PR のリンクで代替）                                                                                           |
+| **レビュワー**         | PR への最終判定コメント（1 ラウンドに 1 件、内部レビュー RV の経緯要約 3〜5 行を含む）、および明示指示時の Finding Issue 投稿 | PR 判定: `bash scripts/review-sync.sh comment reviewer --pr <対象PR番号> --status <Approved\|"Changes requested">`（Bot）<br>Finding Issue（明示指示時のみ）: [repo-review](../repo-review/SKILL.md) 手順 |
+| **全員**               | 読み取り（`view` / `list` / `checks` / `diff` / `api` の GET）                                                                | 個人の `gh` CLI でよい                                                                                                                                                                                    |
 
 - **人間のみが行う操作**: PR の公式 **Approve（承認）**、**マージ（`gh pr merge`）**、および **Issue や PR のクローズ・再オープン・ラベル変更**は人間が行う（※ 通常 Issue は PR 本文の `Closes #N` によるマージ時の自動クローズを含み、Finding Issue は原則 `Refs #N` として PR マージ・再検証完了後に人間がクローズする。[review-finding](../review-finding/SKILL.md) 参照）。なお、ルールセットに緊急用の `bypass_actors`（`internal-dev` Team 等）が設定されている環境では、個人認証の `gh pr merge --admin` 等が技術的に通り得るため、エージェントが `gh pr merge` や `--admin` を使用することは厳禁とする（bypass の有無は人間の管理判断に委ねる）。
 

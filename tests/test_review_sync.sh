@@ -53,7 +53,7 @@ if [[ "$*" == *"pr view --json number,url"* ]]; then
   fi
   echo '{"number": 2, "url": "https://github.com/example/repo/pull/2"}'
   exit 0
-elif [[ "$*" == *"pr review --comment --body-file"* ]]; then
+elif [[ "$*" == *"pr review "* && "$*" == *"--comment --body-file"* ]]; then
   for arg in "$@"; do
     if [[ -f "$arg" ]]; then
       cat "$arg" > "${MOCK_LAST_BODY:-/dev/null}"
@@ -1536,6 +1536,134 @@ if [[ "${COMMENT_WARN_OUT}" == *"警告: state.json 更新失敗"* ]] && [[ "${C
   pass "Emit stderr warning on state.json write failure without failing comment (RV096 P3-1)"
 else
   fail "Emit stderr warning on state.json write failure" "Output: ${COMMENT_WARN_OUT}"
+fi
+
+# ---------------------------------------------------------------------------
+# Test 39: 引数検証 - --pr オプションの構文チェック (Issue #142)
+# ---------------------------------------------------------------------------
+TEST_ENV=$(setup_mock_env "t39")
+cd "${TEST_ENV}/worktree"
+
+# --pr に引数がない場合
+if PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh comment reviewer --status Approved --pr 2>/dev/null; then
+  fail "Reject --pr without argument" "Expected non-zero exit code"
+else
+  pass "Reject --pr without argument (Issue #142)"
+fi
+
+# --pr に非数値が指定された場合
+if PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh comment reviewer --status Approved --pr abc 2>/dev/null; then
+  fail "Reject --pr with non-numeric value" "Expected non-zero exit code"
+else
+  pass "Reject --pr with non-numeric value (Issue #142)"
+fi
+
+# check コマンドで --pr が指定された場合
+if PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh check reviewer --status Approved --pr 123 2>/dev/null; then
+  fail "Reject --pr option for check subcommand" "Expected non-zero exit code"
+else
+  pass "Reject --pr option for check subcommand (Issue #142)"
+fi
+
+# pull-issue / comment-issue コマンドで --pr が指定された場合
+if PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh comment-issue reviewer 100 --status Approved --pr 123 2>/dev/null; then
+  fail "Reject --pr option for comment-issue subcommand" "Expected non-zero exit code"
+else
+  pass "Reject --pr option for comment-issue subcommand (Issue #142)"
+fi
+
+# ---------------------------------------------------------------------------
+# Test 40: pull - --pr 明示指定時にブランチ解決をスキップして指定 PR を取得 (Issue #142)
+# ---------------------------------------------------------------------------
+TEST_ENV=$(setup_mock_env "t40")
+cd "${TEST_ENV}/worktree"
+MOCK_LOG="${TEST_ENV}/gh_log.txt"
+
+# カレントブランチの PR view が失敗する状況でも --pr 42 で pull が成功すること
+PULL_OUT=$(MOCK_GH_LOG="${MOCK_LOG}" MOCK_PR_NOT_FOUND=1 PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh pull reviewer --pr 42 2>&1 || true)
+STATE_FILE="${TEST_ENV}/worktree/.input/review/state.json"
+
+if [[ -f "${STATE_FILE}" ]] && grep -q '"target_id": "42"' "${STATE_FILE}" && grep -q "repos/example/repo/pulls/42/comments" "${MOCK_LOG}"; then
+  pass "Pull succeeds with --pr <N> regardless of branch PR presence (Issue #142)"
+else
+  fail "Pull succeeds with --pr <N>" "Output: ${PULL_OUT}, Log: $(cat "${MOCK_LOG}" 2>/dev/null || true)"
+fi
+
+# ---------------------------------------------------------------------------
+# Test 41: comment - --pr 明示指定時に指定 PR 番号へレビューコメントを送信 (Issue #142)
+# ---------------------------------------------------------------------------
+TEST_ENV=$(setup_mock_env "t41")
+cd "${TEST_ENV}/worktree"
+DRAFT_PATH="${TEST_ENV}/worktree/.input/review/reviewer-draft.md"
+LAST_BODY="${TEST_ENV}/last_body.txt"
+MOCK_LOG="${TEST_ENV}/gh_log.txt"
+
+cat <<'EOF' > "${DRAFT_PATH}"
+# Review Draft
+- Role: reviewer
+## Summary
+LGTM for PR 42.
+EOF
+
+# カレントブランチの PR view が失敗する状況でも --pr 42 --status Approved --round 1 で送信成功すること
+COMMENT_OUT=$(MOCK_GH_LOG="${MOCK_LOG}" MOCK_LAST_BODY="${LAST_BODY}" MOCK_PR_NOT_FOUND=1 PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh comment reviewer --pr 42 --status Approved --round 1 2>&1 || true)
+
+if [[ "${COMMENT_OUT}" == *"OK: 送信が完了し"* ]] && grep -q "mock-gh pr review 42 --comment --body-file" "${MOCK_LOG}"; then
+  pass "Comment succeeds with --pr <N> targeting specific PR directly (Issue #142)"
+else
+  fail "Comment succeeds with --pr <N>" "Output: ${COMMENT_OUT}, Log: $(cat "${MOCK_LOG}" 2>/dev/null || true)"
+fi
+
+# ---------------------------------------------------------------------------
+# Test 42: comment reviewee - --pr 明示指定時に reviewee が指定 PR へコメント送信 (Issue #142)
+# ---------------------------------------------------------------------------
+TEST_ENV=$(setup_mock_env "t42")
+cd "${TEST_ENV}/worktree"
+DRAFT_PATH="${TEST_ENV}/worktree/.input/review/reviewee-draft.md"
+LAST_BODY="${TEST_ENV}/last_body.txt"
+MOCK_LOG="${TEST_ENV}/gh_log.txt"
+
+cat <<'EOF' > "${DRAFT_PATH}"
+# Reviewee Draft
+- Role: reviewee
+## Summary
+Responses for PR 42.
+EOF
+
+COMMENT_OUT=$(MOCK_GH_LOG="${MOCK_LOG}" MOCK_LAST_BODY="${LAST_BODY}" MOCK_PR_NOT_FOUND=1 PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh comment reviewee --pr 42 --round 2 2>&1 || true)
+
+if [[ "${COMMENT_OUT}" == *"OK: 送信が完了し"* ]] && grep -q "mock-gh pr review 42 --comment --body-file" "${MOCK_LOG}"; then
+  pass "Comment reviewee succeeds with --pr <N> targeting specific PR directly (Issue #142)"
+else
+  fail "Comment reviewee succeeds with --pr <N>" "Output: ${COMMENT_OUT}, Log: $(cat "${MOCK_LOG}" 2>/dev/null || true)"
+fi
+
+# ---------------------------------------------------------------------------
+# Test 43: comment - state.json の対象と --pr が不一致の場合にエラー終了すること (RV127 P3-3 / Issue #142)
+# ---------------------------------------------------------------------------
+TEST_ENV=$(setup_mock_env "t43")
+cd "${TEST_ENV}/worktree"
+DRAFT_PATH="${TEST_ENV}/worktree/.input/review/reviewer-draft.md"
+LAST_BODY="${TEST_ENV}/last_body.txt"
+MOCK_LOG="${TEST_ENV}/gh_log.txt"
+
+# PR 42 を pull して state.json に target_id: "42" を記録させる
+MOCK_GH_LOG="${MOCK_LOG}" MOCK_PR_NOT_FOUND=1 PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh pull reviewer --pr 42 >/dev/null 2>&1
+
+cat <<'EOF' > "${DRAFT_PATH}"
+# Review Draft
+- Role: reviewer
+## Summary
+Draft body.
+EOF
+
+# --round を指定せず --pr 43 に comment を試行した場合、state.json (42) との不一致で停止すること
+COMMENT_MISMATCH_OUT=$(MOCK_GH_LOG="${MOCK_LOG}" MOCK_LAST_BODY="${LAST_BODY}" MOCK_PR_NOT_FOUND=1 PATH="${TEST_ENV}/bin:${PATH}" ALLOW_REVIEW_SYNC_DEV=1 bash scripts/review-sync.sh comment reviewer --pr 43 --status Approved 2>&1 || true)
+
+if [[ "${COMMENT_MISMATCH_OUT}" == *"エラー: state.json の対象"* ]] && [[ "${COMMENT_MISMATCH_OUT}" == *"が現在の送信先 (pr:43) と一致しません"* ]]; then
+  pass "Fail-closed when state.json target_id mismatches --pr argument without --round (RV127 P3-3)"
+else
+  fail "Fail-closed on state.json target_id mismatch" "Output: ${COMMENT_MISMATCH_OUT}"
 fi
 
 echo "=========================================="

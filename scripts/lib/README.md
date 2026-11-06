@@ -8,14 +8,14 @@
 
 `scripts/review-sync.sh` は以下のサブコマンドを提供します（エージェントによる PR 作成手順の正本およびロール別 GitHub 書き込みルールは **[repo-workflow](../../.agents/skills/repo-workflow/SKILL.md#pr-create)** を参照）：
 
-| サブコマンド        | 書式                                                                               | 説明                                                                                                                                                        |
-| :------------------ | :--------------------------------------------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **`pr-create`**     | `pr-create [gh pr create のオプション...]`                                         | GitHub App (Bot) 認証を利用して PR を安全に作成（自 PR 制限を回避。運用手順は [repo-workflow](../../.agents/skills/repo-workflow/SKILL.md#pr-create) 参照） |
-| **`pull`**          | `pull <reviewer\|reviewee>`                                                        | PR から最新レビューを取り込みドラフトに展開（PR 番号はブランチから自動解決）                                                                                |
-| **`comment`**       | `comment <reviewer\|reviewee> [--status <val>] [--round <N>]`                      | ドラフト内容を PR レビューコメントとして送信（PR 番号はブランチから自動解決。`reviewer` は `--status Approved\|"Changes requested"` 必須）                  |
-| **`check`**         | `check <reviewer\|reviewee> [--status <val>]`                                      | ドラフトの構文・メタデータ・機密情報を静的検証（オフライン実行。`reviewer` は `--status` 必須）                                                             |
-| **`pull-issue`**    | `pull-issue <reviewer\|reviewee> <issue-number>`                                   | Issue から指摘・回答を取り込みドラフトに展開                                                                                                                |
-| **`comment-issue`** | `comment-issue <reviewer\|reviewee> <issue-number> [--status <val>] [--round <N>]` | Issue へドラフト内容をコメントとして送信（`reviewer` は `--status Approved\|"Changes requested"` 必須）                                                     |
+| サブコマンド        | 書式                                                                               | 説明                                                                                                                                                                 |
+| :------------------ | :--------------------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`pr-create`**     | `pr-create [gh pr create のオプション...]`                                         | GitHub App (Bot) 認証を利用して PR を安全に作成（自 PR 制限を回避。運用手順は [repo-workflow](../../.agents/skills/repo-workflow/SKILL.md#pr-create) 参照）          |
+| **`pull`**          | `pull <reviewer\|reviewee> [--pr <PR番号>]`                                        | PR から最新レビューを取り込みドラフトに展開（PR 番号はブランチから自動解決、または `--pr` で明示指定）                                                               |
+| **`comment`**       | `comment <reviewer\|reviewee> [--pr <PR番号>] [--status <val>] [--round <N>]`      | ドラフト内容を PR レビューコメントとして送信（PR 番号はブランチから自動解決、または `--pr` で明示指定。`reviewer` は `--status Approved\|"Changes requested"` 必須） |
+| **`check`**         | `check <reviewer\|reviewee> [--status <val>]`                                      | ドラフトの構文・メタデータ・機密情報を静的検証（オフライン実行。`reviewer` は `--status` 必須）                                                                      |
+| **`pull-issue`**    | `pull-issue <reviewer\|reviewee> <issue-number>`                                   | Issue から指摘・回答を取り込みドラフトに展開                                                                                                                         |
+| **`comment-issue`** | `comment-issue <reviewer\|reviewee> <issue-number> [--status <val>] [--round <N>]` | Issue へドラフト内容をコメントとして送信（`reviewer` は `--status Approved\|"Changes requested"` 必須）                                                              |
 
 ---
 

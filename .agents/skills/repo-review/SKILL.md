@@ -22,17 +22,17 @@ description: >-
   - チェックリスト群（基本方針、テスト実効性、Tier、波及確認 D-1〜3、ワイド A-1〜8）: **[references/checklists.md](references/checklists.md)**
   - 依頼側手順（request-create、ローカルコミット一意化）: **[references/requester.md](references/requester.md)**
   - レビューイ手順（即時修正禁止、トリアージ、Decision 3 態）: **[references/reviewee.md](references/reviewee.md)**
-  - GitHub PR 連携（review-sync 手順、ブランチ復帰義務）: **[references/github-pr.md](references/github-pr.md)**
+  - GitHub PR 連携（review-sync 手順、--pr 明示指定）: **[references/github-pr.md](references/github-pr.md)**
 - **ドメイン固有ガイドライン**: Herdr Orchestrator の設計・実装・テストを変更する場合は **[docs/herdr-agent-review-guidelines.md](../../../docs/herdr-agent-review-guidelines.md)**（§2〜§26＋ドメイン固有 Blocking 例）を参照。
 
 ---
 
 ## 運用の責務境界（Herdr 内部レビュー vs GitHub 管理対象）
 
-| レビュー種別           | 正本（Source of Truth） | 格納場所・管理単位                           | 連携インターフェース                                  |
-| :--------------------- | :---------------------- | :------------------------------------------- | :---------------------------------------------------- |
-| **Herdr 内部レビュー** | **ローカル Markdown**   | `docs/reviews/internal/<instance-id>/RV*.md` | `herdr-orchestrator result-submit`                    |
-| **通常 PR レビュー**   | **GitHub PR**           | PR 会話タイムライン / Files Changed          | `bash scripts/review-sync.sh comment reviewer`（Bot） |
+| レビュー種別           | 正本（Source of Truth） | 格納場所・管理単位                           | 連携インターフェース                                           |
+| :--------------------- | :---------------------- | :------------------------------------------- | :------------------------------------------------------------- |
+| **Herdr 内部レビュー** | **ローカル Markdown**   | `docs/reviews/internal/<instance-id>/RV*.md` | `herdr-orchestrator result-submit`                             |
+| **通常 PR レビュー**   | **GitHub PR**           | PR 会話タイムライン / Files Changed          | `bash scripts/review-sync.sh comment reviewer --pr <N>`（Bot） |
 
 - **Herdr 内部レビュー**: エージェント間で完結するローカルループ。既定では GitHub への外部書き込みを行わない。PR の最終判定（マージ可否）のみを GitHub PR コメント（1 ラウンド 1 件、RV 経緯要約を含む）に記録する。
 - **権限境界の原則**: **GitHub Issue のクローズ（`gh issue close`）、再オープン、ラベル変更は人間のみが実施し、エージェントによる実行は厳禁**とする（正本: [repo-workflow §7](../repo-workflow/SKILL.md#github-write-matrix)）。
