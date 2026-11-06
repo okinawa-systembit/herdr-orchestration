@@ -207,7 +207,7 @@ Orchestrator 側で Herdr CLI の変更を追従実装しない。
 
 <a id="sec-23-1"></a>
 
-### 23.1 確認済み事項（実機検証ログ参照）
+### 23.1 実機確認状況（実機検証ログ参照）
 
 各 Agent からの Skill 利用および連携状況の実機確認記録は、単一正本である [実機検証ログ (verification-log.md)](../herdr-orchestrator-verification-log.md#sec-agent-verification) を参照。なお、Codex については共有デーモン無効化が必須である既知の制約が存在する（[Issue #122](https://github.com/okinawa-systembit/herdr-orchestration/issues/122)、[README.md FAQ](../../README.md#q-codex-agent-でタスク受信時に宛先不一致caller_not_task_participantエラーで停止する) を参照）。
 

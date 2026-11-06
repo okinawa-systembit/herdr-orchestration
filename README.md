@@ -307,7 +307,8 @@ curl -fsSL 'https://raw.githubusercontent.com/okinawa-systembit/herdr-orchestrat
   - [herdr](https://herdr.dev) が稼働していること
   - Python 3.10 以上, bash 4.0 以上, curl, tar, flock, git
 - **動作確認した AI Agent**:
-  - Cursor, Antigravity (Agy), Claude Code, Codex 等（実機稼働実績および環境ごとの制約・設定の詳細は、単一正本である [実機検証ログ (verification-log.md)](docs/herdr-orchestrator-verification-log.md#sec-agent-verification) を参照）。
+  - **実機確認済み**: Antigravity (Agy), Claude Code
+  - **その他の Agent**: Cursor, Codex 等の動作状況および環境ごとの制約・設定の詳細は、単一正本である [実機検証ログ (verification-log.md)](docs/herdr-orchestrator-verification-log.md#sec-agent-verification) を参照。
   - **Codex**: 共有デーモンの無効化設定（`daemon_auto_start = false`）が必要です（詳細は[よくある質問](#q-codex-agent-でタスク受信時に宛先不一致caller_not_task_participantエラーで停止する)を参照）。
 
 ---
