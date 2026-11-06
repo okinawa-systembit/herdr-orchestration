@@ -27,7 +27,7 @@ PR を作成するときは必ず `bash scripts/review-sync.sh pr-create`（Bot�
 
 ## Herdr Orchestrator レビュー（本リポジトリ）
 
-sync handoff + `repo-review-helper` CLI + `herdr-orchestrator` CLI: [repo-review](.agents/skills/repo-review/SKILL.md)。Finding起票・品質検証: [review-finding](.agents/skills/review-finding/SKILL.md)。役割別ワークフロー・PR作成・相談・handoff/復旧の共通入口: [repo-workflow](.agents/skills/repo-workflow/SKILL.md)。
+sync handoff + `repo-review-helper` CLI + `herdr-orchestrator` CLI: [repo-review](.agents/skills/repo-review/SKILL.md)。Finding起票・品質検証: [review-finding](.agents/skills/review-finding/SKILL.md)。レビュースキル見直し・改修検証: [review-skill-audit](.agents/skills/review-skill-audit/SKILL.md)。役割別ワークフロー・PR作成・相談・handoff/復旧の共通入口: [repo-workflow](.agents/skills/repo-workflow/SKILL.md)。
 
 内部レビュー改善: [設計書](docs/reviews/REVIEW_SKILL_PHASE1_DESIGN.md)、[詳細実装設計書](docs/reviews/REVIEW_SKILL_PHASE1_IMPLEMENTATION.md)。CLI 入口は `scripts/repo-review-helper`。GitHub App 連携・レビュー運用規約: [運用規約方針](docs/reviews/GITHUB_APP_AND_REVIEW_POLICY.md)。CLI 入口は `scripts/review-sync.sh`。
 
