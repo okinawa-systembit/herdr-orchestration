@@ -53,12 +53,16 @@ from orchestrator.list_commands import run_task_list
 from orchestrator.role_bindings import (
     RoleBindingError,
     _utc_now_iso,
+    clear_project,
     clear_role_binding,
+    get_project_catalog,
     get_role_binding_document,
     get_role_bindings,
+    register_project,
     set_role_binding,
     validate_display_name,
     validate_pane_id,
+    validate_project_alias,
     validate_role_name,
 )
 from orchestrator.worktree import WorktreeError, resolve_worktree_root
@@ -76,6 +80,7 @@ PUBLIC_COMMANDS = (
     "reconcile-dispatch",
     "identity",
     "role",
+    "project",
 )
 
 _COMMAND_HELP: dict[str, str] = {
@@ -91,6 +96,7 @@ _COMMAND_HELP: dict[str, str] = {
     "reconcile-dispatch": "応答のない未確定 dispatch を安全に復旧",
     "identity": "リポジトリ識別子（Repository Identity UUID）を管理（init または show）",
     "role": "リポジトリごとの論理ロールと pane_id の紐づけを管理（set, show, clear）",
+    "project": "プロジェクトカタログ（projects.json）を管理（register, show, clear）",
 }
 
 
@@ -196,6 +202,7 @@ def _cmd_handoff(ns: argparse.Namespace) -> int:
                 instruction=ns.instruction,
                 result_wait_timeout_sec=ns.result_wait_timeout_sec,
                 scope=getattr(ns, "scope", None),
+                project=getattr(ns, "project", None),
             )
         )
     except HandoffCommandError as exc:
@@ -604,7 +611,45 @@ def _cmd_role(ns: argparse.Namespace) -> int:
             )
         if old_pane_for_role and old_pane_for_role != valid_pane:
             _sync_pane_label_after_unbind(old_pane_for_role, cwd, target_cwd=old_cwd)
-        label_sync = sync_herdr_pane_label(valid_pane, display_name)
+
+        effective_label = display_name
+        if is_global:
+            # 兼任ペインにおけるローカル UI ラベル優先保護（Issue #151）:
+            # 同一ペインが既にローカルスコープで有効なロールを保持している場合、Herdr UI ラベルはローカルロールの display_name を優先維持する
+            local_display_name: str | None = None
+            local_dirs_to_check: list[Path] = []
+            if target_meta.get("cwd"):
+                try:
+                    local_dirs_to_check.append(Path(target_meta["cwd"]).resolve())
+                except Exception:
+                    pass
+            try:
+                p_cwd = cwd.resolve()
+                if p_cwd not in local_dirs_to_check:
+                    local_dirs_to_check.append(p_cwd)
+            except Exception:
+                pass
+            for d in local_dirs_to_check:
+                local_scope = _try_resolve_local_scope_id(d)
+                if local_scope:
+                    try:
+                        local_doc = get_role_binding_document(local_scope)
+                        for r_name, p_id in local_doc.get("roles", {}).items():
+                            if p_id == valid_pane:
+                                t_meta = local_doc.get("targets", {}).get(r_name, {})
+                                if isinstance(t_meta, dict):
+                                    local_display_name = str(t_meta.get("display_name") or r_name)
+                                else:
+                                    local_display_name = str(r_name)
+                                break
+                    except Exception:
+                        pass
+                if local_display_name is not None:
+                    break
+            if local_display_name is not None:
+                effective_label = local_display_name
+
+        label_sync = sync_herdr_pane_label(valid_pane, effective_label)
         target_with_summary = {
             **target_meta,
             "display_summary": format_pane_display_summary(target_meta, fallback_role=canonical_role),
@@ -737,6 +782,111 @@ def _cmd_role(ns: argparse.Namespace) -> int:
     )
 
 
+def _cmd_project(ns: argparse.Namespace) -> int:
+    action = getattr(ns, "project_action", None)
+    cwd = Path.cwd()
+
+    if action == "register":
+        alias = getattr(ns, "alias", None)
+        if not alias:
+            emit_command_error(
+                "invalid_input",
+                retryable=False,
+                message="project alias required",
+                exit_code=1,
+            )
+        scope_id = _resolve_role_scope_id(cwd, is_global=False, create_if_missing=True)
+        try:
+            reg_info = register_project(alias, scope_id)
+        except RoleBindingError as exc:
+            emit_command_error(
+                exc.code,
+                retryable=False,
+                message=exc.message,
+                exit_code=1,
+            )
+        return emit_json({
+            "command": "project",
+            "action": "register",
+            "alias": reg_info["alias"],
+            "scope_id": reg_info["scope_id"],
+            "registered_at": reg_info["registered_at"],
+            "updated_at": reg_info["updated_at"],
+        })
+
+    elif action == "show":
+        try:
+            catalog = get_project_catalog()
+        except RoleBindingError as exc:
+            emit_command_error(
+                exc.code,
+                retryable=False,
+                message=exc.message,
+                exit_code=1,
+            )
+        panes = list_live_panes_with_ui()
+        projects_payload: dict[str, object] = {}
+        for alias, p_info in sorted(catalog.get("projects", {}).items()):
+            p_scope_id = p_info["scope_id"]
+            reg_at = p_info.get("registered_at")
+            try:
+                p_doc = get_role_binding_document(p_scope_id)
+            except RoleBindingError as exc:
+                sys.stderr.write(f"warning: cannot read role binding for project {alias!r} ({p_scope_id}): {exc.message}\n")
+                p_doc = {"roles": {}, "targets": {}, "outdated_roles": []}
+
+            enriched_targets, _ = _enrich_targets_with_live_status(
+                p_doc.get("targets", {}),
+                roles=p_doc.get("roles", {}),
+                chosen_scope_id=p_scope_id,
+                local_scope_id=p_scope_id,
+                local_doc=p_doc,
+                global_doc={},
+                panes=panes,
+            )
+            projects_payload[alias] = {
+                "scope_id": p_scope_id,
+                "registered_at": reg_at,
+                "roles": p_doc.get("roles", {}),
+                "targets": enriched_targets,
+                "outdated_roles": p_doc.get("outdated_roles", []),
+            }
+
+        return emit_json({
+            "command": "project",
+            "action": "show",
+            "schema_version": catalog.get("schema_version", 1),
+            "updated_at": catalog.get("updated_at"),
+            "projects": projects_payload,
+        })
+
+    elif action == "clear":
+        alias = getattr(ns, "alias", None)
+        clear_all = bool(getattr(ns, "clear_all", False))
+        try:
+            res = clear_project(alias, clear_all=clear_all)
+        except RoleBindingError as exc:
+            emit_command_error(
+                exc.code,
+                retryable=False,
+                message=exc.message,
+                exit_code=1,
+            )
+        out_payload: dict[str, object] = {
+            "command": "project",
+            "action": "clear",
+            **res,
+        }
+        return emit_json(out_payload)
+
+    emit_command_error(
+        "invalid_input",
+        retryable=False,
+        message="project action must be 'register', 'show', or 'clear'",
+        exit_code=1,
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="herdr-orchestrator",
@@ -786,6 +936,11 @@ def build_parser() -> argparse.ArgumentParser:
                 choices=("local", "global"),
                 default=None,
                 help="同名ロール重複時に参照するスコープを明示指定（local または global）",
+            )
+            p.add_argument(
+                "--project",
+                default=None,
+                help="プロジェクトカタログに登録された別プロジェクトのローカルロールへ委託（例: --project my-app）",
             )
             p.add_argument(
                 "--task-type",
@@ -939,6 +1094,39 @@ def build_parser() -> argparse.ArgumentParser:
                 action="store_true",
                 help="グローバルロールの紐づけを解除",
             )
+        elif name == "project":
+            proj_sub = p.add_subparsers(dest="project_action", required=True)
+            proj_reg = proj_sub.add_parser(
+                "register",
+                help="カレントディレクトリのプロジェクトをエイリアスでカタログに登録",
+                description="カレントディレクトリのプロジェクトをエイリアスでカタログに登録",
+            )
+            proj_reg.add_argument(
+                "alias",
+                help="プロジェクトエイリアス（1〜32文字）",
+            )
+            proj_sub.add_parser(
+                "show",
+                help="プロジェクトカタログの一覧と各プロジェクトのロール・稼働状況を表示",
+                description="プロジェクトカタログの一覧と各プロジェクトのロール・稼働状況を表示",
+            )
+            proj_clear = proj_sub.add_parser(
+                "clear",
+                help="プロジェクトカタログから登録を解除",
+                description="プロジェクトカタログから登録を解除",
+            )
+            proj_clear.add_argument(
+                "alias",
+                nargs="?",
+                default=None,
+                help="登録解除するプロジェクトエイリアス（--all 指定時は不要）",
+            )
+            proj_clear.add_argument(
+                "--all",
+                dest="clear_all",
+                action="store_true",
+                help="すべてのプロジェクト登録を一括解除",
+            )
         else:
             p.add_argument("task_id", nargs="?", metavar="task.id", help="対象タスクID")
 
@@ -961,6 +1149,7 @@ def main(argv: list[str] | None = None) -> int:
         "recover-completion": _cmd_recover_completion,
         "identity": _cmd_identity,
         "role": _cmd_role,
+        "project": _cmd_project,
     }
     handler = handlers[ns.command]
     return handler(ns)

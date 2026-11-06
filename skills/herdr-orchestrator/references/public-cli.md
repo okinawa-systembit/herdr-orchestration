@@ -11,22 +11,25 @@
 
 ## 1. コマンド一覧
 
-| コマンド                                                  | 説明                                                                                                                   | `HERDR_ENV=1` 制約 |
-| --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ------------------ |
-| `doctor`                                                  | 環境健全性診断、古い Role Binding 検出、stale dispatch 候補検出                                                        | 必須               |
-| `identity init`                                           | Git リポジトリ固有の UUID（Repository Identity）を初期化                                                               | 免除（ペイン外可） |
-| `identity show`                                           | 現在のリポジトリ固有 UUID を表示                                                                                       | 免除（ペイン外可） |
-| `role set <role> [<pane_id>]`                             | ロールとペインを紐づけ（`--global`, `--label <name>`, `--pane <pane_id>`）                                             | 必須               |
-| `role show`                                               | 登録済みロール一覧とペイン指紋メタデータを表示（`--global`）                                                           | 免除（ペイン外可） |
-| `role clear [<role>\|--all]`                              | ロール登録を解除（`--global`）                                                                                         | 免除（ペイン外可） |
-| `handoff`                                                 | タスクを作成して Worker へ委託（`--mode sync\|async`, `--to <role>`, `--instruction <text>`, `--scope local\|global`） | 必須               |
-| `task-status <task_id>`                                   | タスクの進行状態と受信者照合（`recipient_verification`）を確認                                                         | 必須               |
-| `task-list`                                               | Task Registry 内のタスク一覧を読み取り専用で取得（`--worktree`, `--status`, `--limit` 等）                             | 必須               |
-| `result-submit <task_id>`                                 | Worker によるタスク結果の提出（`--result-status succeeded\|failed`, `--result-ref <path>`, `--summary <text>`）        | 必須               |
-| `task-result <task_id>`                                   | Requester による結果確定データの取得・成果物パス解決                                                                   | 必須               |
-| `resume-task` / `reset-completion` / `recover-completion` | completion 状態の再試行・復旧                                                                                          | 必須               |
-| `reconcile-dispatch`                                      | 未確定 dispatch の整合性復旧                                                                                           | 必須               |
-| `update`                                                  | 【未実装・将来仕様】配布環境の最新化（現行版の更新は `install.sh` を再実行。README『アップデート』参照）               | 免除（ペイン外可） |
+| コマンド                                                  | 説明                                                                                                                                        | `HERDR_ENV=1` 制約 |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
+| `doctor`                                                  | 環境健全性診断、古い Role Binding 検出、stale dispatch 候補検出                                                                             | 必須               |
+| `identity init`                                           | Git リポジトリ固有の UUID（Repository Identity）を初期化                                                                                    | 免除（ペイン外可） |
+| `identity show`                                           | 現在のリポジトリ固有 UUID を表示                                                                                                            | 免除（ペイン外可） |
+| `role set <role> [<pane_id>]`                             | ロールとペインを紐づけ（`--global`, `--label <name>`, `--pane <pane_id>`）                                                                  | 必須               |
+| `role show`                                               | 登録済みロール一覧とペイン指紋メタデータを表示（`--global`）                                                                                | 免除（ペイン外可） |
+| `role clear [<role>\|--all]`                              | ロール登録を解除（`--global`）                                                                                                              | 免除（ペイン外可） |
+| `project register <alias>`                                | カレントディレクトリのプロジェクトをエイリアスでカタログに登録                                                                              | 免除（ペイン外可） |
+| `project show`                                            | 登録済みプロジェクト一覧と各ロールの生存状態を表示                                                                                          | 免除（ペイン外可） |
+| `project clear [<alias>\|--all]`                          | プロジェクトカタログから登録を解除                                                                                                          | 免除（ペイン外可） |
+| `handoff`                                                 | タスクを作成して Worker へ委託（`--mode sync\|async`, `--to <role>`, `--instruction <text>`, `--scope local\|global`, `--project <alias>`） | 必須               |
+| `task-status <task_id>`                                   | タスクの進行状態と受信者照合（`recipient_verification`）を確認                                                                              | 必須               |
+| `task-list`                                               | Task Registry 内のタスク一覧を読み取り専用で取得（`--worktree`, `--status`, `--limit` 等）                                                  | 必須               |
+| `result-submit <task_id>`                                 | Worker によるタスク結果の提出（`--result-status succeeded\|failed`, `--result-ref <path>`, `--summary <text>`）                             | 必須               |
+| `task-result <task_id>`                                   | Requester による結果確定データの取得・成果物パス解決                                                                                        | 必須               |
+| `resume-task` / `reset-completion` / `recover-completion` | completion 状態の再試行・復旧                                                                                                               | 必須               |
+| `reconcile-dispatch`                                      | 未確定 dispatch の整合性復旧                                                                                                                | 必須               |
+| `update`                                                  | 【未実装・将来仕様】配布環境の最新化（現行版の更新は `install.sh` を再実行。README『アップデート』参照）                                    | 免除（ペイン外可） |
 
 ※ Task Registry の JSON ファイル直接編集は禁止されています。すべての操作は本 CLI を介してアトミックに行われます。
 
@@ -123,6 +126,27 @@ herdr-orchestrator role clear --all --global
   - 各スコープのローカル Role ファイルは `${XDG_STATE_HOME:-~/.local/state}/herdr-orchestrator/roles/<repository-id>.json`（Non-Git ディレクトリの場合は `dir_<hash16>.json`）および対応する `.lock` に保存されます。他リポジトリへの誤干渉を防ぐため、別リポジトリのファイルを一括削除する CLI コマンドは設けられていません。
   - ディスクから完全に削除・破棄したリポジトリ（またはディレクトリ）の Role ファイルを掃除する場合は、**対象スコープに対して Orchestrator のコマンドが実行中でないこと**および **JSON 内の `targets[*].cwd` のディレクトリが既に存在しないこと**を確認した上で、該当の `<repository-id>.json`（または `dir_<hash16>.json`）と対応する `.lock` を `rm` コマンドで手動削除してください（※ 全ワークスペース共通の `global.json` は削除しないでください）。
 
+### 3.4 プロジェクトカタログ管理 (`project`)
+
+複数プロジェクト間でローカルロールを相互呼び出しできるようにするため、プロジェクトの作業ツリー（`scope_id`）に分かりやすい別名（エイリアス）を付けて登録・管理します。
+
+```bash
+# カレントディレクトリのプロジェクトをエイリアスでカタログに登録（各プロジェクトのトップディレクトリで実行）
+herdr-orchestrator project register my-project
+
+# カタログ登録済みプロジェクトの一覧と、各プロジェクトのローカルロール・実機生存状態を表示
+herdr-orchestrator project show
+
+# 特定プロジェクトの登録をカタログから解除（ローカル Role Binding ファイル自体は削除されません）
+herdr-orchestrator project clear my-project
+
+# カタログの全プロジェクト登録を一括解除
+herdr-orchestrator project clear --all
+```
+
+- **一意性制約**: 1つのプロジェクト（`scope_id`）には1つのエイリアスのみ登録可能です（同一プロジェクトの別名登録は `project_scope_already_registered`、同一エイリアスの重複登録は `project_alias_already_exists` で拒否されます）。
+- **予約語**: `"local"`, `"global"`, `"unbound"` はプロジェクトエイリアスとして登録できません。
+
 ---
 
 ## 4. タスク委託 (`handoff`)
@@ -143,7 +167,16 @@ herdr-orchestrator handoff \
   --to 調査担当 \
   --scope global \
   --instruction "最新のサーバーエラーログを解析してください。"
+
+# 3. プロジェクト跨ぎ委託（別プロジェクトのローカルロールへ委託）
+herdr-orchestrator handoff \
+  --mode sync \
+  --to レビュワー \
+  --project project-b \
+  --instruction "プロジェクトBのローカルレビュワーにレビューを依頼します。"
 ```
+
+````
 
 - `--mode sync|async`: 同期（完了待機）または非同期（即時復帰。既定値: `sync`）。
 - `--to <role>`（または `--worker-role <role>`）: 登録済みロール名を指定（日本語名可）。
@@ -160,7 +193,7 @@ herdr-orchestrator handoff \
 
 ```bash
 herdr-orchestrator task-status <task_id>
-```
+````
 
 出力 JSON の `recipient_verification` には、現在の呼び出し元ペインが対象タスクの正当な受信者（Worker / Requester）かどうかの照合結果が含まれます。`verified: false` の場合は誤配送防止のため作業を着手してはなりません。
 

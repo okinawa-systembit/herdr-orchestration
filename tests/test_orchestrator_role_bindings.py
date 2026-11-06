@@ -1416,6 +1416,7 @@ raise SystemExit(99)
         self.assertEqual(d1["label_sync"]["action"], "rename")
 
         # 2. Bind same w15:p2 to global role 'ticket管理' with custom label
+        # Issue #151: w15:p2 already holds local role 'レビュワー', so local UI label takes precedence and is preserved!
         r2 = _run_cli(
             "role",
             "set",
@@ -1432,7 +1433,7 @@ raise SystemExit(99)
         self.assertEqual(d2["display_name"], "チケット管理 (共通)")
 
         renames = self.rename_log.read_text(encoding="utf-8").strip().splitlines()
-        self.assertEqual(renames[-1], "w15:p2 チケット管理 (共通)")
+        self.assertEqual(renames[-1], "w15:p2 レビュワー")
 
         # 3. Clear local role 'レビュワー'.
         # Since w15:p2 still holds global role 'ticket管理', the label must be preserved / re-synced, NOT cleared!
@@ -2049,6 +2050,334 @@ raise SystemExit(99)
         res_h4 = _run_cli("handoff", "--mode", "async", "--to", "レビュワー", "--instruction", "go", env=self.env, cwd=self.repo_a)
         self.assertEqual(res_h4.returncode, 1)
         self.assertEqual(json.loads(res_h4.stdout)["error"], "worker_pane_closed_or_missing")
+
+    def test_cw28_project_register_and_uniqueness_constraints(self) -> None:
+        # CW-28: project register alias registration and uniqueness constraints
+        # 1. Register repo-a with alias 'proj-a'
+        res1 = _run_cli("project", "register", "proj-a", env=self.env, cwd=self.repo_a)
+        self.assertEqual(res1.returncode, 0)
+        d1 = json.loads(res1.stdout)
+        self.assertEqual(d1["command"], "project")
+        self.assertEqual(d1["action"], "register")
+        self.assertEqual(d1["alias"], "proj-a")
+        self.assertTrue(d1["scope_id"])
+
+        # 2. Reserved aliases rejection ('local', 'global', 'unbound')
+        for r_alias in ("local", "global", "unbound"):
+            res_res = _run_cli("project", "register", r_alias, env=self.env, cwd=self.repo_a)
+            self.assertEqual(res_res.returncode, 1)
+            err = json.loads(res_res.stdout)
+            self.assertEqual(err["error"], "invalid_input")
+
+        # 3. Same repo cannot be registered under a different alias (project_scope_already_registered)
+        res_dup_scope = _run_cli("project", "register", "proj-a-alias2", env=self.env, cwd=self.repo_a)
+        self.assertEqual(res_dup_scope.returncode, 1)
+        err = json.loads(res_dup_scope.stdout)
+        self.assertEqual(err["error"], "project_scope_already_registered")
+
+        # 4. Same alias cannot be registered to a different repo (project_alias_already_exists)
+        res_dup_alias = _run_cli("project", "register", "proj-a", env=self.env, cwd=self.repo_b)
+        self.assertEqual(res_dup_alias.returncode, 1)
+        err = json.loads(res_dup_alias.stdout)
+        self.assertEqual(err["error"], "project_alias_already_exists")
+
+        # 5. Idempotent re-registration of same repo with same alias succeeds
+        res_re = _run_cli("project", "register", "proj-a", env=self.env, cwd=self.repo_a)
+        self.assertEqual(res_re.returncode, 0)
+
+    def test_cw29_project_show_live_status(self) -> None:
+        # CW-29: project show displays project details, roles, targets with live_status
+        r_set = _run_cli("role", "set", "レビュワー", "w15:p2", env=self.env, cwd=self.repo_a)
+        self.assertEqual(r_set.returncode, 0)
+        r_reg = _run_cli("project", "register", "my-proj", env=self.env, cwd=self.repo_a)
+        self.assertEqual(r_reg.returncode, 0)
+
+        res_show = _run_cli("project", "show", env=self.env, cwd=self.repo_a)
+        self.assertEqual(res_show.returncode, 0)
+        d_show = json.loads(res_show.stdout)
+        self.assertEqual(d_show["command"], "project")
+        self.assertEqual(d_show["action"], "show")
+        self.assertIn("my-proj", d_show["projects"])
+        proj = d_show["projects"]["my-proj"]
+        self.assertIn("レビュワー", proj["roles"])
+        self.assertIn("レビュワー", proj["targets"])
+        self.assertEqual(proj["targets"]["レビュワー"]["live_status"]["status"], "live")
+
+    def test_cw30_project_clear(self) -> None:
+        # CW-30: project clear single and all, preserving role binding files
+        _run_cli("project", "register", "proj-a", env=self.env, cwd=self.repo_a)
+        _run_cli("project", "register", "proj-b", env=self.env, cwd=self.repo_b)
+
+        # Clear non-existent
+        res_not_found = _run_cli("project", "clear", "nonexistent", env=self.env, cwd=self.repo_a)
+        self.assertEqual(res_not_found.returncode, 1)
+        self.assertEqual(json.loads(res_not_found.stdout)["error"], "project_alias_not_found")
+
+        # Clear single
+        res_clear_one = _run_cli("project", "clear", "proj-a", env=self.env, cwd=self.repo_a)
+        self.assertEqual(res_clear_one.returncode, 0)
+        d_one = json.loads(res_clear_one.stdout)
+        self.assertEqual(d_one["cleared_alias"], "proj-a")
+        self.assertNotIn("proj-a", d_one["projects"])
+        self.assertIn("proj-b", d_one["projects"])
+
+        # Clear all
+        res_clear_all = _run_cli("project", "clear", "--all", env=self.env, cwd=self.repo_a)
+        self.assertEqual(res_clear_all.returncode, 0)
+        d_all = json.loads(res_clear_all.stdout)
+        self.assertEqual(d_all["cleared_aliases"], ["proj-b"])
+        self.assertEqual(d_all["projects"], {})
+
+    def test_cw31_cw32_cw33_handoff_project_flow_and_guardrails(self) -> None:
+        # CW-31, CW-32, CW-33: Cross-project handoff, fail-closed stops, and argument mutual exclusion
+        state = json.loads(self.herdr_state_file.read_text(encoding="utf-8"))
+        state["panes"].append({
+            "pane_id": "w15:p3",
+            "workspace_id": "w15",
+            "tab_id": "w15:t1",
+            "terminal_id": "term_15_3",
+            "agent": "claude",
+            "agent_status": "idle",
+            "agent_session": {"value": "sess_b_impl"},
+            "foreground_cwd": str(self.repo_b.resolve()),
+        })
+        self._update_panes(state["panes"])
+
+        _run_cli("role", "set", "設計担当", "w15:p1", env=self.env, cwd=self.repo_a)
+        _run_cli("role", "set", "実装担当", "w15:p3", env=self.env, cwd=self.repo_b)
+        _run_cli("project", "register", "remote-b", env=self.env, cwd=self.repo_b)
+
+        # CW-33: --project and --scope mutual exclusion
+        res_excl = _run_cli(
+            "handoff",
+            "--project", "remote-b",
+            "--scope", "local",
+            "--to", "実装担当",
+            "--instruction", "work",
+            env=self.env,
+            cwd=self.repo_a,
+        )
+        self.assertEqual(res_excl.returncode, 1)
+        self.assertEqual(json.loads(res_excl.stdout)["error"], "invalid_input")
+
+        # CW-32: worker_project_not_found
+        res_p_nf = _run_cli(
+            "handoff",
+            "--project", "unknown-proj",
+            "--to", "実装担当",
+            "--instruction", "work",
+            env=self.env,
+            cwd=self.repo_a,
+        )
+        self.assertEqual(res_p_nf.returncode, 1)
+        err = json.loads(res_p_nf.stdout)
+        self.assertEqual(err["error"], "worker_project_not_found")
+        self.assertIn("remote-b", err["available_projects"])
+
+        # CW-32: worker_role_not_bound (fail-closed, no fallback)
+        res_r_nb = _run_cli(
+            "handoff",
+            "--project", "remote-b",
+            "--to", "存在しないロール",
+            "--instruction", "work",
+            env=self.env,
+            cwd=self.repo_a,
+        )
+        self.assertEqual(res_r_nb.returncode, 1)
+        err = json.loads(res_r_nb.stdout)
+        self.assertEqual(err["error"], "worker_role_not_bound")
+        self.assertIn("実装担当", err["available_roles"])
+
+        # CW-31: Successful cross-project handoff
+        res_success = _run_cli(
+            "handoff",
+            "--mode", "async",
+            "--project", "remote-b",
+            "--to", "実装担当",
+            "--instruction", "implement cross-project feature",
+            env=self.env,
+            cwd=self.repo_a,
+        )
+        self.assertEqual(res_success.returncode, 0)
+        d_succ = json.loads(res_success.stdout)
+        task_id = d_succ["task_id"]
+        prompts = self.prompt_log.read_text(encoding="utf-8").strip().splitlines()
+        self.assertEqual(prompts[-1].split("|")[0], "w15:p3")
+
+        st_res = _run_cli("task-status", task_id, env=self.env, cwd=self.repo_a)
+        self.assertEqual(st_res.returncode, 0)
+        task_doc = json.loads(st_res.stdout)["task"]
+        self.assertEqual(task_doc["worker"]["role"], "実装担当")
+        self.assertEqual(task_doc["worker"]["pane_id"], "w15:p3")
+        self.assertEqual(task_doc["worker"]["cwd"], str(self.repo_b.resolve()))
+        self.assertEqual(task_doc["requester"]["role"], "設計担当")
+
+    def test_cw34_handoff_project_readonly_no_mutation_guarantee(self) -> None:
+        # CW-34: Cross-project handoff never mutates target project's role bindings (no auto-tracking, no fingerprint update)
+        state = json.loads(self.herdr_state_file.read_text(encoding="utf-8"))
+        state["panes"].append({
+            "pane_id": "w15:p3",
+            "workspace_id": "w15",
+            "tab_id": "w15:t1",
+            "terminal_id": "term_15_3",
+            "agent": "claude",
+            "agent_status": "idle",
+            "agent_session": {"value": "sess_b_impl"},
+            "foreground_cwd": str(self.repo_b.resolve()),
+        })
+        self._update_panes(state["panes"])
+
+        _run_cli("role", "set", "設計担当", "w15:p1", env=self.env, cwd=self.repo_a)
+        _run_cli("role", "set", "実装担当", "w15:p3", env=self.env, cwd=self.repo_b)
+        res_reg = _run_cli("project", "register", "remote-b", env=self.env, cwd=self.repo_b)
+        self.assertEqual(res_reg.returncode, 0)
+        scope_b = json.loads(res_reg.stdout)["scope_id"]
+        binding_file_b = self.state_home / "herdr-orchestrator" / "roles" / f"{scope_b}.json"
+        content_before = binding_file_b.read_text(encoding="utf-8")
+
+        # Simulate pane_missing on w15:p3
+        self._update_panes([p for p in state["panes"] if p["pane_id"] != "w15:p3"])
+
+        res_missing = _run_cli(
+            "handoff",
+            "--mode", "async",
+            "--project", "remote-b",
+            "--to", "実装担当",
+            "--instruction", "work",
+            env=self.env,
+            cwd=self.repo_a,
+        )
+        self.assertEqual(res_missing.returncode, 1)
+        err = json.loads(res_missing.stdout)
+        self.assertEqual(err["error"], "worker_pane_closed_or_missing")
+
+        # Target role binding file MUST NOT be mutated (strict read-only guarantee)
+        content_after = binding_file_b.read_text(encoding="utf-8")
+        self.assertEqual(content_before, content_after)
+
+    def test_cw35_recipient_verification_cross_project(self) -> None:
+        # CW-35: Recipient verification succeeds on worker side for cross-project handoff
+        state = json.loads(self.herdr_state_file.read_text(encoding="utf-8"))
+        state["panes"].append({
+            "pane_id": "w15:p3",
+            "workspace_id": "w15",
+            "tab_id": "w15:t1",
+            "terminal_id": "term_15_3",
+            "agent": "claude",
+            "agent_status": "idle",
+            "agent_session": {"value": "sess_b_impl"},
+            "foreground_cwd": str(self.repo_b.resolve()),
+        })
+        self._update_panes(state["panes"])
+
+        _run_cli("role", "set", "設計担当", "w15:p1", env=self.env, cwd=self.repo_a)
+        _run_cli("role", "set", "実装担当", "w15:p3", env=self.env, cwd=self.repo_b)
+        _run_cli("project", "register", "remote-b", env=self.env, cwd=self.repo_b)
+
+        res_h = _run_cli(
+            "handoff",
+            "--mode", "async",
+            "--project", "remote-b",
+            "--to", "実装担当",
+            "--instruction", "work",
+            env=self.env,
+            cwd=self.repo_a,
+        )
+        self.assertEqual(res_h.returncode, 0)
+        task_id = json.loads(res_h.stdout)["task_id"]
+
+        # Worker (w15:p3) runs task-status from repo_b
+        worker_env = self.env.copy()
+        worker_env["HERDR_PANE_ID"] = "w15:p3"
+        res_status = _run_cli("task-status", task_id, env=worker_env, cwd=self.repo_b)
+        self.assertEqual(res_status.returncode, 0)
+        d_status = json.loads(res_status.stdout)
+        self.assertTrue(d_status["recipient_verification"]["verified"])
+        self.assertEqual(d_status["recipient_verification"]["caller_role_in_task"], "worker")
+
+    def test_cw36_role_set_global_preserves_local_label_for_dual_role_pane(self) -> None:
+        # CW-36: role set --global on a pane with existing local role preserves local UI label
+        # 1. Set local role 'レビュワー' on w15:p2
+        r1 = _run_cli("role", "set", "レビュワー", "w15:p2", env=self.env, cwd=self.repo_a)
+        self.assertEqual(r1.returncode, 0)
+        renames1 = self.rename_log.read_text(encoding="utf-8").strip().splitlines()
+        self.assertEqual(renames1[-1], "w15:p2 レビュワー")
+
+        # 2. Set global role 'チケット管理' on the same pane w15:p2
+        r2 = _run_cli("role", "set", "チケット管理", "w15:p2", "--global", env=self.env, cwd=self.repo_a)
+        self.assertEqual(r2.returncode, 0)
+        renames2 = self.rename_log.read_text(encoding="utf-8").strip().splitlines()
+        # Local role 'レビュワー' label MUST be preserved
+        self.assertEqual(renames2[-1], "w15:p2 レビュワー")
+
+        # Global role is recorded in global binding document
+        show_g = _run_cli("role", "show", "--global", env=self.env, cwd=self.repo_a)
+        self.assertEqual(show_g.returncode, 0)
+        self.assertIn("チケット管理", json.loads(show_g.stdout)["roles"])
+
+    def test_cw37_cross_project_peer_fingerprint_mismatch_prevents_misrouting(self) -> None:
+        # CW-37 (RV131 P1-1): When pane IDs are swapped in a multi-role same-CWD project,
+        # cross-project handoff must detect fingerprint mismatch (peer_context) and stop with worker_context_changed
+        # rather than misrouting to another role's pane silently.
+        state = json.loads(self.herdr_state_file.read_text(encoding="utf-8"))
+        state["panes"].extend([
+            {
+                "pane_id": "w15:p3",
+                "workspace_id": "w15",
+                "tab_id": "w15:t1",
+                "terminal_id": "term_15_3",
+                "agent": "claude",
+                "agent_status": "idle",
+                "agent_session": {"value": "sess_b_impl"},
+                "foreground_cwd": str(self.repo_b.resolve()),
+            },
+            {
+                "pane_id": "w15:p4",
+                "workspace_id": "w15",
+                "tab_id": "w15:t1",
+                "terminal_id": "term_15_4",
+                "agent": "claude",
+                "agent_status": "idle",
+                "agent_session": {"value": "sess_b_rev"},
+                "foreground_cwd": str(self.repo_b.resolve()),
+            },
+        ])
+        self._update_panes(state["panes"])
+
+        _run_cli("role", "set", "設計担当", "w15:p1", env=self.env, cwd=self.repo_a)
+        _run_cli("role", "set", "実装担当", "w15:p3", env=self.env, cwd=self.repo_b)
+        _run_cli("role", "set", "レビュワー", "w15:p4", env=self.env, cwd=self.repo_b)
+        res_reg = _run_cli("project", "register", "remote-b", env=self.env, cwd=self.repo_b)
+        self.assertEqual(res_reg.returncode, 0)
+        scope_b = json.loads(res_reg.stdout)["scope_id"]
+        binding_file_b = self.state_home / "herdr-orchestrator" / "roles" / f"{scope_b}.json"
+        content_before = binding_file_b.read_text(encoding="utf-8")
+
+        # Simulate restart swap: w15:p4 is closed, and w15:p3 now has reviewer's session/terminal
+        swapped_panes = [p for p in state["panes"] if p["pane_id"] != "w15:p4"]
+        for p in swapped_panes:
+            if p["pane_id"] == "w15:p3":
+                p["terminal_id"] = "term_15_4"
+                p["agent_session"] = {"value": "sess_b_rev"}
+        self._update_panes(swapped_panes)
+
+        # Handoff to 実装担当 must fail with worker_context_changed (cannot misroute to reviewer session)
+        res_swap = _run_cli(
+            "handoff",
+            "--mode", "async",
+            "--project", "remote-b",
+            "--to", "実装担当",
+            "--instruction", "work",
+            env=self.env,
+            cwd=self.repo_a,
+        )
+        self.assertEqual(res_swap.returncode, 1)
+        err = json.loads(res_swap.stdout)
+        self.assertEqual(err["error"], "worker_context_changed")
+
+        # Target role binding MUST NOT be mutated
+        content_after = binding_file_b.read_text(encoding="utf-8")
+        self.assertEqual(content_before, content_after)
 
 
 if __name__ == "__main__":

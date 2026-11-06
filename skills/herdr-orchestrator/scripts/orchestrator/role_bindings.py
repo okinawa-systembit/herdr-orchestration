@@ -7,6 +7,7 @@ import os
 import re
 import secrets
 import stat as stat_module
+import unicodedata
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -17,6 +18,10 @@ from orchestrator.paths import roles_dir
 from orchestrator.registry.schema import STANDARD_ROLES, normalize_role_name
 
 ROLE_BINDINGS_SCHEMA_VERSION = 1
+PROJECT_CATALOG_SCHEMA_VERSION = 1
+PROJECT_CATALOG_FILENAME = "projects.json"
+PROJECT_CATALOG_LOCK_FILENAME = "projects.json.lock"
+RESERVED_PROJECT_ALIASES = frozenset({"local", "global", "unbound"})
 _DIR_MODE = 0o755
 _FILE_MODE = 0o644
 _PANE_ID_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9:_-]{0,63}$")
@@ -442,3 +447,263 @@ def resolve_role_by_pane(repository_id: str, pane_id: str) -> str | None:
     if len(matches) == 1:
         return matches[0]
     return None
+
+
+# ---------------------------------------------------------------------------
+# Project Catalog (projects.json)
+# ---------------------------------------------------------------------------
+
+
+def validate_project_alias(alias: str) -> str:
+    if not isinstance(alias, str) or not alias.strip():
+        raise RoleBindingError("invalid_input", message="project alias must be a non-empty string")
+    norm = unicodedata.normalize("NFKC", alias).strip().lower()
+    if norm in RESERVED_PROJECT_ALIASES:
+        raise RoleBindingError("invalid_input", message=f"reserved project alias: {norm!r}")
+    try:
+        return normalize_role_name(norm, allow_unbound=False)
+    except ValueError as exc:
+        raise RoleBindingError("invalid_input", message=f"invalid project alias: {exc}") from exc
+
+
+def project_catalog_file_path() -> Path:
+    return roles_dir() / PROJECT_CATALOG_FILENAME
+
+
+def _project_lock_path() -> Path:
+    return roles_dir() / PROJECT_CATALOG_LOCK_FILENAME
+
+
+@contextmanager
+def _projects_mutation_lock() -> Iterator[None]:
+    _ensure_roles_dir()
+    lpath = _project_lock_path()
+    _assert_safe_path(lpath, must_exist=False)
+    flags = os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(str(lpath), flags, _FILE_MODE)
+    except OSError as exc:
+        raise RoleBindingError(
+            "role_binding_write_failed",
+            message=f"cannot open project lock {lpath.name}: {exc.strerror or exc}",
+        ) from exc
+    _safe_chmod(lpath, _FILE_MODE)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        finally:
+            os.close(fd)
+
+
+def _read_project_catalog_unlocked() -> dict[str, Any]:
+    path = project_catalog_file_path()
+    if not path.exists():
+        return {
+            "schema_version": PROJECT_CATALOG_SCHEMA_VERSION,
+            "projects": {},
+            "updated_at": _utc_now_iso(),
+        }
+    _assert_safe_path(path, must_exist=True)
+    try:
+        raw = path.read_text(encoding="utf-8")
+        doc = json.loads(raw)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RoleBindingError(
+            "project_catalog_corrupted",
+            message=f"cannot read project catalog {path.name}: {exc}",
+        ) from exc
+    if not isinstance(doc, dict):
+        raise RoleBindingError("project_catalog_corrupted", message="project catalog root must be object")
+    if doc.get("schema_version") != PROJECT_CATALOG_SCHEMA_VERSION:
+        raise RoleBindingError("project_catalog_corrupted", message="unsupported schema_version")
+    projects_raw = doc.get("projects")
+    if not isinstance(projects_raw, dict):
+        raise RoleBindingError("project_catalog_corrupted", message="projects must be object")
+    projects: dict[str, dict[str, str]] = {}
+    for k, v in projects_raw.items():
+        if not isinstance(k, str) or not isinstance(v, dict):
+            continue
+        try:
+            norm_k = validate_project_alias(k)
+        except RoleBindingError:
+            continue
+        scope_id = v.get("scope_id")
+        reg_at = v.get("registered_at")
+        if isinstance(scope_id, str) and scope_id.strip():
+            clean_sid = scope_id.strip().lower()
+            if not (is_valid_uuid_v4(clean_sid) or is_dir_scope_id(clean_sid)):
+                continue
+            projects[norm_k] = {
+                "scope_id": clean_sid,
+                "registered_at": str(reg_at) if reg_at else _utc_now_iso(),
+            }
+    return {
+        "schema_version": PROJECT_CATALOG_SCHEMA_VERSION,
+        "projects": projects,
+        "updated_at": str(doc.get("updated_at") or _utc_now_iso()),
+    }
+
+
+def get_project_catalog() -> dict[str, Any]:
+    """Return project catalog dictionary."""
+    if not roles_dir().exists():
+        return {
+            "schema_version": PROJECT_CATALOG_SCHEMA_VERSION,
+            "projects": {},
+            "updated_at": _utc_now_iso(),
+        }
+    return _read_project_catalog_unlocked()
+
+
+def _write_project_catalog_unlocked(projects: dict[str, dict[str, str]]) -> None:
+    root = _ensure_roles_dir()
+    dest = project_catalog_file_path()
+    _assert_safe_path(dest, must_exist=False)
+    clean_projects = {
+        alias: {
+            "scope_id": info["scope_id"],
+            "registered_at": info.get("registered_at", _utc_now_iso()),
+        }
+        for alias, info in sorted(projects.items())
+        if isinstance(info, dict) and info.get("scope_id")
+    }
+    doc: dict[str, Any] = {
+        "schema_version": PROJECT_CATALOG_SCHEMA_VERSION,
+        "projects": clean_projects,
+        "updated_at": _utc_now_iso(),
+    }
+    encoded = (json.dumps(doc, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    tmp_name = f".projects.{secrets.token_hex(8)}.tmp"
+    tmp_path = root / tmp_name
+    flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(str(tmp_path), flags, _FILE_MODE)
+    except OSError as exc:
+        raise RoleBindingError(
+            "role_binding_write_failed",
+            message=f"temp open failed: {exc.strerror or exc}",
+        ) from exc
+    try:
+        offset = 0
+        while offset < len(encoded):
+            written = os.write(fd, encoded[offset:])
+            if written <= 0:
+                raise OSError("incomplete write to project catalog temp file")
+            offset += written
+        os.fsync(fd)
+    except Exception as exc:
+        os.close(fd)
+        tmp_path.unlink(missing_ok=True)
+        raise RoleBindingError(
+            "role_binding_write_failed",
+            message=f"write failed: {exc}",
+        ) from exc
+    os.close(fd)
+    _safe_chmod(tmp_path, _FILE_MODE)
+    try:
+        os.replace(tmp_path, dest)
+        _safe_chmod(dest, _FILE_MODE)
+    except OSError as exc:
+        tmp_path.unlink(missing_ok=True)
+        raise RoleBindingError(
+            "role_binding_write_failed",
+            message=f"atomic replace failed: {exc.strerror or exc}",
+        ) from exc
+
+
+def register_project(alias: str, scope_id: str) -> dict[str, Any]:
+    """Register or update a project alias pointing to scope_id."""
+    norm_alias = validate_project_alias(alias)
+    if not isinstance(scope_id, str) or not scope_id.strip():
+        raise RoleBindingError("invalid_input", message="scope_id must be a non-empty string")
+    clean_scope_id = scope_id.strip().lower()
+    if not (is_valid_uuid_v4(clean_scope_id) or is_dir_scope_id(clean_scope_id)):
+        raise RoleBindingError(
+            "invalid_input",
+            message=f"scope_id must be a valid UUID v4 or dir_<hash16> scope ID (got {clean_scope_id!r})",
+        )
+
+    with _projects_mutation_lock():
+        catalog = _read_project_catalog_unlocked()
+        projects = catalog.get("projects", {})
+
+        # 一意性検証 1: 同一 scope_id が既に別名で登録されているか
+        for existing_alias, p_info in projects.items():
+            if p_info.get("scope_id") == clean_scope_id and existing_alias != norm_alias:
+                raise RoleBindingError(
+                    "project_scope_already_registered",
+                    message=(
+                        f"project scope {clean_scope_id!r} is already registered with alias {existing_alias!r}. "
+                        "A project can only have one alias in the catalog."
+                    ),
+                )
+
+        # 一意性検証 2: 同一 alias が既に別 scope_id に登録されているか
+        existing_info = projects.get(norm_alias)
+        if existing_info and existing_info.get("scope_id") != clean_scope_id:
+            raise RoleBindingError(
+                "project_alias_already_exists",
+                message=(
+                    f"project alias {norm_alias!r} is already registered to scope {existing_info.get('scope_id')!r}"
+                ),
+            )
+
+        now = _utc_now_iso()
+        reg_at = existing_info.get("registered_at") if existing_info else now
+        projects[norm_alias] = {
+            "scope_id": clean_scope_id,
+            "registered_at": reg_at,
+        }
+        _write_project_catalog_unlocked(projects)
+        return {
+            "alias": norm_alias,
+            "scope_id": clean_scope_id,
+            "registered_at": reg_at,
+            "updated_at": now,
+        }
+
+
+def clear_project(alias: str | None = None, *, clear_all: bool = False) -> dict[str, Any]:
+    """Clear a project alias or all aliases from the catalog."""
+    if clear_all and alias is not None:
+        raise RoleBindingError("invalid_input", message="cannot specify both alias and --all")
+    if not clear_all and alias is None:
+        raise RoleBindingError("invalid_input", message="specify an alias or --all")
+
+    with _projects_mutation_lock():
+        catalog = _read_project_catalog_unlocked()
+        projects = catalog.get("projects", {})
+
+        if clear_all:
+            cleared_aliases = sorted(projects.keys())
+            projects.clear()
+            _write_project_catalog_unlocked(projects)
+            return {"cleared_aliases": cleared_aliases, "projects": {}}
+
+        assert alias is not None
+        norm_alias = validate_project_alias(alias)
+        if norm_alias not in projects:
+            raise RoleBindingError(
+                "project_alias_not_found",
+                message=f"project alias {alias!r} not found in catalog",
+            )
+        cleared_info = projects.pop(norm_alias)
+        _write_project_catalog_unlocked(projects)
+        return {"cleared_alias": norm_alias, "cleared_info": cleared_info, "projects": projects}
+
+
+def resolve_project_scope_id(alias: str) -> str | None:
+    """Resolve project alias to scope_id, returning None if not found."""
+    try:
+        norm_alias = validate_project_alias(alias)
+    except RoleBindingError:
+        return None
+    catalog = get_project_catalog()
+    p_info = catalog.get("projects", {}).get(norm_alias)
+    if isinstance(p_info, dict):
+        return p_info.get("scope_id")
+    return None
+

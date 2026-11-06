@@ -2,8 +2,8 @@
 
 - **対象 Issue**:
   - [#74 — ワークスペース跨ぎ配送・グローバルロール・日本語ロール名・ペイン自動追従への対応](https://github.com/okinawa-systembit/herdr-orchestration/issues/74)（PR #75 / v0.4.0 にて実装完了・マージ済み）
-  - [#151 — プロジェクトカタログと --project オプションによるプロジェクト跨ぎロール配送](https://github.com/okinawa-systembit/herdr-orchestration/issues/151)（現在設計中）
-- **ステータス**: 設計中
+  - [#151 — プロジェクトカタログと --project オプションによるプロジェクト跨ぎロール配送](https://github.com/okinawa-systembit/herdr-orchestration/issues/151)（PR #153 にて実装完了・マージ済み）
+- **ステータス**: 実装完了（PR #153 にてマージ済み）
 - **関連 Issue**:
   - [#72 — herdr agent rename 依存を廃止し pane_id ベースの Role Binding 管理へ移行](https://github.com/okinawa-systembit/herdr-orchestration/issues/72)
   - [#121 — 呼び出し元ペイン判定の耐障害性向上（Codex共有デーモン汚染・Cursor環境変数欠落への対応）](https://github.com/okinawa-systembit/herdr-orchestration/issues/121)
