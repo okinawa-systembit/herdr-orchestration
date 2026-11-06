@@ -525,7 +525,7 @@ Herdr の仕様に関する判断が必要な場合は、記憶だけで断定�
 
 ## 27. Blocking 判定
 
-次のような問題は原則として implementation / release blocking とする。
+次のような Herdr ドメイン固有の問題は原則として implementation / release blocking とする。
 
 - Herdr 公式仕様と明確に矛盾する
 - undocumented behavior を必須前提としている
@@ -540,51 +540,15 @@ Herdr の仕様に関する判断が必要な場合は、記憶だけで断定�
 - recovery 不能な状態が仕様上発生する
 - 設計書と実装の重要な Contract が一致しない
 
-軽微な文言、可読性、将来改善等は non-blocking として分離する。
-
-重大度（P0〜P3）と Blocking 判定は以下の規則に従う：
-
-- **P0 / P1**: 原則 Blocking（マージ前是正必須、`blocking:yes` ラベル付与対象）。
-- **P2**: 原則 Non-blocking。ただし、特定環境でのみ機能阻害が生じる場合や設計契約違反など、マージ前修正の必要性が客観的に裏付けられる場合に限り例外的に Blocking と判定できる（具体的な Blocking 理由の明記および `blocking:yes` ラベル付与が必須）。
-- **P3**: Non-blocking（理由なく Blocking 指定することを禁止）。
-
-GitHub 管理対象レビューにおいて未解決指摘を Finding Issue として起票する際は、`.agents/skills/review-finding/` Skill に従い、起票前品質バリデーション（検出元の実在確認、重大度と `blocking:yes` ラベル整合性、是正完了条件、回帰テスト条件、維持すべき既存保証、多層重複検索）を実施すること。検出元 Scope Issue は実在すれば Closed であっても起票できる（自動再オープンは禁止）。重複検出時は新規起票を中止・報告し、勝手な自動コメント追記は行わない。
-
-Finding Issue の解決完了は、①修正 PR の特定とマージ完了、②マージコミットに対する再検証完了、③是正完了条件の達成、④結果記録 を満たした場合にのみ成立する。レビューGO（変更承認）だけを根拠として Finding Issue を早期クローズすることは厳禁とする（手動クローズ方式を標準とし、PR マージ後の再検証を経て `review-finding` Skill によりクローズする）。
+汎用的な指摘の 3 分類・重大度（P0〜P3）と Blocking 判定規則・GO 判定条件・反証確認は、唯一の正本である **[.agents/skills/repo-review/references.md](../.agents/skills/repo-review/references.md#review-principles)** に従う。また、Finding Issue の起票・解決検証手順は **[.agents/skills/review-finding/SKILL.md](../.agents/skills/review-finding/SKILL.md)**、GitHub への書き込みおよび Issue クローズ・ラベル変更権限（人間のみ）の正本は **[.agents/skills/repo-workflow/SKILL.md §7](../.agents/skills/repo-workflow/SKILL.md#github-write-matrix)** に従う。
 
 ---
 
 ## 28. レビュー出力形式
 
-レビュー結果は、少なくとも次の形式で整理する。
+レビュー記録およびコメントの出力形式は、唯一の正本である **[.agents/skills/repo-review/references.md](../.agents/skills/repo-review/references.md#review-response-body)** に統一する（本ガイドラインで独自の別出力フォーマットは設けない）。
 
-### 総評
-
-設計または実装が、次工程へ進める状態かを簡潔に記述する。
-
-### Blocking issues
-
-各指摘について以下を記載する。
-
-1. **指摘内容**
-2. **該当箇所**
-3. **問題となる理由**
-4. **Herdr 公式仕様との関係**
-5. **コミュニティ / ベストプラクティスとの比較**
-6. **推奨する修正方針**
-7. **blocking と判断する理由**
-
-### Non-blocking issues
-
-軽微な改善、可読性、運用上の改善候補を記載する。
-
-### 仕様確認事項
-
-Herdr の現在仕様を確認しなければ判断できないものを、推測で結論付けず列挙する。
-
-### 良好な点
-
-重要な設計判断が公式仕様や安全原則に沿っている場合は、その根拠を簡潔に記載する。
+Herdr Orchestrator の設計・実装に関する指摘を行う際は、正本テンプレートの「根拠」欄に **Herdr 公式仕様との関係（§2〜§6）** を明記し、Herdr の現在仕様を確認しなければ判断できない事項は推測で結論付けず「要確認事項」に分類する。
 
 ---
 
@@ -605,19 +569,16 @@ Herdr の現在仕様を確認しなければ判断できないものを、推�
 - Herdr lifecycle と business task status を混同する
 - 将来機能を理由なく MVP に追加する
 - 根拠を確認せず「ベストプラクティス」と表現する
-- レビューGO を根拠として PR マージ前の Finding Issue をクローズする（早期クローズ。Finding Issue のクローズは PR マージ・再検証完了後に依頼元が実施するものであり、レビュワーによるクローズは厳禁）
-- Scope Issue のクローズ手順（`gh issue close`）を Finding Issue に誤適用する（レビュワーによるレビュー結果のコメント投稿は許可されるが、クローズ権限は依頼元のみにありレビュワーによるクローズは禁止）
 
 ---
 
 ## 30. 最終確認
 
-レビュー完了前に、最低限次を確認する。
+Herdr Orchestrator の設計・実装レビュー完了前に、ドメイン固有観点として次を確認する（汎用チェックリストは [.agents/skills/repo-review/references.md](../.agents/skills/repo-review/references.md#review-scope) 参照）。
 
 - Herdr 公式推奨に原則従っているか
 - 使用している Herdr 機能は本来の用途に沿っているか
 - 公式にない保証を独自に仮定していないか
-- コミュニティの実装・議論と比較したか
 - 独自実装は公式機能で不足する領域だけか
 - routing failure 時に fail closed になっているか
 - failed と uncertain を区別しているか

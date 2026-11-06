@@ -452,13 +452,14 @@ class TestRecorder(unittest.TestCase):
         # Case (a) & (b): Body contains bullets with status and quotes previous task ID
         body = "## Summary\n- **総合判定**: GO\n- **Task ID**: task_prev_quoted\n- **Status**: GO\nAll approved."
         with ReviewLock(self.common_dir):
-            # First save with result_status="succeeded"
+            # First save with task_status="succeeded"
             rid1, path1, is_new1 = record_save_atomic(
                 self.common_dir,
                 self.worktree,
                 "task_idempotent_1",
                 body,
-                result_status="succeeded",
+                outcome="GO",
+                task_status="succeeded",
                 target_commit="commit1",
             )
             self.assertEqual(rid1, "RV001")
@@ -475,7 +476,8 @@ class TestRecorder(unittest.TestCase):
                 self.worktree,
                 "task_idempotent_1",
                 body,
-                result_status="succeeded",
+                outcome="GO",
+                task_status="succeeded",
                 target_commit="commit1",
             )
             self.assertEqual(rid2, "RV001")
@@ -494,7 +496,7 @@ class TestRecorder(unittest.TestCase):
                 self.worktree,
                 "task_conflict_1",
                 "Body 1",
-                result_status="GO",
+                outcome="GO",
             )
 
             with self.assertRaises(TaskRecordConflictError):
@@ -503,7 +505,7 @@ class TestRecorder(unittest.TestCase):
                     self.worktree,
                     "task_conflict_1",
                     "Different Body 2",
-                    result_status="GO",
+                    outcome="GO",
                 )
 
     def test_record_save_atomic_conflict_commit(self):
@@ -887,7 +889,7 @@ class TestCliIntegration(unittest.TestCase):
             "--worktree", wt_str,
             "--task-id", "task_abc",
             "--body", "## Review Summary\n\nApproved.",
-            "--result-status", "GO",
+            "--outcome", "GO",
         ])
         self.assertEqual(code, 0)
 
@@ -897,7 +899,7 @@ class TestCliIntegration(unittest.TestCase):
             "--worktree", wt_str,
             "--task-id", "task_abc",
             "--body", "## Review Summary\n\nApproved.",
-            "--result-status", "GO",
+            "--outcome", "GO",
         ])
         self.assertEqual(code, 0)
 
@@ -934,7 +936,7 @@ class TestCliIntegration(unittest.TestCase):
                 "--worktree", wt_str,
                 "--task-id", "task_stdin",
                 "--body-file", "-",
-                "--result-status", "GO",
+                "--outcome", "GO",
             ])
             self.assertEqual(code, 0)
 
@@ -1035,7 +1037,7 @@ class TestCliIntegration(unittest.TestCase):
 
     @patch("repo_review_helper.cli.check_active_review_tasks")
     def test_cli_record_save_outcome_required_exit_2(self, mock_check):
-        """X-1: Omitting --outcome or providing invalid outcome via legacy --result-status exits 2."""
+        """X-1 & C-11: Omitting --outcome, passing removed --result-status, or passing CONDITIONAL GO exits 2."""
         mock_check.return_value = TaskCheckResult(
             can_safely_initialize=True,
             has_active_tasks=False,
@@ -1053,15 +1055,26 @@ class TestCliIntegration(unittest.TestCase):
         ])
         self.assertEqual(code1, 2)
 
-        # 2. Specifying legacy --result-status succeeded (which is not an outcome)
-        code2 = cli_main([
-            "record-save",
-            "--worktree", wt_str,
-            "--task-id", "task_legacy_succeeded",
-            "--body", "Review content",
-            "--result-status", "succeeded",
-        ])
-        self.assertEqual(code2, 2)
+        # 2. Specifying removed legacy --result-status or CONDITIONAL GO raises SystemExit(2) in argparse
+        with self.assertRaises(SystemExit) as ctx_legacy:
+            cli_main([
+                "record-save",
+                "--worktree", wt_str,
+                "--task-id", "task_legacy_succeeded",
+                "--body", "Review content",
+                "--result-status", "succeeded",
+            ])
+        self.assertEqual(ctx_legacy.exception.code, 2)
+
+        with self.assertRaises(SystemExit) as ctx_cond:
+            cli_main([
+                "record-save",
+                "--worktree", wt_str,
+                "--task-id", "task_cond_go",
+                "--body", "Review content",
+                "--outcome", "CONDITIONAL GO",
+            ])
+        self.assertEqual(ctx_cond.exception.code, 2)
 
     @patch("repo_review_helper.cli.check_active_review_tasks")
     def test_request_create_tier_instructions(self, mock_check):

@@ -2,19 +2,19 @@
 
 ## 役割と pane（例）
 
-Herdr 上の live 名は環境依存。logical role は handoff の `reviewer` / requester pane。
+Herdr 上の live 名は環境依存。本リポジトリでは [repo-workflow](../repo-workflow/SKILL.md) と共通の日本語ロール名（`レビュワー`、`メイン`、`設計担当`、`実装担当`）を使用する。
 
-| 論理 role               | 例（この workspace）       | 備考                                                               |
-| ----------------------- | -------------------------- | ------------------------------------------------------------------ |
-| requester / implementer | `${HERDR_WORKSPACE_ID}:p1` | handoff 実行 pane                                                  |
-| reviewer worker         | `${HERDR_WORKSPACE_ID}:p2` | `--worker-role reviewer`（または登録したカスタムロール名）の解決先 |
+| 論理 role               | 例（この workspace）       | 備考                                                    |
+| ----------------------- | -------------------------- | ------------------------------------------------------- |
+| requester / implementer | `${HERDR_WORKSPACE_ID}:p1` | handoff 実行 pane（`メイン` / `設計担当` / `実装担当`） |
+| reviewer worker         | `${HERDR_WORKSPACE_ID}:p2` | `--to レビュワー` の解決先                              |
 
-`herdr agent list`（および `herdr-orchestrator role show`）で pane と role の紐づけを確認。Registry の `worker.agent_name`（Role Binding 利用時は `pane_id` が格納済み）と reviewer 自身の `HERDR_PANE_ID`（`pane_id`）または live `agent.name` が一致すること（§11.4）。
-※ 本リポジトリのレビュー連携では標準ロール名 `reviewer`（UI 表示は `--label "レビュワー"`）での登録を推奨。日本語ロール名（例: `レビュワー`）で登録している環境では handoff 時に `--to レビュワー` を指定する。
+`herdr agent list`（および `herdr-orchestrator role show`）で pane と role の紐づけを確認。Registry の `worker.agent_name`（Role Binding 利用時は `pane_id` が格納済み）と reviewer 自身の `HERDR_PANE_ID`（`pane_id`）または live `agent.name` が一致すること（[設計 §11.4](../../../docs/herdr-orchestrator/06-results-and-workflows.md#sec-11-4)）。
+※ 本リポジトリのレビュー連携では [repo-workflow](../repo-workflow/SKILL.md) と統一し、日本語ロール名 `レビュワー`（handoff 時に `--to レビュワー` を指定）を標準とする。
 
-- **GitHub 操作権限とコメント投稿条件**:
+- **GitHub 操作権限とコメント投稿条件（正本: [repo-workflow §7](../repo-workflow/SKILL.md#github-write-matrix)）**:
   - **コメント投稿条件**: 内部レビューはローカル完結を基本とし、依頼元から明示的に指示された場合（request や instruction での指定）に限り、対象 Finding Issue へレビュー結果をコメント投稿（`gh issue comment`）する。投稿前に Issue 番号・リポジトリ・対象 SHA を確認し、レビューGO を「解決完了」と表現しない。API エラー時はレビュー自体を失敗とせず警告として扱う。
-  - **クローズ・変更権限**: Finding Issue のクローズ（`gh issue close`）、再オープン、ラベル変更は、PR マージ後の再検証を完了した依頼元（requester / implementer）のみが実施する。**レビュワー（reviewer）が自律的に Issue の状態を変更することは厳禁とする（クローズ等は依頼元のみが実施）**。
+  - **クローズ・変更権限**: Finding Issue を含む GitHub Issue のクローズ（`gh issue close`）、再オープン（`gh issue reopen`）、およびラベル変更（`gh issue edit`）は **人間のみが実施する**（エージェントによる実行は厳禁。依頼元エージェントは PR マージ後の再検証と解決確認コメントの記録・人間へのクローズ推奨報告までを担当する）。
 
 ---
 
@@ -26,7 +26,7 @@ Herdr 上の live 名は環境依存。logical role は handoff の `reviewer` /
 - [ ] Task Registry / 状態遷移の正本は [03-task-registry.md](../../../docs/herdr-orchestrator/03-task-registry.md) に沿う
 - [ ] Herdr 公式仕様と独自設計の境界（[レビューガイドライン](../../../docs/herdr-agent-review-guidelines.md) §2–4）
 - [ ] public CLI のみ Registry 更新（JSON 手編集なし）
-- [ ] §15: 破壊的操作を allowlist 前提にしない
+- [ ] [設計 §15](../../../docs/herdr-orchestrator/07-skill-and-implementation.md#sec-15): 破壊的操作を allowlist 前提にしない
 - [ ] テスト: `npm run test:orchestrator`（claim は request / response に記載）
 - [ ] Markdown 変更時: 設計書なら `npm run format:md` / `check:md`（AGENTS.md）
 - [ ] 宣言的成果物（Skill・設計書・設定等）: 規則間の整合性（概念定義の一致、原則と例外の整合、判定条件とテンプレートの整合、矛盾・参照漏れの有無）
@@ -82,7 +82,7 @@ Herdr 上の live 名は環境依存。logical role は handoff の `reviewer` /
 | **A-4** | **相対リンクおよびアンカーの健全性** | `check:md` に加え、主要ドキュメント間の相対リンクおよび `#anchor`（`#sec-N` 等）が実在するか確認する。                                                                                                                                                                                                                                        |
 | **A-5** | **バージョン表記の整合性**           | `package.json`、SKILL 定義、最新 git tag のバージョン表記に矛盾がないか確認する。                                                                                                                                                                                                                                                             |
 | **A-6** | **GitHub Issue・PR の健全性**        | クローズ漏れの Finding Issue、マージ済み機能を参照したままの未解決 Issue、放置された draft PR、および作成者が Bot（`<app-slug>[bot]`）でないエージェント作成 PR がないか（読み取り確認のみ、自律的な状態変更は厳禁）。                                                                                                                        |
-| **A-7** | **ローカル作業領域の健全性**         | `.input/inbox/` に放置された古い依頼ファイル、`.input/review/` に残存したドラフト、`docs/reviews/internal/INDEX.md` と個別 RV 記録の整合性、および `herdr-orchestrator role show`（`--global` 含む）で `live` 以外の古い Role Binding（閉鎖済み不要ペイン等）が放置されていないかを確認する。                                                 |
+| **A-7** | **ローカル作業領域の健全性**         | `.input/inbox/` に放置された古い依頼ファイル、`.input/review/` に残存したドラフト、`docs/reviews/internal/<instance-id>/INDEX.md` と個別 RV 記録の整合性、および `herdr-orchestrator role show`（`--global` 含む）で `live` 以外の古い Role Binding（閉鎖済み不要ペイン等）が放置されていないかを確認する。                                   |
 | **A-8** | **放置 TODO・将来課題の棚卸し**      | ドキュメントやコード内に放置された「TODO」「将来対応」「チケット」等の記述を棚卸しし、未起票の課題がないか確認する。                                                                                                                                                                                                                          |
 
 ---
@@ -126,6 +126,8 @@ Herdr 上の live 名は環境依存。logical role は handoff の `reviewer` /
 #### P2 の例外的 Blocking 基準
 
 P2 を例外的に **Blocking** と判定する場合、P1 と同様に「具体的な重大影響」および「なぜマージ前の修正が不可欠か（Blocking 理由）」の明記を必須とする。説明できない場合は原則どおり Non-blocking とする。
+
+<a id="refutation-checks"></a>
 
 ### 2. 指摘候補に対する反証確認（必須）
 
@@ -189,7 +191,7 @@ GitHub 管理対象レビュー（Pull Request レビュー等）において、
 | **要修正**       | `- Status: Changes requested` | 未解消の確認済み Blocking 指摘（P0/P1、例外的 Blocking の P2）への修正対応を要求（※ Non-blocking 指摘のみの場合は他の GO 条件を満たす限り GO と判定可能）。 |
 | **NO-GO**        | `- Status: Changes requested` | 設計方針やアーキテクチャの抜本的見直しまたは差し戻しを要求（メタデータは `Changes requested` とし、本文の判定・総評において NO-GO である旨を詳述）。        |
 
-※ **レビューGOとIssueクローズ・コメント投稿条件の厳格な分離**: レビューGOは変更内容がマージ可能であることを示すのみであり、関連する Finding Issue の解決完了を意味しない。レビュワーによるレビュー結果のコメント投稿は依頼元から明示的に指示された場合のみ実行する。また、**Finding Issue のクローズ権限は依頼元（requester / implementer）に限定され、レビュワーが自律的に Issue をクローズ・再オープン・ラベル変更することは厳禁とする（クローズ等は PR マージ後に依頼元が実施）**。
+※ **レビューGOとIssueクローズ・コメント投稿条件の厳格な分離**: レビューGOは変更内容がマージ可能であることを示すのみであり、関連する Finding Issue の解決完了を意味しない。レビュワーによるレビュー結果のコメント投稿は依頼元から明示的に指示された場合のみ実行する。また、**Finding Issue を含む Issue のクローズ・再オープン・ラベル変更は人間のみが実施する（エージェントによる実行は厳禁。依頼元エージェントは PR マージ後の再検証と解決確認コメントの記録・人間へのクローズ推奨報告までを担当する。正本: [repo-workflow §7](../repo-workflow/SKILL.md#github-write-matrix)）**。
 
 ### 5. 実行結果と推論の区別
 
@@ -215,6 +217,15 @@ GitHub 管理対象レビュー（Pull Request レビュー等）において、
      - レビューイが `defer` を選択した Non-blocking 指摘で、後続 Issue へのリンク・チケット化が確認された場合（「未対応（後続 Issue #NN へ移管）」として記録し、GO を妨げない）。※ Blocking 指摘（P0/P1、および P2 の例外的 Blocking）の `defer` は原則不可。
      - レビューイが `reject` を選択したが反証が不成立の場合、または未修正の場合（Blocking 指摘であれば要修正を維持）。
    - `検証不能`: 前回記録や根拠が確認できない場合。
+   - **再レビュー結果の記録表（`reject` の反証成否・合意根拠を含む）**:
+     `## 再レビュー結果` セクションには以下の表を含め、特に `reject`（前回指摘の誤り / 未対応）については反証の成否と合意根拠を明記する：
+
+     | 前回指摘 ID | 前回重大度 / Blocking | レビューイ Decision | 再検証状態                        | 確認根拠・反証成否（`accept` の修正確認、`defer` の移管先 Issue、`reject` の反証成立/不成立の根拠） |
+     | :---------- | :-------------------- | :------------------ | :-------------------------------- | :-------------------------------------------------------------------------------------------------- |
+     | P1-1        | P1 / Blocking         | `accept`            | `対応済み`                        | `<path>:<line>` の修正とテスト通過を確認                                                            |
+     | P2-1        | P2 / Non-blocking     | `reject`            | `前回指摘の誤り`                  | 反証成立: `<path>:<line>` の上位ガードで防止されていることを確認し合意                              |
+     | P3-1        | P3 / Non-blocking     | `defer`             | `未対応（後続 Issue #NN へ移管）` | Finding Issue #NN への起票・リンクを確認                                                            |
+
 4. **回帰不具合の確認**: 修正によって別の問題が発生していないか、関連する状態遷移やエラー処理、既存テストが破綻していないかを確認する。
 5. **新規問題の探索**: 新たな差分および周辺コードについて、前回見落とした問題がないか探索する（前回と同じ指摘を根拠なく繰り返さない）。
 
@@ -329,15 +340,10 @@ GitHub 管理対象レビュー（Pull Request レビュー等）において、
 
 ### 6. レビューイ回答ドラフトテンプレート（`.input/review/reviewee-draft.md` 用）
 
-※ テンプレート主導アプローチ（[基本方針: 指針 9](../../../docs/core-principles.md#guideline-9)）に基づき、スクリプトによる本文の自動挿入や構文書き換えは行われません。エージェントは以下のテンプレートに沿って、取り込まれた指摘に対する回答（Decision、レビューイ評価、対応内容/理由）を自由記述として記述します。
+※ テンプレート主導アプローチおよび制御値の完全分離（[基本方針: 指針 9](../../../docs/core-principles.md#guideline-9)）に基づき、外側の制御値（送信時に `scripts/review-sync.sh` が自動付与する `<!-- review-sync ... -->` マーカー等）は機械側で処理されます。エージェントは本文に制御値（`Role` / `Round` 等）やマーカーを手書きせず、以下のテンプレートに沿って回答（Decision、レビューイ評価、対応内容/理由）を自由記述として記述します。
 
 ```markdown
-<!-- review-sync role=reviewee round=<round> -->
-
 # レビュー指摘への回答 (PR #<pr_number>)
-
-- Role: reviewee
-- Round: <round>
 
 ## 判定に対する応答
 
