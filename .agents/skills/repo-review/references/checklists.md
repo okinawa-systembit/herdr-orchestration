@@ -6,28 +6,28 @@
 
 ### 1.1 基本確認項目
 
-- [ ] 変更が [実装 INDEX](../../../docs/herdr-orchestrator-implementation-index.md) の段階と一致
-- [ ] Task Registry / 状態遷移の正本は [03-task-registry.md](../../../docs/herdr-orchestrator/03-task-registry.md) に沿う
-- [ ] Herdr 公式仕様と独自設計の境界（[レビューガイドライン](../../../docs/herdr-agent-review-guidelines.md) §2–4）
+- [ ] 変更が [実装 INDEX](../../../../docs/herdr-orchestrator-implementation-index.md) の段階と一致
+- [ ] Task Registry / 状態遷移の正本は [03-task-registry.md](../../../../docs/herdr-orchestrator/03-task-registry.md) に沿う
+- [ ] Herdr 公式仕様と独自設計の境界（[レビューガイドライン](../../../../docs/herdr-agent-review-guidelines.md) §2–4）
 - [ ] public CLI のみ Registry 更新（JSON 手編集なし）
-- [ ] [設計 §15](../../../docs/herdr-orchestrator/07-skill-and-implementation.md#sec-15): 破壊的操作を allowlist 前提にしない
+- [ ] [設計 §15](../../../../docs/herdr-orchestrator/07-skill-and-implementation.md#sec-15): 破壊的操作を allowlist 前提にしない
 - [ ] テスト: `npm run test:orchestrator`（claim は request / response に記載）
 - [ ] Markdown 変更時: 設計書なら `npm run format:md` / `check:md`（AGENTS.md）
 - [ ] 宣言的成果物（Skill・設計書・設定等）: 規則間の整合性（概念定義の一致、原則と例外の整合、判定条件とテンプレートの整合、矛盾・参照漏れの有無）
 - [ ] 既存保証の維持: 変更によって従来保証されていた安全性・正確性・検証範囲・品質ゲートが失われていないか（CI/CD、セキュリティ、データ整合性、並行処理、契約変更等で重点確認）
 
-### 1.2 基本方針（[docs/core-principles.md](../../../docs/core-principles.md)）チェックリスト
+### 1.2 基本方針（[docs/core-principles.md](../../../../docs/core-principles.md)）チェックリスト
 
-- [ ] **原則 1（KISS 原則）**: 複雑な仕組み・過剰な状態管理・多段フォールバックを排除し、最も単純なアプローチを採っているか。標準ファイル操作機能を使用しているか。
-- [ ] **原則 2（人間中心の可観測性）**: 作業領域は `.input/` に一元化され、ブラックボックスを作っていないか。
-- [ ] **原則 3（車輪の再発明をしない）**: `git`、`gh` CLI、Unix 標準コマンド等の既存ツール・公式機能に素直に委譲しているか。
-- [ ] **原則 4（依存管理の境界分離）**: 配布物（中央 Skill・CLI）は Python 標準ライブラリと OS 標準コマンドのみ（ゼロ依存）を維持しているか。
-- [ ] **原則 5（秘密のインライン渡し）**: 認証トークンや鍵の存在範囲をコマンドの一瞬に限定し、平文で永続化・ログ出力していないか。
-- [ ] **原則 6（1つの事実は1か所＋機械検査）**: ステータスや設定の多重管理を排除し、単一正本と機械検査（lint/check）をセットにしているか。
-- [ ] **原則 7（修正ラウンドでスコープを広げない）**: レビュー指摘修正コミットに指摘の是正のみを入れ、無関係な変更を混ぜていないか。
-- [ ] **指針 8（機械検査とエージェント判断の境界）**: 「ただし〜を除く」が 2 つ以上必要な機械検査を作らず、自由文の意味判定はエージェントに任せているか。
-- [ ] **指針 9（テンプレート主導と制御値の完全分離）**: 本文に外側ヘッダーや機械制御値を手書き・自動挿入させていないか。
-- [ ] **指針 10（黙って失敗しない）**: 警告を標準エラーに出力し、テストは引数変換だけでなく実際の結果・状態（ファイル内容、終了コード、stderr）を検証しているか。
+- [ ] **[原則 1（KISS 原則）](../../../../docs/core-principles.md#principle-1)**: 複雑な仕組み・過剰な状態管理・多段フォールバックの排除、標準ファイル操作機能の利用
+- [ ] **[原則 2（人間中心の可観測性）](../../../../docs/core-principles.md#principle-2)**: 作業領域の `.input/` 一元化、ブラックボックス排除
+- [ ] **[原則 3（車輪の再発明をしない）](../../../../docs/core-principles.md#principle-3)**: `git`、`gh` CLI、Unix 標準コマンド等の既存ツール・公式機能への素直な委譲
+- [ ] **[原則 4（依存管理の境界分離）](../../../../docs/core-principles.md#principle-4)**: 配布物（中央 Skill・CLI）のゼロ依存（Python 標準ライブラリと OS 標準コマンドのみ）維持
+- [ ] **[原則 5（秘密のインライン渡し）](../../../../docs/core-principles.md#principle-5)**: 認証トークンや鍵の局所化・インライン渡し、平文永続化・ログ漏洩の排除
+- [ ] **[原則 6（1つの事実は1か所＋機械検査）](../../../../docs/core-principles.md#principle-6)**: ステータスや設定の多重管理排除、単一正本と機械検査（lint/check）のセット運用
+- [ ] **[原則 7（修正ラウンドでスコープを広げない）](../../../../docs/core-principles.md#principle-7)**: レビュー指摘修正コミットへの新機能・大規模移行の混入防止
+- [ ] **[指針 8（機械検査とエージェント判断の境界）](../../../../docs/core-principles.md#guideline-8)**: 「ただし〜を除く」2 つ以上の機械検査の禁止、自由文の意味・妥当性判定のエージェント委譲
+- [ ] **[指針 9（テンプレート主導と制御値の完全分離）](../../../../docs/core-principles.md#guideline-9)**: 本文への外側ヘッダーや機械制御値の手書き・自動挿入排除
+- [ ] **[指針 10（黙って失敗しない）](../../../../docs/core-principles.md#guideline-10)**: 警告の標準エラー出力、テストにおける引数変換だけでなく実際の結果・状態（ファイル内容、終了コード、stderr）の検証
 
 ### 1.3 テスト品質（実効性）チェックリスト
 

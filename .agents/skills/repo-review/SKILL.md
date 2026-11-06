@@ -81,8 +81,7 @@ scripts/repo-review-helper record-save \
   --task-id "<task.id>" \
   --body-file .input/tmp/review-body.md \
   --outcome "<GO|要修正|NO-GO>" \
-  --target-commit "<target_commit_sha>"
-rm -f .input/tmp/review-body.md
+  --target-commit "<target_commit_sha>" && rm -f .input/tmp/review-body.md
 ```
 
 ### 6. 結果提出

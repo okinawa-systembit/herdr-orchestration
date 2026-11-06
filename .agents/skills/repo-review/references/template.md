@@ -95,7 +95,7 @@
 <!-- 実際に実行したコマンドとその結果のみ記載。未実行の項目は未実行欄に明記。固定文言による過大報告禁止 -->
 
 - 実行コマンド: `npm run format:md && npm run check:md` (PASS)
-- 実行コマンド: `npm run test:orchestrator` (399 件 PASS)
+- 実行コマンド: `npm run test:orchestrator` (<件数> 件 PASS / 未実行)
 - 未実施の検証: リモート GitHub Actions での検証、本番環境での動作確認
 
 ## 調査範囲と未確認事項
