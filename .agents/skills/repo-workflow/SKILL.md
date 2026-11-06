@@ -64,6 +64,9 @@ git switch -c <新しいブランチ名>
   - 実装タスク: `issue-<N>-<topic>-impl`
   - 文書・単発タスク: `issue-<N>-<topic>`
 
+5. **ブランチ作業中のローカルコミット一意化（C-15）**:
+   - レビュー記録の `target_commit` SHA を一意に追跡可能とするため、ローカルレビューを依頼する前に必ずコミット（作業中であれば WIP コミット可）を作成する。未コミット差分でのレビュー依頼は例外的な場面に限定する。
+
 <a id="pr-create"></a>
 
 ### 2.3 Pull Request の作成（正本: Bot アカウント必須）
@@ -183,7 +186,8 @@ rm -f .input/tmp/pr-body.md
    - 依頼書で指定された **差分外波及チェック（D-1〜D-3）** の更新（設計書ヘッダーの `実装完了（PR #NN にてマージ済み）` 更新、節冒頭の「未実装」注記の解除、`public-cli.md` / `--help` 整合など）を行う。
    - `npm run test:orchestrator`（必要に応じ `npm run verify:orchestrator`）、および Markdown を変更した場合は `npm run format:md && npm run check:md` を実行し、すべてパスした状態で**ローカルコミット（未 push）**を作成する。
 4. **PR 作成前のローカル実装レビュー依頼（必須）**:
-   - [repo-review](../repo-review/SKILL.md) の Requester 手順（レビュースキルや関連レビュー文書自体の改修時は [review-skill-audit](../review-skill-audit/SKILL.md) モード B）に従い、`scripts/repo-review-helper request-create` で依頼書を作成してレビュワーへ `sync handoff` し、**GO（Blocking 0 件）** を獲得する（指摘修正時は修正コミットを作成し再レビューを受ける。ただし `review-skill-audit` B-1 の 3 に定める軽量経路を除く）。
+   - [repo-review](../repo-review/SKILL.md) の Requester 手順（レビュースキルや関連レビュー文書自体の改修時は [review-skill-audit](../review-skill-audit/SKILL.md) モード B）に従い、`scripts/repo-review-helper request-create` で依頼書を作成してレビュワーへ `sync handoff` し、**GO（Blocking 0 件）** を獲得する。
+   - **P3 軽量経路（LGTM with nits）**: 指摘が P3（軽微な改善提案）のみの場合は判定が GO となり、**P3 の修正対応は自己確認（および PR 最終判定コメント等の要約）で完結させ、再レビュー往復を不要**とする（Blocking または P2 指摘の修正時は修正コミットを作成して再レビューを受ける）。
 5. **実装 PR の作成（Bot）**:
    - レビュー GO 後（依頼書で push・PR 作成が許可されている場合）、共通手順（[2.3](#pr-create)）に従って `git push -u origin <作業ブランチ>` と **`bash scripts/review-sync.sh pr-create`**（**個人の `gh pr create` 直接実行は厳禁**）を実行する。
    - D-1 で設計書ヘッダーに実際の PR 番号（`PR #NN`）を反映する必要がある場合は、PR 作成直後に番号を更新して `npm run format:md && npm run check:md` を通し、追加コミット＆ push する。

@@ -1,8 +1,10 @@
 # Herdr Orchestrator エージェントレビューガイドライン
 
-## 1. 目的
+## 1. 目的と位置づけ
 
-本資料は、Herdr Orchestrator に関する設計書および実装を AI エージェントがレビューする際の共通基準を定める。
+本資料は、**Herdr Orchestrator の設計書・実装・テストを変更する場合に参照するドメイン固有のレビューガイドライン（§2〜§26 および §27 のドメイン固有 Blocking 例）** を定める。
+
+汎用的な指摘の 3 分類・重大度（P0〜P3）と Blocking 判定規則・GO 判定条件・反証確認は唯一の正本である **[.agents/skills/repo-review/references/criteria.md](../.agents/skills/repo-review/references/criteria.md)**（または [.agents/skills/repo-review/references.md](../.agents/skills/repo-review/references.md#review-principles)）に、出力テンプレートは **[.agents/skills/repo-review/references/template.md](../.agents/skills/repo-review/references/template.md)** に、汎用チェックリストは **[.agents/skills/repo-review/references/checklists.md](../.agents/skills/repo-review/references/checklists.md)** に従う。
 
 レビューでは、単に「動作しそうか」を確認するのではなく、Herdr 本来の設計思想・公式仕様・実運用上の安全性・コミュニティで蓄積された知見との整合性を確認する。
 
@@ -540,13 +542,13 @@ Herdr の仕様に関する判断が必要な場合は、記憶だけで断定�
 - recovery 不能な状態が仕様上発生する
 - 設計書と実装の重要な Contract が一致しない
 
-汎用的な指摘の 3 分類・重大度（P0〜P3）と Blocking 判定規則・GO 判定条件・反証確認は、唯一の正本である **[.agents/skills/repo-review/references.md](../.agents/skills/repo-review/references.md#review-principles)** に従う。また、Finding Issue の起票・解決検証手順は **[.agents/skills/review-finding/SKILL.md](../.agents/skills/review-finding/SKILL.md)**、GitHub への書き込みおよび Issue クローズ・ラベル変更権限（人間のみ）の正本は **[.agents/skills/repo-workflow/SKILL.md §7](../.agents/skills/repo-workflow/SKILL.md#github-write-matrix)** に従う。
+汎用的な指摘の 3 分類・重大度（P0〜P3）と Blocking 判定規則・GO 判定条件・反証確認は、唯一の正本である **[.agents/skills/repo-review/references/criteria.md](../.agents/skills/repo-review/references/criteria.md)**（または [.agents/skills/repo-review/references.md](../.agents/skills/repo-review/references.md#review-principles)）に従う。また、Finding Issue の起票・解決検証手順は **[.agents/skills/review-finding/SKILL.md](../.agents/skills/review-finding/SKILL.md)**、GitHub への書き込みおよび Issue クローズ・ラベル変更権限（人間のみ）の正本は **[.agents/skills/repo-workflow/SKILL.md §7](../.agents/skills/repo-workflow/SKILL.md#github-write-matrix)** に従う。
 
 ---
 
 ## 28. レビュー出力形式
 
-レビュー記録およびコメントの出力形式は、唯一の正本である **[.agents/skills/repo-review/references.md](../.agents/skills/repo-review/references.md#review-response-body)** に統一する（本ガイドラインで独自の別出力フォーマットは設けない）。
+レビュー記録およびコメントの出力形式は、唯一の正本である **[.agents/skills/repo-review/references/template.md](../.agents/skills/repo-review/references/template.md)**（または [.agents/skills/repo-review/references.md](../.agents/skills/repo-review/references.md#review-response-body)）に統一する（本ガイドラインで独自の別出力フォーマットは設けない）。
 
 Herdr Orchestrator の設計・実装に関する指摘を行う際は、正本テンプレートの「根拠」欄に **Herdr 公式仕様との関係（§2〜§6）** を明記し、Herdr の現在仕様を確認しなければ判断できない事項は推測で結論付けず「要確認事項」に分類する。
 
@@ -574,7 +576,7 @@ Herdr Orchestrator の設計・実装に関する指摘を行う際は、正本�
 
 ## 30. 最終確認
 
-Herdr Orchestrator の設計・実装レビュー完了前に、ドメイン固有観点として次を確認する（汎用チェックリストは [.agents/skills/repo-review/references.md](../.agents/skills/repo-review/references.md#review-scope) 参照）。
+Herdr Orchestrator の設計・実装レビュー完了前に、ドメイン固有観点として次を確認する（汎用チェックリストは [.agents/skills/repo-review/references/checklists.md](../.agents/skills/repo-review/references/checklists.md) 参照）。
 
 - Herdr 公式推奨に原則従っているか
 - 使用している Herdr 機能は本来の用途に沿っているか
