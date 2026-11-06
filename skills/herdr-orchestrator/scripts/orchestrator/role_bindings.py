@@ -240,14 +240,61 @@ def _read_bindings_unlocked(repository_id: str) -> dict[str, str]:
     return roles
 
 
+def _atomic_write_json(
+    dest_path: Path,
+    payload: dict[str, Any],
+    tmp_prefix: str,
+    *,
+    mode: int = _FILE_MODE,
+) -> None:
+    """JSON データをアトミックにファイルへ書き込む共通ヘルパー。"""
+    _ensure_roles_dir()
+    _assert_safe_path(dest_path, must_exist=False)
+    encoded = (json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    tmp_name = f".{tmp_prefix}.{secrets.token_hex(8)}.tmp"
+    tmp_path = dest_path.parent / tmp_name
+    flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(str(tmp_path), flags, mode)
+    except OSError as exc:
+        raise RoleBindingError(
+            "role_binding_write_failed",
+            message=f"temp open failed: {exc.strerror or exc}",
+        ) from exc
+    try:
+        offset = 0
+        while offset < len(encoded):
+            written = os.write(fd, encoded[offset:])
+            if written <= 0:
+                raise OSError(f"incomplete write to temp file {tmp_path.name}")
+            offset += written
+        os.fsync(fd)
+    except Exception as exc:
+        os.close(fd)
+        tmp_path.unlink(missing_ok=True)
+        raise RoleBindingError(
+            "role_binding_write_failed",
+            message=f"write failed: {exc}",
+        ) from exc
+    os.close(fd)
+    _safe_chmod(tmp_path, mode)
+    try:
+        os.replace(tmp_path, dest_path)
+        _safe_chmod(dest_path, mode)
+    except OSError as exc:
+        tmp_path.unlink(missing_ok=True)
+        raise RoleBindingError(
+            "role_binding_write_failed",
+            message=f"atomic replace failed: {exc.strerror or exc}",
+        ) from exc
+
+
 def _write_doc_unlocked(
     repository_id: str,
     roles: dict[str, str],
     targets: dict[str, dict[str, Any]],
 ) -> None:
-    root = _ensure_roles_dir()
     dest = role_bindings_file_path(repository_id)
-    _assert_safe_path(dest, must_exist=False)
     norm_id = repository_id.strip().lower()
     repo_val = (
         norm_id
@@ -266,43 +313,7 @@ def _write_doc_unlocked(
         "targets": clean_targets,
         "updated_at": _utc_now_iso(),
     }
-    encoded = (json.dumps(doc, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode("utf-8")
-    tmp_name = f".role_{dest.stem}.{secrets.token_hex(8)}.tmp"
-    tmp_path = root / tmp_name
-    flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0)
-    try:
-        fd = os.open(str(tmp_path), flags, _FILE_MODE)
-    except OSError as exc:
-        raise RoleBindingError(
-            "role_binding_write_failed",
-            message=f"temp open failed: {exc.strerror or exc}",
-        ) from exc
-    try:
-        offset = 0
-        while offset < len(encoded):
-            written = os.write(fd, encoded[offset:])
-            if written <= 0:
-                raise OSError("incomplete write to role bindings temp file")
-            offset += written
-        os.fsync(fd)
-    except Exception as exc:
-        os.close(fd)
-        tmp_path.unlink(missing_ok=True)
-        raise RoleBindingError(
-            "role_binding_write_failed",
-            message=f"write failed: {exc}",
-        ) from exc
-    os.close(fd)
-    _safe_chmod(tmp_path, _FILE_MODE)
-    try:
-        os.replace(tmp_path, dest)
-        _safe_chmod(dest, _FILE_MODE)
-    except OSError as exc:
-        tmp_path.unlink(missing_ok=True)
-        raise RoleBindingError(
-            "role_binding_write_failed",
-            message=f"atomic replace failed: {exc.strerror or exc}",
-        ) from exc
+    _atomic_write_json(dest, doc, f"role_{dest.stem}")
 
 
 def get_role_bindings(repository_id: str) -> dict[str, str]:
@@ -559,9 +570,7 @@ def get_project_catalog() -> dict[str, Any]:
 
 
 def _write_project_catalog_unlocked(projects: dict[str, dict[str, str]]) -> None:
-    root = _ensure_roles_dir()
     dest = project_catalog_file_path()
-    _assert_safe_path(dest, must_exist=False)
     clean_projects = {
         alias: {
             "scope_id": info["scope_id"],
@@ -575,43 +584,7 @@ def _write_project_catalog_unlocked(projects: dict[str, dict[str, str]]) -> None
         "projects": clean_projects,
         "updated_at": _utc_now_iso(),
     }
-    encoded = (json.dumps(doc, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode("utf-8")
-    tmp_name = f".projects.{secrets.token_hex(8)}.tmp"
-    tmp_path = root / tmp_name
-    flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0)
-    try:
-        fd = os.open(str(tmp_path), flags, _FILE_MODE)
-    except OSError as exc:
-        raise RoleBindingError(
-            "role_binding_write_failed",
-            message=f"temp open failed: {exc.strerror or exc}",
-        ) from exc
-    try:
-        offset = 0
-        while offset < len(encoded):
-            written = os.write(fd, encoded[offset:])
-            if written <= 0:
-                raise OSError("incomplete write to project catalog temp file")
-            offset += written
-        os.fsync(fd)
-    except Exception as exc:
-        os.close(fd)
-        tmp_path.unlink(missing_ok=True)
-        raise RoleBindingError(
-            "role_binding_write_failed",
-            message=f"write failed: {exc}",
-        ) from exc
-    os.close(fd)
-    _safe_chmod(tmp_path, _FILE_MODE)
-    try:
-        os.replace(tmp_path, dest)
-        _safe_chmod(dest, _FILE_MODE)
-    except OSError as exc:
-        tmp_path.unlink(missing_ok=True)
-        raise RoleBindingError(
-            "role_binding_write_failed",
-            message=f"atomic replace failed: {exc.strerror or exc}",
-        ) from exc
+    _atomic_write_json(dest, doc, "projects")
 
 
 def register_project(alias: str, scope_id: str) -> dict[str, Any]:
