@@ -5,7 +5,14 @@ from pathlib import Path
 from typing import Any
 
 from orchestrator.completion_commands import best_effort_completion_after_result
-from orchestrator.identity import GLOBAL_SCOPE_ID, is_valid_uuid_v4
+from orchestrator.identity import (
+    GLOBAL_SCOPE_ID,
+    GitRepositoryNotInitializedError,
+    derive_directory_scope_id,
+    get_repository_identity,
+    is_valid_uuid_v4,
+    resolve_git_common_dir,
+)
 from orchestrator.live_agent import (
     LiveAgentError,
     get_caller_live_agent,
@@ -52,8 +59,13 @@ def _registry_to_public(exc: RegistryError) -> ResultCommandError:
     )
 
 
-def _lookup_all_bound_roles(repo_id: str, pane_id: str | None) -> dict[str, str]:
-    """Return dict of scope -> bound_role for the pane (e.g., {'local': 'レビュワー', 'global': '調査担当'})."""
+def _lookup_all_bound_roles(
+    repo_id: str,
+    pane_id: str | None,
+    *,
+    worker_scope_id: str | None = None,
+) -> dict[str, str]:
+    """Return dict of scope -> bound_role for the pane (e.g., {'local': 'レビュワー', 'global': '調査担当', 'project': '実装担当'})."""
     roles: dict[str, str] = {}
     if not pane_id:
         return roles
@@ -69,6 +81,13 @@ def _lookup_all_bound_roles(repo_id: str, pane_id: str | None) -> dict[str, str]
             roles["global"] = gr
     except RoleBindingError:
         pass
+    if worker_scope_id and worker_scope_id not in (repo_id, GLOBAL_SCOPE_ID):
+        try:
+            pr = resolve_role_by_pane(worker_scope_id, pane_id)
+            if pr:
+                roles["project"] = pr
+        except RoleBindingError:
+            pass
     return roles
 
 
@@ -143,8 +162,21 @@ def build_recipient_verification(doc: dict[str, Any], *, command: str = "task-st
 
     caller_pane = (caller.pane_id or caller.name or "").strip()
     caller_cwd = caller.foreground_cwd.resolve()
-    bound_roles = _lookup_all_bound_roles(repo_id, caller_pane)
-    bound_role = bound_roles.get("local") or bound_roles.get("global")
+
+    worker_scope_id: str | None = None
+    try:
+        resolve_git_common_dir(worker_cwd)
+        worker_scope_id = get_repository_identity(worker_cwd)
+    except GitRepositoryNotInitializedError:
+        try:
+            worker_scope_id = derive_directory_scope_id(worker_cwd)
+        except Exception:
+            worker_scope_id = None
+    except Exception:
+        worker_scope_id = None
+
+    bound_roles = _lookup_all_bound_roles(repo_id, caller_pane, worker_scope_id=worker_scope_id)
+    bound_role = bound_roles.get("local") or bound_roles.get("global") or bound_roles.get("project")
 
     is_worker_caller = caller_pane == worker_pane or caller.name == worker_agent_name
     is_requester_caller = caller_pane == requester_pane or caller.name == requester_agent_name

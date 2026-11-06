@@ -36,10 +36,13 @@ from orchestrator.naming import derive_requester_role, expected_agent_name
 from orchestrator.role_bindings import (
     RoleBindingError,
     compare_and_update_role_binding,
+    get_project_catalog,
     get_role_binding_document,
     is_target_meta_valid,
     resolve_pane_by_role,
+    resolve_project_scope_id,
     resolve_role_by_pane,
+    validate_project_alias,
     validate_role_name,
 )
 from orchestrator.registry.errors import RegistryError
@@ -123,6 +126,7 @@ class HandoffInput:
     instruction: str
     result_wait_timeout_sec: int
     scope: str | None = None
+    project: str | None = None
 
 
 def _non_empty_str_match(a: str | None, b: str | None) -> bool:
@@ -153,6 +157,128 @@ def _snapshot_from_pane_dict(p: dict[str, Any]) -> LiveAgentSnapshot:
         tab_id=p.get("tab_id"),
         tab_number=p.get("tab_number"),
     )
+
+
+def _verify_project_bound_worker(
+    *,
+    project_alias: str,
+    target_scope_id: str,
+    canonical_worker_role: str,
+    bound_pane_id: str,
+    target_meta: dict[str, Any],
+    req_pane_opt: str | None,
+) -> LiveAgentSnapshot:
+    """Verify worker in a cross-project target without mutating target role bindings."""
+    expected_cwd = Path(target_meta["cwd"]).resolve()
+    expected_agent = target_meta["agent"]
+    target_summary = format_pane_display_summary(
+        target_meta, fallback_role=canonical_worker_role
+    )
+
+    if bound_pane_id == req_pane_opt:
+        raise HandoffCommandError(
+            "worker_context_changed",
+            message=f"{target_summary}（プロジェクト '{project_alias}'）が依頼元自身のペインと重なっています。",
+            details={"target": {**target_meta, "display_summary": target_summary}, "project": project_alias},
+        )
+
+    panes = list_live_panes_with_ui()
+    if panes is not None:
+        target_pane = next((p for p in panes if p.get("pane_id") == bound_pane_id), None)
+        if target_pane is None:
+            raise HandoffCommandError(
+                "worker_pane_closed_or_missing",
+                message=(
+                    f"{target_summary} に配送できませんでした（相手先ペイン {bound_pane_id} が実機上に存在しません）。"
+                    f"相手先プロジェクト（'{project_alias}'）の環境でエージェントを起動・確認し、必要に応じて role set で再設定してください。"
+                ),
+                details={"target": {**target_meta, "display_summary": target_summary}, "project": project_alias},
+            )
+        live_agent = target_pane.get("agent")
+        agent_status = target_pane.get("agent_status")
+        if agent_status == "none" or not live_agent:
+            raise HandoffCommandError(
+                "worker_agent_not_running",
+                message=f"{target_summary} に配送できませんでした（現在エージェントが起動しておらずシェル状態です）。",
+                details={"target": {**target_meta, "display_summary": target_summary}, "project": project_alias},
+            )
+        if agent_status not in ("idle", "done"):
+            raise HandoffCommandError(
+                "worker_not_promptable",
+                message=f"{target_summary} が応答可能な状態ではありません（status={agent_status}）。",
+                details={"target": {**target_meta, "display_summary": target_summary}, "project": project_alias},
+            )
+        live_cwd = Path(target_pane["cwd"]).resolve()
+        if live_cwd != expected_cwd or live_agent != expected_agent:
+            raise HandoffCommandError(
+                "worker_context_changed",
+                message=(
+                    f"{target_summary} の状態が登録時と変わっています"
+                    f"（登録時: {expected_cwd} / {expected_agent}、現在: {live_cwd} / {live_agent}）。"
+                    f"相手先プロジェクト（'{project_alias}'）の環境でエージェントを起動・確認し、必要に応じて role set で再設定してください。"
+                ),
+                details={
+                    "target": {**target_meta, "display_summary": target_summary},
+                    "project": project_alias,
+                    "actual": {
+                        "pane_id": bound_pane_id,
+                        "cwd": str(live_cwd),
+                        "agent": live_agent,
+                        "terminal_id": target_pane.get("terminal_id"),
+                        "agent_session_id": target_pane.get("agent_session_id"),
+                    },
+                },
+            )
+        return _snapshot_from_pane_dict(target_pane)
+
+    # Fallback when list_live_panes_with_ui() is None (e.g., minimal test harnesses)
+    try:
+        snap = get_live_agent(bound_pane_id)
+    except LiveAgentError as exc:
+        raise HandoffCommandError(
+            "worker_pane_closed_or_missing",
+            message=(
+                f"{target_summary} に配送できませんでした（閉じられているか応答しません）: {exc}。"
+                f"相手先プロジェクト（'{project_alias}'）の環境でエージェントを起動・確認し、必要に応じて role set で再設定してください。"
+            ),
+            details={"target": {**target_meta, "display_summary": target_summary}, "project": project_alias},
+        ) from exc
+
+    if snap.agent_status == "none" or not snap.agent:
+        raise HandoffCommandError(
+            "worker_agent_not_running",
+            message=f"{target_summary} に配送できませんでした（現在エージェントが起動しておらずシェル状態です）。",
+            details={"target": {**target_meta, "display_summary": target_summary}, "project": project_alias},
+        )
+    if snap.agent_status not in ("idle", "done"):
+        raise HandoffCommandError(
+            "worker_not_promptable",
+            message=f"{target_summary} が応答可能な状態ではありません（status={snap.agent_status}）。",
+            details={"target": {**target_meta, "display_summary": target_summary}, "project": project_alias},
+        )
+    live_cwd = snap.foreground_cwd.resolve()
+    live_agent = snap.agent
+    if live_cwd != expected_cwd or live_agent != expected_agent:
+        raise HandoffCommandError(
+            "worker_context_changed",
+            message=(
+                f"{target_summary} の状態が登録時と変わっています"
+                f"（登録時: {expected_cwd} / {expected_agent}、現在: {live_cwd} / {live_agent}）。"
+                f"相手先プロジェクト（'{project_alias}'）の環境でエージェントを起動・確認し、必要に応じて role set で再設定してください。"
+            ),
+            details={
+                "target": {**target_meta, "display_summary": target_summary},
+                "project": project_alias,
+                "actual": {
+                    "pane_id": bound_pane_id,
+                    "cwd": str(live_cwd),
+                    "agent": live_agent,
+                    "terminal_id": snap.terminal_id,
+                    "agent_session_id": snap.agent_session_id,
+                },
+            },
+        )
+    return snap
 
 
 def _verify_or_track_bound_worker(
@@ -498,7 +624,10 @@ def _resolve_parties(
     *,
     worker_role: str,
     scope: str | None = None,
+    project: str | None = None,
 ) -> tuple[Any, Any, Path, str, str, str, list[dict[str, Any]]]:
+    if project is not None and scope is not None:
+        raise HandoffCommandError("invalid_input", message="--project and --scope are mutually exclusive")
     if scope is not None and scope not in ("local", "global"):
         raise HandoffCommandError("invalid_input", message="scope must be local or global")
     try:
@@ -610,6 +739,61 @@ def _resolve_parties(
                 requester = replace(requester, name=req_pane_opt)
 
     warnings: list[dict[str, Any]] = []
+
+    if project is not None:
+        try:
+            norm_project = validate_project_alias(project)
+        except RoleBindingError as exc:
+            raise HandoffCommandError("invalid_input", message=f"invalid project alias: {exc.message}") from exc
+
+        target_scope_id = resolve_project_scope_id(norm_project)
+        if not target_scope_id:
+            catalog = get_project_catalog()
+            avail_projs = sorted(catalog.get("projects", {}).keys())
+            raise HandoffCommandError(
+                "worker_project_not_found",
+                message=f"プロジェクト『{project}』はカタログに登録されていません。'herdr-orchestrator project register <alias>' で登録してください。",
+                details={"project": project, "available_projects": avail_projs},
+            )
+
+        try:
+            target_doc = get_role_binding_document(target_scope_id)
+        except RoleBindingError as exc:
+            raise HandoffCommandError(exc.code, message=exc.message) from exc
+
+        if canonical_worker_role not in target_doc["roles"]:
+            raise HandoffCommandError(
+                "worker_role_not_bound",
+                message=f"ロール『{canonical_worker_role}』はプロジェクト『{project}』に登録されていません。",
+                details={"project": project, "available_roles": sorted(target_doc["roles"].keys())},
+            )
+
+        bound_worker_pane = target_doc["roles"][canonical_worker_role]
+        target_meta = target_doc["targets"].get(canonical_worker_role)
+        if not is_target_meta_valid(target_meta):
+            raise HandoffCommandError(
+                "role_binding_outdated",
+                message=(
+                    f"プロジェクト『{project}』のロール『{canonical_worker_role}』（{bound_worker_pane}）の設定が旧バージョンの形式です。"
+                    f"該当プロジェクト環境で 'herdr-orchestrator role set {canonical_worker_role} {bound_worker_pane}' を実行して再登録してください。"
+                ),
+                details={"role": canonical_worker_role, "pane_id": bound_worker_pane, "project": project},
+            )
+
+        assert target_meta is not None
+        worker = _verify_project_bound_worker(
+            project_alias=norm_project,
+            target_scope_id=target_scope_id,
+            canonical_worker_role=canonical_worker_role,
+            bound_pane_id=bound_worker_pane,
+            target_meta=target_meta,
+            req_pane_opt=req_pane_opt,
+        )
+        _require_live_pane_id(requester, party="requester")
+        wrk_pane = _require_live_pane_id(worker, party="worker")
+        worker = replace(worker, name=wrk_pane)
+        return requester, worker, worktree, identity, requester_role, canonical_worker_role, warnings
+
     chosen_scope_id: str | None = None
     chosen_doc: dict[str, Any] | None = None
 
@@ -848,6 +1032,7 @@ def run_handoff(handoff: HandoffInput) -> dict[str, Any]:
         _resolve_parties(
             worker_role=handoff.worker_role,
             scope=handoff.scope,
+            project=handoff.project,
         )
     )
     create_payload = _build_create_payload(
