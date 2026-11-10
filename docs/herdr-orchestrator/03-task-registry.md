@@ -416,6 +416,11 @@ created から 30 日以上経過
 
 `completion.status` が `pending` または `processing` の task は、`task.status` が terminal でも自動削除しない。`created` / `in_progress` / `unknown` も自動削除しない。cleanup は最大1日1回とする。
 
+公開 CLI における lazy cleanup のトリガー（`result-submit` 完了時の best-effort 実行）、`doctor` による蓄積状況の可視化、手動管理サブコマンド `cleanup-registry`、ロックなし事前フィルタを含む 2 段階判定とロックファイル（`<task.id>.json.lock` / `<task.id>.handoff.lock`）削除、および 30 日保護ガードレールの詳細設計は [Task Registry クリーンアップ機構 設計書 (Issue #157)](../herdr-orchestrator-task-registry-cleanup.md) を正本とする。
+
+> [!NOTE]
+> `result-submit` からの lazy cleanup 自動接続、`doctor` の `registry_cleanup` 出力、`cleanup-registry` 公開サブコマンド、および 2 段階判定・`.json.lock` 削除は**設計承認済み・未実装**（[Issue #157](https://github.com/okinawa-systembit/herdr-orchestration/issues/157) にて実装予定）である。
+
 <a id="sec-6-9"></a>
 
 ### 6.9 Registry Security
