@@ -411,11 +411,25 @@ def cmd_reindex(args: argparse.Namespace) -> int:
 def cmd_cleanup_candidates(args: argparse.Namespace) -> int:
     try:
         worktree = _resolve_worktree(args.worktree)
+        data = scan_cleanup_candidates(worktree)
     except FileNotFoundError as e:
-        print(f"[ERROR] {e}", file=sys.stderr)
-        return 1
-
-    data = scan_cleanup_candidates(worktree)
+        print(f"[WARN] Worktree path does not exist: {e}", file=sys.stderr)
+        data = {
+            "retention_days": RETENTION_DAYS,
+            "instance_id": None,
+            "archive_candidates": [],
+            "delete_candidates": [],
+            "protected_count": {
+                "total": 0,
+                "by_reason": {
+                    "within_retention": 0,
+                    "active_task": 0,
+                    "future_or_unreadable": 0,
+                    "control_file": 0,
+                    "symlink": 0,
+                },
+            },
+        }
 
     if args.json:
         print(json.dumps(data, indent=2, ensure_ascii=False))

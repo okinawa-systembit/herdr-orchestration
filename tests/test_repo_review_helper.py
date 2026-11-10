@@ -839,6 +839,11 @@ class TestCliIntegration(unittest.TestCase):
         readme.write_text("hello\n", encoding="utf-8")
         subprocess.run(["git", "add", "README.md"], cwd=str(self.worktree), check=True)
         subprocess.run(["git", "commit", "-m", "init"], cwd=str(self.worktree), check=True)
+        subprocess.run(
+            ["git", "config", "herdr.repository-id", "00000000-0000-4000-8000-000000000001"],
+            cwd=str(self.worktree),
+            check=True,
+        )
 
     def tearDown(self):
         self.temp_dir.cleanup()
@@ -1144,6 +1149,11 @@ class TestCleanupCandidates(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.worktree = Path(self.temp_dir.name)
+        self.state_dir = self.worktree / ".state_home"
+        self.state_dir.mkdir(parents=True, exist_ok=True)
+        self.orig_xdg_state = os.environ.get("XDG_STATE_HOME")
+        os.environ["XDG_STATE_HOME"] = str(self.state_dir)
+
         subprocess.run(["git", "init"], cwd=str(self.worktree), check=True, capture_output=True)
         subprocess.run(["git", "config", "user.name", "Test"], cwd=str(self.worktree), check=True)
         subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=str(self.worktree), check=True)
@@ -1152,8 +1162,17 @@ class TestCleanupCandidates(unittest.TestCase):
         readme.write_text("hello\n", encoding="utf-8")
         subprocess.run(["git", "add", "README.md"], cwd=str(self.worktree), check=True)
         subprocess.run(["git", "commit", "-m", "init"], cwd=str(self.worktree), check=True)
+        subprocess.run(
+            ["git", "config", "herdr.repository-id", "00000000-0000-4000-8000-000000000001"],
+            cwd=str(self.worktree),
+            check=True,
+        )
 
     def tearDown(self):
+        if self.orig_xdg_state is not None:
+            os.environ["XDG_STATE_HOME"] = self.orig_xdg_state
+        else:
+            os.environ.pop("XDG_STATE_HOME", None)
         self.temp_dir.cleanup()
 
     def test_p2_01_retention_days_alignment(self):
@@ -1276,33 +1295,76 @@ class TestCleanupCandidates(unittest.TestCase):
         now = datetime(2026, 11, 10, 12, 0, 0, tzinfo=timezone.utc)
         now_ts = now.timestamp()
 
-        # RV001: active task
+        # RV001: in_progress task
         rv1 = inst_dir / "RV001.md"
-        rv1.write_text("---\nreview_id: RV001\ntask_id: task_active_123\noutcome: GO\ncreated_at: 2026-10-01T00:00:00+00:00\n---\n# RV1", encoding="utf-8")
+        rv1.write_text("---\nreview_id: RV001\ntask_id: task_inprogress_1\noutcome: GO\ncreated_at: 2026-10-01T00:00:00+00:00\n---\n# RV1", encoding="utf-8")
         os.utime(str(rv1), (now_ts - 40 * 86400, now_ts - 40 * 86400))
 
-        # RV002: closed task
+        # RV002: created task
         rv2 = inst_dir / "RV002.md"
-        rv2.write_text("---\nreview_id: RV002\ntask_id: task_closed_456\noutcome: GO\ncreated_at: 2026-10-01T00:00:00+00:00\n---\n# RV2", encoding="utf-8")
+        rv2.write_text("---\nreview_id: RV002\ntask_id: task_created_2\noutcome: GO\ncreated_at: 2026-10-01T00:00:00+00:00\n---\n# RV2", encoding="utf-8")
         os.utime(str(rv2), (now_ts - 40 * 86400, now_ts - 40 * 86400))
 
-        # RV003: no task_id ('-')
+        # RV003: unknown status task
         rv3 = inst_dir / "RV003.md"
-        rv3.write_text("---\nreview_id: RV003\ntask_id: '-'\noutcome: GO\ncreated_at: 2026-10-01T00:00:00+00:00\n---\n# RV3", encoding="utf-8")
+        rv3.write_text("---\nreview_id: RV003\ntask_id: task_unknown_3\noutcome: GO\ncreated_at: 2026-10-01T00:00:00+00:00\n---\n# RV3", encoding="utf-8")
         os.utime(str(rv3), (now_ts - 40 * 86400, now_ts - 40 * 86400))
 
-        # Subtest A: active task set contains task_active_123
-        with patch("repo_review_helper.cleanup.get_active_task_ids", return_value=({"task_active_123"}, False)):
-            data = scan_cleanup_candidates(self.worktree, now=now)
-            self.assertEqual(data["protected_count"]["by_reason"]["active_task"], 1)
-            arch_ids = [c["review_id"] for c in data["archive_candidates"]]
-            self.assertEqual(arch_ids, ["RV002", "RV003"])
+        # RV004: closed/terminal task
+        rv4 = inst_dir / "RV004.md"
+        rv4.write_text("---\nreview_id: RV004\ntask_id: task_closed_4\noutcome: GO\ncreated_at: 2026-10-01T00:00:00+00:00\n---\n# RV4", encoding="utf-8")
+        os.utime(str(rv4), (now_ts - 40 * 86400, now_ts - 40 * 86400))
 
-        # Subtest B: task-list failure / truncated -> fallback protects all 3 with warning
-        with patch("repo_review_helper.cleanup.get_active_task_ids", return_value=(set(), True)):
-            data_fail = scan_cleanup_candidates(self.worktree, now=now)
-            self.assertEqual(data_fail["protected_count"]["by_reason"]["active_task"], 3)
-            self.assertEqual(len(data_fail["archive_candidates"]), 0)
+        # RV005: no task_id ('-')
+        rv5 = inst_dir / "RV005.md"
+        rv5.write_text("---\nreview_id: RV005\ntask_id: '-'\noutcome: GO\ncreated_at: 2026-10-01T00:00:00+00:00\n---\n# RV5", encoding="utf-8")
+        os.utime(str(rv5), (now_ts - 40 * 86400, now_ts - 40 * 86400))
+
+        # Subtest A: fetch_task_list returns active tasks (created, in_progress, unknown)
+        mock_task_list_payload = {
+            "complete": True,
+            "truncated": False,
+            "tasks": [
+                {"task": {"id": "task_inprogress_1", "status": "in_progress"}},
+                {"task": {"id": "task_created_2", "status": "created"}},
+                {"task": {"id": "task_unknown_3", "status": "unknown"}},
+            ],
+        }
+        with patch("repo_review_helper.cleanup.fetch_task_list", return_value=mock_task_list_payload) as mock_fetch:
+            data = scan_cleanup_candidates(self.worktree, now=now)
+            self.assertEqual(data["protected_count"]["by_reason"]["active_task"], 3)
+            arch_ids = [c["review_id"] for c in data["archive_candidates"]]
+            self.assertEqual(arch_ids, ["RV004", "RV005"])
+
+            # Verify fetch_task_list call arguments: task_type=None, statuses contains created, in_progress, unknown
+            mock_fetch.assert_called_once()
+            _, kwargs = mock_fetch.call_args
+            self.assertIsNone(kwargs.get("task_type"))
+            self.assertEqual(sorted(kwargs.get("statuses", [])), ["created", "in_progress", "unknown"])
+
+        # Subtest B1: complete=False -> triggers safe fallback
+        with patch("repo_review_helper.cleanup.fetch_task_list", return_value={"complete": False, "truncated": False, "tasks": []}):
+            with patch("sys.stderr", new_callable=io.StringIO) as mock_stderr:
+                data_incomplete = scan_cleanup_candidates(self.worktree, now=now)
+                self.assertEqual(data_incomplete["protected_count"]["by_reason"]["active_task"], 5)
+                self.assertEqual(len(data_incomplete["archive_candidates"]), 0)
+                self.assertIn("incomplete or truncated", mock_stderr.getvalue())
+
+        # Subtest B2: truncated=True -> triggers safe fallback
+        with patch("repo_review_helper.cleanup.fetch_task_list", return_value={"complete": True, "truncated": True, "tasks": []}):
+            with patch("sys.stderr", new_callable=io.StringIO) as mock_stderr:
+                data_truncated = scan_cleanup_candidates(self.worktree, now=now)
+                self.assertEqual(data_truncated["protected_count"]["by_reason"]["active_task"], 5)
+                self.assertEqual(len(data_truncated["archive_candidates"]), 0)
+                self.assertIn("incomplete or truncated", mock_stderr.getvalue())
+
+        # Subtest B3: exception during fetch_task_list -> triggers safe fallback
+        with patch("repo_review_helper.cleanup.fetch_task_list", side_effect=RuntimeError("connection error")):
+            with patch("sys.stderr", new_callable=io.StringIO) as mock_stderr:
+                data_exc = scan_cleanup_candidates(self.worktree, now=now)
+                self.assertEqual(data_exc["protected_count"]["by_reason"]["active_task"], 5)
+                self.assertEqual(len(data_exc["archive_candidates"]), 0)
+                self.assertIn("Failed to fetch task list", mock_stderr.getvalue())
 
     def test_p2_04_input_allowlist_and_control_files(self):
         """P2-04: Allowlist for .input/ and protection of control files."""
@@ -1424,7 +1486,14 @@ class TestCleanupCandidates(unittest.TestCase):
             shutil.rmtree(str(outside_dir), ignore_errors=True)
 
     def test_p2_06_uninitialized_and_missing_dirs(self):
-        """P2-06: Resilience when review helper is uninitialized and directories are missing."""
+        """P2-06: Resilience when review helper is uninitialized, directories are missing, and non-existing worktree."""
+        # Unset repository identity to simulate uninitialized environment
+        subprocess.run(
+            ["git", "-C", str(self.worktree), "config", "--unset", "herdr.repository-id"],
+            capture_output=True,
+        )
+
+        # 1. Uninitialized worktree without state.json and without .input directory
         with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
             code = cli_main(["cleanup-candidates", "--worktree", str(self.worktree), "--json"])
             self.assertEqual(code, 0)
@@ -1434,6 +1503,25 @@ class TestCleanupCandidates(unittest.TestCase):
         self.assertEqual(data["archive_candidates"], [])
         self.assertEqual(data["delete_candidates"], [])
         self.assertEqual(data["protected_count"]["total"], 0)
+
+        # Zero side-effects: ensure git config was NOT modified to create repository identity
+        proc = subprocess.run(
+            ["git", "-C", str(self.worktree), "config", "--get", "herdr.repository-id"],
+            capture_output=True,
+            text=True,
+        )
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertEqual(proc.stdout.strip(), "")
+
+        # 2. Non-existing worktree path: returns rc=0 with [WARN] to stderr
+        non_existing = self.worktree / "does_not_exist"
+        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+            with patch("sys.stderr", new_callable=io.StringIO) as mock_stderr:
+                code_missing = cli_main(["cleanup-candidates", "--worktree", str(non_existing), "--json"])
+                self.assertEqual(code_missing, 0)
+                self.assertIn("[WARN]", mock_stderr.getvalue())
+                data_missing = json.loads(mock_stdout.getvalue())
+                self.assertIsNone(data_missing["instance_id"])
 
     def test_p2_07_invalid_options_rejection(self):
         """P2-07: Ensure unsupported flags (--days, --force, --all) are rejected with exit code 2."""

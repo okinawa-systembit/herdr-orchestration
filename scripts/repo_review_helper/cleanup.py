@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from orchestrator.identity import get_or_create_repository_identity
+from orchestrator.identity import get_repository_identity
 
 from .recorder import RV_PATTERN, get_instance_reviews_dir, parse_review_metadata
 from .state import get_git_common_dir, load_state
@@ -27,7 +27,7 @@ def get_active_task_ids(
     """
     if not repo_identity:
         try:
-            repo_identity = get_or_create_repository_identity(worktree)
+            repo_identity = get_repository_identity(worktree)
         except Exception as exc:
             sys.stderr.write(f"[WARN] Failed to resolve repository identity: {exc}\n")
             return set(), True
