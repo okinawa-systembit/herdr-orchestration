@@ -1,6 +1,6 @@
 # 内部レビュー記録・作業領域の保持期間とアーカイブ設計書（Phase 2）
 
-- **ステータス**: 設計承認
+- **ステータス**: 実装完了（PR #159 にてマージ済み）
 - **対象 Issue**: [Issue #97](https://github.com/okinawa-systembit/herdr-orchestration/issues/97)
 - **対象**: このリポジトリの内部レビュー記録（`docs/reviews/internal/`）および作業領域（`.input/`）
 

@@ -24,6 +24,7 @@ if str(REPO_ROOT / "skills" / "herdr-orchestrator" / "scripts") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "skills" / "herdr-orchestrator" / "scripts"))
 
 from repo_review_helper.cli import main as cli_main
+from repo_review_helper.cleanup import RETENTION_DAYS, scan_cleanup_candidates
 from repo_review_helper.lock import LockAcquisitionError, ReviewLock
 from repo_review_helper.recorder import (
     ReviewRecordExistsError,
@@ -838,6 +839,11 @@ class TestCliIntegration(unittest.TestCase):
         readme.write_text("hello\n", encoding="utf-8")
         subprocess.run(["git", "add", "README.md"], cwd=str(self.worktree), check=True)
         subprocess.run(["git", "commit", "-m", "init"], cwd=str(self.worktree), check=True)
+        subprocess.run(
+            ["git", "config", "herdr.repository-id", "00000000-0000-4000-8000-000000000001"],
+            cwd=str(self.worktree),
+            check=True,
+        )
 
     def tearDown(self):
         self.temp_dir.cleanup()
@@ -1137,6 +1143,453 @@ class TestCliIntegration(unittest.TestCase):
         self.assertIn("差分外波及確認（D-1）", light_text)
         self.assertIn("D-1", light_text)
         self.assertNotIn("D-2", light_text)
+
+
+class TestCleanupCandidates(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.worktree = Path(self.temp_dir.name)
+        self.state_dir = self.worktree / ".state_home"
+        self.state_dir.mkdir(parents=True, exist_ok=True)
+        self.orig_xdg_state = os.environ.get("XDG_STATE_HOME")
+        os.environ["XDG_STATE_HOME"] = str(self.state_dir)
+
+        subprocess.run(["git", "init"], cwd=str(self.worktree), check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=str(self.worktree), check=True)
+        subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=str(self.worktree), check=True)
+
+        readme = self.worktree / "README.md"
+        readme.write_text("hello\n", encoding="utf-8")
+        subprocess.run(["git", "add", "README.md"], cwd=str(self.worktree), check=True)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=str(self.worktree), check=True)
+        subprocess.run(
+            ["git", "config", "herdr.repository-id", "00000000-0000-4000-8000-000000000001"],
+            cwd=str(self.worktree),
+            check=True,
+        )
+
+    def tearDown(self):
+        if self.orig_xdg_state is not None:
+            os.environ["XDG_STATE_HOME"] = self.orig_xdg_state
+        else:
+            os.environ.pop("XDG_STATE_HOME", None)
+        self.temp_dir.cleanup()
+
+    def test_p2_01_retention_days_alignment(self):
+        """P2-01: Retention days constant matches orchestrator registry operations and CLI JSON output."""
+        import orchestrator.registry.operations as reg_ops
+
+        self.assertEqual(RETENTION_DAYS, 30)
+        self.assertEqual(reg_ops._RETENTION_DAYS, 30)
+        self.assertEqual(RETENTION_DAYS, reg_ops._RETENTION_DAYS)
+
+        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+            code = cli_main(["cleanup-candidates", "--worktree", str(self.worktree), "--json"])
+            self.assertEqual(code, 0)
+            data = json.loads(mock_stdout.getvalue())
+            self.assertEqual(data["retention_days"], 30)
+
+    @patch("repo_review_helper.cli.check_active_review_tasks")
+    def test_p2_02_rv_timestamp_and_boundaries(self, mock_check):
+        """P2-02: RV*.md timestamp parsing, boundaries (30d vs 31d), fallback, and future protection."""
+        from datetime import datetime, timezone
+
+        mock_check.return_value = TaskCheckResult(
+            can_safely_initialize=True,
+            has_active_tasks=False,
+            uncertain=False,
+        )
+        cli_main(["init", "--worktree", str(self.worktree)])
+
+        state = load_state(get_git_common_dir(self.worktree))
+        self.assertIsNotNone(state)
+        inst_dir = get_instance_reviews_dir(self.worktree, state["instance_id"])
+
+        now = datetime(2026, 11, 10, 12, 0, 0, tzinfo=timezone.utc)
+        now_ts = now.timestamp()
+
+        # 1. 31 days ago -> eligible (> 30 days)
+        rv1 = inst_dir / "RV001.md"
+        rv1.write_text(
+            "---\nreview_id: RV001\ntask_id: task_1\noutcome: GO\ncreated_at: 2026-10-10T11:00:00+00:00\n---\n# RV1",
+            encoding="utf-8",
+        )
+        os.utime(str(rv1), (now_ts - 31 * 86400, now_ts - 31 * 86400))
+
+        # 2. Exactly 30 days ago -> within_retention (<= 30 days)
+        rv2 = inst_dir / "RV002.md"
+        rv2.write_text(
+            "---\nreview_id: RV002\ntask_id: task_2\noutcome: GO\ncreated_at: 2026-10-11T12:00:00+00:00\n---\n# RV2",
+            encoding="utf-8",
+        )
+        os.utime(str(rv2), (now_ts - 30 * 86400, now_ts - 30 * 86400))
+
+        # 3. 29 days ago -> within_retention
+        rv3 = inst_dir / "RV003.md"
+        rv3.write_text(
+            "---\nreview_id: RV003\ntask_id: task_3\noutcome: GO\ncreated_at: 2026-10-12T12:00:00+00:00\n---\n# RV3",
+            encoding="utf-8",
+        )
+        os.utime(str(rv3), (now_ts - 29 * 86400, now_ts - 29 * 86400))
+
+        # 4. created_at missing / '-' -> fallback to mtime (set to 35 days ago)
+        rv4 = inst_dir / "RV004.md"
+        rv4.write_text(
+            "---\nreview_id: RV004\ntask_id: task_4\noutcome: GO\ncreated_at: '-'\n---\n# RV4",
+            encoding="utf-8",
+        )
+        os.utime(str(rv4), (now_ts - 35 * 86400, now_ts - 35 * 86400))
+
+        # 5. created_at naive datetime (no timezone) -> fallback to mtime (set to 20 days ago)
+        rv5 = inst_dir / "RV005.md"
+        rv5.write_text(
+            "---\nreview_id: RV005\ntask_id: task_5\noutcome: GO\ncreated_at: '2026-10-01 12:00:00'\n---\n# RV5",
+            encoding="utf-8",
+        )
+        os.utime(str(rv5), (now_ts - 20 * 86400, now_ts - 20 * 86400))
+
+        # 6. created_at in future -> future_or_unreadable
+        rv6 = inst_dir / "RV006.md"
+        rv6.write_text(
+            "---\nreview_id: RV006\ntask_id: task_6\noutcome: GO\ncreated_at: 2026-12-01T00:00:00+00:00\n---\n# RV6",
+            encoding="utf-8",
+        )
+        os.utime(str(rv6), (now_ts - 35 * 86400, now_ts - 35 * 86400))
+
+        # 7. mtime in future -> future_or_unreadable
+        rv7 = inst_dir / "RV007.md"
+        rv7.write_text(
+            "---\nreview_id: RV007\ntask_id: task_7\noutcome: GO\ncreated_at: 2026-10-01T00:00:00+00:00\n---\n# RV7",
+            encoding="utf-8",
+        )
+        os.utime(str(rv7), (now_ts + 86400, now_ts + 86400))
+
+        with patch("repo_review_helper.cleanup.get_active_task_ids", return_value=(set(), False)):
+            data = scan_cleanup_candidates(self.worktree, now=now)
+
+        arc_cand = {c["review_id"]: c for c in data["archive_candidates"]}
+        self.assertIn("RV001", arc_cand)
+        self.assertEqual(arc_cand["RV001"]["timestamp_source"], "created_at")
+        self.assertIn("RV004", arc_cand)
+        self.assertEqual(arc_cand["RV004"]["timestamp_source"], "mtime")
+
+        # RV002 (30d), RV003 (29d), RV005 (naive fallback to 20d mtime) -> within_retention
+        self.assertEqual(data["protected_count"]["by_reason"]["within_retention"], 3)
+        # RV006 (future created_at), RV007 (future mtime) -> future_or_unreadable
+        self.assertEqual(data["protected_count"]["by_reason"]["future_or_unreadable"], 2)
+
+    @patch("repo_review_helper.cli.check_active_review_tasks")
+    def test_p2_03_rv_active_task_protection(self, mock_check):
+        """P2-03: Active task protection: active task protects RV, closed does not; task-list failure triggers safe protection with warning."""
+        from datetime import datetime, timezone
+
+        mock_check.return_value = TaskCheckResult(
+            can_safely_initialize=True,
+            has_active_tasks=False,
+            uncertain=False,
+        )
+        cli_main(["init", "--worktree", str(self.worktree)])
+
+        state = load_state(get_git_common_dir(self.worktree))
+        inst_dir = get_instance_reviews_dir(self.worktree, state["instance_id"])
+        now = datetime(2026, 11, 10, 12, 0, 0, tzinfo=timezone.utc)
+        now_ts = now.timestamp()
+
+        # RV001: in_progress task
+        rv1 = inst_dir / "RV001.md"
+        rv1.write_text("---\nreview_id: RV001\ntask_id: task_inprogress_1\noutcome: GO\ncreated_at: 2026-10-01T00:00:00+00:00\n---\n# RV1", encoding="utf-8")
+        os.utime(str(rv1), (now_ts - 40 * 86400, now_ts - 40 * 86400))
+
+        # RV002: created task
+        rv2 = inst_dir / "RV002.md"
+        rv2.write_text("---\nreview_id: RV002\ntask_id: task_created_2\noutcome: GO\ncreated_at: 2026-10-01T00:00:00+00:00\n---\n# RV2", encoding="utf-8")
+        os.utime(str(rv2), (now_ts - 40 * 86400, now_ts - 40 * 86400))
+
+        # RV003: unknown status task
+        rv3 = inst_dir / "RV003.md"
+        rv3.write_text("---\nreview_id: RV003\ntask_id: task_unknown_3\noutcome: GO\ncreated_at: 2026-10-01T00:00:00+00:00\n---\n# RV3", encoding="utf-8")
+        os.utime(str(rv3), (now_ts - 40 * 86400, now_ts - 40 * 86400))
+
+        # RV004: closed/terminal task
+        rv4 = inst_dir / "RV004.md"
+        rv4.write_text("---\nreview_id: RV004\ntask_id: task_closed_4\noutcome: GO\ncreated_at: 2026-10-01T00:00:00+00:00\n---\n# RV4", encoding="utf-8")
+        os.utime(str(rv4), (now_ts - 40 * 86400, now_ts - 40 * 86400))
+
+        # RV005: no task_id ('-')
+        rv5 = inst_dir / "RV005.md"
+        rv5.write_text("---\nreview_id: RV005\ntask_id: '-'\noutcome: GO\ncreated_at: 2026-10-01T00:00:00+00:00\n---\n# RV5", encoding="utf-8")
+        os.utime(str(rv5), (now_ts - 40 * 86400, now_ts - 40 * 86400))
+
+        # Subtest A: fetch_task_list returns active tasks (created, in_progress, unknown)
+        mock_task_list_payload = {
+            "complete": True,
+            "truncated": False,
+            "tasks": [
+                {"task": {"id": "task_inprogress_1", "status": "in_progress"}},
+                {"task": {"id": "task_created_2", "status": "created"}},
+                {"task": {"id": "task_unknown_3", "status": "unknown"}},
+            ],
+        }
+        with patch("repo_review_helper.cleanup.fetch_task_list", return_value=mock_task_list_payload) as mock_fetch:
+            data = scan_cleanup_candidates(self.worktree, now=now)
+            self.assertEqual(data["protected_count"]["by_reason"]["active_task"], 3)
+            arch_ids = [c["review_id"] for c in data["archive_candidates"]]
+            self.assertEqual(arch_ids, ["RV004", "RV005"])
+
+            # Verify fetch_task_list call arguments: task_type=None, statuses contains created, in_progress, unknown
+            mock_fetch.assert_called_once()
+            _, kwargs = mock_fetch.call_args
+            self.assertIsNone(kwargs.get("task_type"))
+            self.assertEqual(sorted(kwargs.get("statuses", [])), ["created", "in_progress", "unknown"])
+
+        # Subtest B1: complete=False -> triggers safe fallback
+        with patch("repo_review_helper.cleanup.fetch_task_list", return_value={"complete": False, "truncated": False, "tasks": []}):
+            with patch("sys.stderr", new_callable=io.StringIO) as mock_stderr:
+                data_incomplete = scan_cleanup_candidates(self.worktree, now=now)
+                self.assertEqual(data_incomplete["protected_count"]["by_reason"]["active_task"], 5)
+                self.assertEqual(len(data_incomplete["archive_candidates"]), 0)
+                self.assertIn("incomplete or truncated", mock_stderr.getvalue())
+
+        # Subtest B2: truncated=True -> triggers safe fallback
+        with patch("repo_review_helper.cleanup.fetch_task_list", return_value={"complete": True, "truncated": True, "tasks": []}):
+            with patch("sys.stderr", new_callable=io.StringIO) as mock_stderr:
+                data_truncated = scan_cleanup_candidates(self.worktree, now=now)
+                self.assertEqual(data_truncated["protected_count"]["by_reason"]["active_task"], 5)
+                self.assertEqual(len(data_truncated["archive_candidates"]), 0)
+                self.assertIn("incomplete or truncated", mock_stderr.getvalue())
+
+        # Subtest B3: exception during fetch_task_list -> triggers safe fallback
+        with patch("repo_review_helper.cleanup.fetch_task_list", side_effect=RuntimeError("connection error")):
+            with patch("sys.stderr", new_callable=io.StringIO) as mock_stderr:
+                data_exc = scan_cleanup_candidates(self.worktree, now=now)
+                self.assertEqual(data_exc["protected_count"]["by_reason"]["active_task"], 5)
+                self.assertEqual(len(data_exc["archive_candidates"]), 0)
+                self.assertIn("Failed to fetch task list", mock_stderr.getvalue())
+
+    def test_p2_04_input_allowlist_and_control_files(self):
+        """P2-04: Allowlist for .input/ and protection of control files."""
+        from datetime import datetime, timezone
+
+        now = datetime(2026, 11, 10, 12, 0, 0, tzinfo=timezone.utc)
+        now_ts = now.timestamp()
+
+        inbox_dir = self.worktree / ".input" / "inbox"
+        inbox_dir.mkdir(parents=True, exist_ok=True)
+        sent_dir = self.worktree / ".input" / "review" / "sent"
+        sent_dir.mkdir(parents=True, exist_ok=True)
+        tmp_dir = self.worktree / ".input" / "tmp"
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+
+        # 1. inbox old file (> 30 days) -> delete candidate
+        f_inbox_old = inbox_dir / "review-request.old.md"
+        f_inbox_old.write_text("old req", encoding="utf-8")
+        os.utime(str(f_inbox_old), (now_ts - 35 * 86400, now_ts - 35 * 86400))
+
+        # 2. inbox new file (<= 30 days) -> within_retention
+        f_inbox_new = inbox_dir / "review-request.new.md"
+        f_inbox_new.write_text("new req", encoding="utf-8")
+        os.utime(str(f_inbox_new), (now_ts - 10 * 86400, now_ts - 10 * 86400))
+
+        # 3. inbox hidden file -> excluded
+        f_inbox_hidden = inbox_dir / ".gitkeep"
+        f_inbox_hidden.write_text("", encoding="utf-8")
+        os.utime(str(f_inbox_hidden), (now_ts - 40 * 86400, now_ts - 40 * 86400))
+
+        # 4. inbox subdir -> excluded (non-recursive)
+        sub_dir = inbox_dir / "subdir"
+        sub_dir.mkdir()
+        sub_file = sub_dir / "nested.md"
+        sub_file.write_text("nested", encoding="utf-8")
+        os.utime(str(sub_file), (now_ts - 40 * 86400, now_ts - 40 * 86400))
+
+        # 5. review/sent old file (> 30 days) -> delete candidate
+        f_sent_old = sent_dir / "20260901-draft.md"
+        f_sent_old.write_text("sent draft", encoding="utf-8")
+        os.utime(str(f_sent_old), (now_ts - 40 * 86400, now_ts - 40 * 86400))
+
+        # 6. review/sent new file (<= 30 days) -> within_retention
+        f_sent_new = sent_dir / "20261105-draft.md"
+        f_sent_new.write_text("sent draft", encoding="utf-8")
+        os.utime(str(f_sent_new), (now_ts - 5 * 86400, now_ts - 5 * 86400))
+
+        # 7. control files in .input/review/ -> control_file protection
+        c1 = self.worktree / ".input" / "review" / "state.json"
+        c1.write_text("{}", encoding="utf-8")
+        c2 = self.worktree / ".input" / "review" / "reviewer-draft.md"
+        c2.write_text("draft", encoding="utf-8")
+        c3 = self.worktree / ".input" / "review" / "incoming.md"
+        c3.write_text("inc", encoding="utf-8")
+        for cf in (c1, c2, c3):
+            os.utime(str(cf), (now_ts - 50 * 86400, now_ts - 50 * 86400))
+
+        # 8. .input/tmp/ file -> excluded from candidates
+        f_tmp = tmp_dir / "pr-body.md"
+        f_tmp.write_text("tmp body", encoding="utf-8")
+        os.utime(str(f_tmp), (now_ts - 50 * 86400, now_ts - 50 * 86400))
+
+        with patch("repo_review_helper.cleanup.get_active_task_ids", return_value=(set(), False)):
+            data = scan_cleanup_candidates(self.worktree, now=now)
+
+        del_paths = [c["path"] for c in data["delete_candidates"]]
+        self.assertEqual(len(del_paths), 2)
+        self.assertIn(".input/inbox/review-request.old.md", del_paths)
+        self.assertIn(".input/review/sent/20260901-draft.md", del_paths)
+
+        self.assertEqual(data["protected_count"]["by_reason"]["within_retention"], 2)  # f_inbox_new + f_sent_new
+        self.assertEqual(data["protected_count"]["by_reason"]["control_file"], 3)  # state.json, reviewer-draft, incoming
+
+    @patch("repo_review_helper.cli.check_active_review_tasks")
+    def test_p2_05_symlink_non_following(self, mock_check):
+        """P2-05: Non-following of symlinks with lstat inspection and warning."""
+        from datetime import datetime, timezone
+
+        mock_check.return_value = TaskCheckResult(
+            can_safely_initialize=True,
+            has_active_tasks=False,
+            uncertain=False,
+        )
+        cli_main(["init", "--worktree", str(self.worktree)])
+
+        state = load_state(get_git_common_dir(self.worktree))
+        inst_dir = get_instance_reviews_dir(self.worktree, state["instance_id"])
+        inbox_dir = self.worktree / ".input" / "inbox"
+        inbox_dir.mkdir(parents=True, exist_ok=True)
+
+        now = datetime(2026, 11, 10, 12, 0, 0, tzinfo=timezone.utc)
+        now_ts = now.timestamp()
+
+        outside_dir = Path(tempfile.mkdtemp())
+        try:
+            target_file = outside_dir / "target_old.md"
+            target_file.write_text(
+                "---\nreview_id: RV999\ntask_id: -\noutcome: GO\ncreated_at: 2026-09-01T00:00:00+00:00\n---\n# Symlink target",
+                encoding="utf-8",
+            )
+            os.utime(str(target_file), (now_ts - 70 * 86400, now_ts - 70 * 86400))
+
+            sym_rv = inst_dir / "RV999.md"
+            sym_rv.symlink_to(target_file)
+
+            sym_inbox = inbox_dir / "review-request.symlink.md"
+            sym_inbox.symlink_to(target_file)
+
+            with patch("repo_review_helper.cleanup.get_active_task_ids", return_value=(set(), False)):
+                with patch("sys.stderr", new_callable=io.StringIO) as mock_stderr:
+                    data = scan_cleanup_candidates(self.worktree, now=now)
+                    stderr_output = mock_stderr.getvalue()
+
+            self.assertEqual(data["protected_count"]["by_reason"]["symlink"], 2)
+            self.assertIn("Skipping symlink", stderr_output)
+            self.assertEqual(len(data["archive_candidates"]), 0)
+            self.assertEqual(len(data["delete_candidates"]), 0)
+        finally:
+            shutil.rmtree(str(outside_dir), ignore_errors=True)
+
+    def test_p2_06_uninitialized_and_missing_dirs(self):
+        """P2-06: Resilience when review helper is uninitialized, directories are missing, and non-existing worktree."""
+        # Unset repository identity to simulate uninitialized environment
+        subprocess.run(
+            ["git", "-C", str(self.worktree), "config", "--unset", "herdr.repository-id"],
+            capture_output=True,
+        )
+
+        # 1. Uninitialized worktree without state.json and without .input directory
+        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+            code = cli_main(["cleanup-candidates", "--worktree", str(self.worktree), "--json"])
+            self.assertEqual(code, 0)
+            data = json.loads(mock_stdout.getvalue())
+
+        self.assertIsNone(data["instance_id"])
+        self.assertEqual(data["archive_candidates"], [])
+        self.assertEqual(data["delete_candidates"], [])
+        self.assertEqual(data["protected_count"]["total"], 0)
+
+        # Zero side-effects: ensure git config was NOT modified to create repository identity
+        proc = subprocess.run(
+            ["git", "-C", str(self.worktree), "config", "--get", "herdr.repository-id"],
+            capture_output=True,
+            text=True,
+        )
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertEqual(proc.stdout.strip(), "")
+
+        # 2. Non-existing worktree path: returns rc=0 with [WARN] to stderr
+        non_existing = self.worktree / "does_not_exist"
+        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+            with patch("sys.stderr", new_callable=io.StringIO) as mock_stderr:
+                code_missing = cli_main(["cleanup-candidates", "--worktree", str(non_existing), "--json"])
+                self.assertEqual(code_missing, 0)
+                self.assertIn("[WARN]", mock_stderr.getvalue())
+                data_missing = json.loads(mock_stdout.getvalue())
+                self.assertIsNone(data_missing["instance_id"])
+
+    def test_p2_07_invalid_options_rejection(self):
+        """P2-07: Ensure unsupported flags (--days, --force, --all) are rejected with exit code 2."""
+        with self.assertRaises(SystemExit) as ctx_days:
+            cli_main(["cleanup-candidates", "--worktree", str(self.worktree), "--days", "7"])
+        self.assertEqual(ctx_days.exception.code, 2)
+
+        with self.assertRaises(SystemExit) as ctx_force:
+            cli_main(["cleanup-candidates", "--worktree", str(self.worktree), "--force"])
+        self.assertEqual(ctx_force.exception.code, 2)
+
+        with self.assertRaises(SystemExit) as ctx_all:
+            cli_main(["cleanup-candidates", "--worktree", str(self.worktree), "--all"])
+        self.assertEqual(ctx_all.exception.code, 2)
+
+    @patch("repo_review_helper.cli.check_active_review_tasks")
+    def test_p2_08_reindex_and_id_allocation_after_archive(self, mock_check):
+        """P2-08: Moving RV001-RV003 to archive/ keeps reindex functional and continues ID allocation without rewinding."""
+        mock_check.return_value = TaskCheckResult(
+            can_safely_initialize=True,
+            has_active_tasks=False,
+            uncertain=False,
+        )
+        wt_str = str(self.worktree)
+        cli_main(["init", "--worktree", wt_str])
+
+        for i in range(1, 4):
+            code = cli_main([
+                "record-save",
+                "--worktree", wt_str,
+                "--task-id", f"task_{i}",
+                "--body", f"## Review {i}",
+                "--outcome", "GO",
+            ])
+            self.assertEqual(code, 0)
+
+        state = load_state(get_git_common_dir(self.worktree))
+        self.assertEqual(state["counter"], 3)
+        inst_dir = get_instance_reviews_dir(self.worktree, state["instance_id"])
+
+        archive_dir = inst_dir / "archive"
+        archive_dir.mkdir(parents=True, exist_ok=True)
+        for i in range(1, 4):
+            fname = f"RV{i:03d}.md"
+            (inst_dir / fname).rename(archive_dir / fname)
+
+        archive_index = archive_dir / "INDEX.md"
+        archive_index.write_text("# Archive Index\n- RV001..RV003\n", encoding="utf-8")
+
+        code_reindex = cli_main(["reindex", "--worktree", wt_str])
+        self.assertEqual(code_reindex, 0)
+
+        index_file = inst_dir / "INDEX.md"
+        index_content = index_file.read_text(encoding="utf-8")
+        self.assertIn("- **総記録数**: 0", index_content)
+
+        code_next = cli_main([
+            "record-save",
+            "--worktree", wt_str,
+            "--task-id", "task_4",
+            "--body", "## Review 4",
+            "--outcome", "GO",
+        ])
+        self.assertEqual(code_next, 0)
+
+        rv4_file = inst_dir / "RV004.md"
+        self.assertTrue(rv4_file.exists())
+        self.assertFalse((inst_dir / "RV001.md").exists())
 
 
 if __name__ == "__main__":

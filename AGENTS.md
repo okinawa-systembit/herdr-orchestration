@@ -29,7 +29,7 @@ PR を作成するときは必ず `bash scripts/review-sync.sh pr-create`（Bot�
 
 sync handoff + `repo-review-helper` CLI + `herdr-orchestrator` CLI: [repo-review](.agents/skills/repo-review/SKILL.md)。Finding起票・品質検証: [review-finding](.agents/skills/review-finding/SKILL.md)。レビュースキル見直し・改修検証: [review-skill-audit](.agents/skills/review-skill-audit/SKILL.md)。役割別ワークフロー・PR作成・相談・handoff/復旧の共通入口: [repo-workflow](.agents/skills/repo-workflow/SKILL.md)。
 
-内部レビュー改善: [設計書](docs/reviews/REVIEW_SKILL_PHASE1_DESIGN.md)、[詳細実装設計書](docs/reviews/REVIEW_SKILL_PHASE1_IMPLEMENTATION.md)、[Phase 2 設計書](docs/reviews/REVIEW_SKILL_PHASE2_DESIGN.md)。CLI 入口は `scripts/repo-review-helper`。GitHub App 連携・レビュー運用規約: [運用規約方針](docs/reviews/GITHUB_APP_AND_REVIEW_POLICY.md)。CLI 入口は `scripts/review-sync.sh`。
+内部レビュー改善: [設計書](docs/reviews/REVIEW_SKILL_PHASE1_DESIGN.md)、[詳細実装設計書](docs/reviews/REVIEW_SKILL_PHASE1_IMPLEMENTATION.md)、[Phase 2 設計書](docs/reviews/REVIEW_SKILL_PHASE2_DESIGN.md)。CLI 入口は `scripts/repo-review-helper`。作業領域（`.input/`）および内部レビュー記録は30日間保持され、整理は必ず `scripts/repo-review-helper cleanup-candidates` で出力された候補に限って実行する（ワイルドカード削除禁止、30日以内削除要求は人間へ委任、秘密混入時は即時個別削除例外 — 詳細は [Phase 2 設計書](docs/reviews/REVIEW_SKILL_PHASE2_DESIGN.md) および [repo-workflow](.agents/skills/repo-workflow/SKILL.md) 参照）。GitHub App 連携・レビュー運用規約: [運用規約方針](docs/reviews/GITHUB_APP_AND_REVIEW_POLICY.md)。CLI 入口は `scripts/review-sync.sh`。
 
 ## Herdr Orchestrator のレビュー
 

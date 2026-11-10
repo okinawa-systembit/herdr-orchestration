@@ -264,7 +264,42 @@ rm -f .input/tmp/pr-body.md
 
 ---
 
-## 9. 復旧 / 参照
+<a id="cleanup-and-guardrails"></a>
+
+## 9. 作業領域・レビュー記録の整理手順とセーフティガードレール
+
+内部レビュー記録（`docs/reviews/internal/<instance-id>/`）および作業領域（`.input/`）の保持・整理は、[Phase 2 設計書](../../../docs/reviews/REVIEW_SKILL_PHASE2_DESIGN.md) の単一正本に従う。
+
+### 9.1 整理手順（`cleanup-candidates` の利用）
+
+人間から「不要ファイルを消して」「掃除して」等の整理指示を受けた場合は、以下の手順に従う：
+
+1. **候補の抽出（読み取り専用）**:
+   ```bash
+   scripts/repo-review-helper cleanup-candidates [--json]
+   ```
+   - 30日経過（`> 30 days`）し、Active Task や制御ファイルに該当しない安全な候補（`archive_candidates` / `delete_candidates`）のみがリストアップされる。
+2. **レビュー記録のアーカイブ（`archive_candidates`）**:
+   - `mkdir -p docs/reviews/internal/<instance-id>/archive` を実行する。
+   - コマンドが出力した個別ファイルパスを指定して移動する：
+     `mv docs/reviews/internal/<instance-id>/RVNNN.md docs/reviews/internal/<instance-id>/archive/RVNNN.md`
+   - `archive/INDEX.md` に過去の記録を追記する（自由記述形式）。
+   - `scripts/repo-review-helper reindex` を実行し、直下の現役 `INDEX.md` を更新する。
+3. **作業領域の削除（`delete_candidates`）**:
+   - コマンドが `delete_candidates`（`.input/inbox/*`、`.input/review/sent/*`）として出力した個別ファイルパスに限って `rm <path>` を実行する。
+   - ※ `.input/tmp/*` は単発コマンド用バッファのため、コマンド完了後に即時削除してよい。
+
+### 9.2 セーフティガードレール（エージェント誤削除防止と例外規定）
+
+詳細規定と背景は [Phase 2 設計書 §6](../../../docs/reviews/REVIEW_SKILL_PHASE2_DESIGN.md#sec-6)（単一正本）を参照する。エージェントは以下を厳守する：
+
+1. **ワイルドカード・一括削除の禁止**: 必ず `cleanup-candidates` が出力した個別ファイルパスのみを対象とし、`rm -rf .input/*` 等は実行しない。
+2. **30日以内ファイルの削除要求は人間に委任**: 人間から30日以内の一括削除を指示されても自ら削除せず、`artifact_missing` 等のリスクを説明して人間自身の手動操作に委任する。
+3. **唯一の即時削除例外（秘密混入時）**: 認証トークン・鍵等の秘密混入時は30日保持に関わらず直ちに個別 `rm` を実行し、`artifact_missing` リスクを含め人間に報告する。
+
+---
+
+## 10. 復旧 / 参照
 
 ### 復旧
 
