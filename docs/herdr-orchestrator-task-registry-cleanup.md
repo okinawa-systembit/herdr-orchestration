@@ -1,7 +1,7 @@
 # Herdr Orchestrator Task Registry クリーンアップ機構 設計書
 
 - **対象 Issue**: [Issue #157](https://github.com/okinawa-systembit/herdr-orchestration/issues/157)
-- **親 Issue**: [Issue #112](https://github.com/okinawa-systembit/herdr-orchestration/issues/112)（オーケストレーション基盤リファクタリングおよび設計原則の明文化）
+- **親 Issue**: [Issue #112](https://github.com/okinawa-systembit/herdr-orchestration/issues/112)（将来仕様（update コマンド等）およびロードマップ §23 検証項目のバックログ追跡）
 - **ステータス**: 設計中
 - **関連文書**:
   - [01-foundation.md](herdr-orchestrator/01-foundation.md#sec-2-4): 設計原則の Orchestrator 適用（§2.4〜§2.10）
@@ -102,16 +102,19 @@ flowchart TD
 
 <a id="sec-3-1"></a>
 
-### 3.1 トリガーポイントの選定理由（`result-submit` のみ）
+### 3.1 トリガーポイントの選定理由（`result-submit` のみ）と自動許可（allow）方針との整合
 
-[§6.8](herdr-orchestrator/03-task-registry.md#sec-6-8) の lazy cleanup を接続する公開 CLI コマンドは、**`herdr-orchestrator result-submit` の 1 か所のみ**とする。他のコマンドに接続しない理由は以下のとおりである。
+[§6.8](herdr-orchestrator/03-task-registry.md#sec-6-8) の lazy cleanup を接続する公開 CLI コマンドは、**`herdr-orchestrator result-submit` の 1 か所のみ**とする。選定理由、および配布テンプレートにおける自動許可（`allow`）方針との整合は以下のとおりである。
 
-1. **読み取り専用契約および [§15.3](herdr-orchestrator/07-skill-and-implementation.md#sec-15-3) Allowlist 境界の保護**:
-   `doctor`、`task-status`、`task-result`、`task-list` は状態を変更しない読み取り専用コマンドであり、[herdr-orchestrator-task-list.md §2.1](herdr-orchestrator-task-list.md#21-厳密な読み取り専用) でも「`task-list` 実行時に [§6.8](herdr-orchestrator/03-task-registry.md#sec-6-8) の lazy cleanup は起動しない」と明記されている。これらにファイル削除の副作用を持たせると、[§15.3](herdr-orchestrator/07-skill-and-implementation.md#sec-15-3) の自動実行許可（Allowlist）の安全性根拠が崩れる。
+1. **読み取り専用コマンド（`doctor` / `task-status` / `task-result` / `task-list`）の無副作用契約の維持**:
+   これらは状態を変更しない読み取り専用コマンドであり、[herdr-orchestrator-task-list.md §2.1](herdr-orchestrator-task-list.md#21-厳密な読み取り専用) でも「`task-list` 実行時に [§6.8](herdr-orchestrator/03-task-registry.md#sec-6-8) の lazy cleanup は起動しない」と明記されている。状態確認や診断のたびに裏で Registry が変化する副作用を持たせないため、読み取り系コマンドには接続しない。
 2. **Handoff 配送クリティカルパスの保護**:
    `handoff` は live agent 解決・`handoff.lock` 取得・Herdr `agent prompt` 実行というタイミング制約の厳しいクリティカルパスを持つため、ディレクトリ走査を伴うクリーンアップを挟まない。
 3. **タスクライフサイクル終端との一致**:
-   `result-submit` はタスクが terminal 状態（`succeeded` / `failed`）へ遷移し、completion 通知まで完了した直後のライフサイクル終端であり、そもそも Registry への書き込み権限を持つミューテーションコマンドである。ここで 1 日 1 回の lazy cleanup を起動するのが最も自然かつ安全である。
+   `result-submit` はタスクが terminal 状態（`succeeded` / `failed`）へ遷移し、completion 通知まで完了した直後のライフサイクル終端であり、そもそも Registry への書き込み権限を持つミューテーションコマンドである。ここで 1 日 1 回の lazy cleanup を起動するのが最も自然である。
+4. **[§15.2](herdr-orchestrator/07-skill-and-implementation.md#sec-15-2)「destructive operation は自動許可対象へ含めない」および配布テンプレート（`allow`）との整合**:
+   `result-submit` は Worker の自動完了報告に不可欠であるため、配布テンプレート（[install/README.md §2.1](../skills/herdr-orchestrator/install/README.md#21-コマンド分類と許可方針)、`codex-execpolicy-snippet.rules`、[public-cli.md §6.1](../skills/herdr-orchestrator/references/public-cli.md#61-実行承認設定-codex-execpolicy)）において自動許可（`allow`）に設定されている。
+   ここで、[§6.8](herdr-orchestrator/03-task-registry.md#sec-6-8) の保持期間満了（作成から 30 日以上経過かつ `task.status` / `completion.status` がともに terminal）に基づく自動削除および孤立ロックの回収は、**Orchestrator が自己管理する内部メタデータの規定されたライフサイクル管理（ガベージコレクション）であり、[§15.2](herdr-orchestrator/07-skill-and-implementation.md#sec-15-2) および [§15.4](herdr-orchestrator/07-skill-and-implementation.md#sec-15-4) が禁じる destructive operation（利用者データ・リポジトリ内成果物・稼働中状態の破壊や任意パス削除）には該当しない**と定義する。したがって、`result-submit` に lazy cleanup を接続しても `result-submit` を `allow` とする安全性根拠は維持される（実装 PR では [install/README.md §2.1](../skills/herdr-orchestrator/install/README.md#21-コマンド分類と許可方針) の `result-submit` 備考欄にも「完了後に 1 日 1 回の lazy cleanup（§6.8）を実行する」旨を明記する）。
 
 <a id="sec-3-2"></a>
 
@@ -124,7 +127,7 @@ flowchart TD
    - `replay == True`（同一内容の冪等再送）の場合は、副作用を最小化するため lazy cleanup を起動しない。
 2. **非ブロッキング実行とレート制限**:
    - `registry.cleanup_tasks(nonblocking=True, ignore_rate_limit=False)` として呼び出す。
-   - 他のプロセスがすでに `cleanup.lock` を保持している場合は、待機せず即座にスキップする（`skipped_lock: True`）。
+   - 他のプロセスがすでに `cleanup.run.lock` を保持している場合は、待機せず即座にスキップする（`skipped_lock: True`）。
    - `last_cleanup_at` スタンプから 24 時間（`timedelta(days=1)`）未満の場合は、ディレクトリ走査を行わず即座にスキップする（`skipped_rate_limit: True`）。
 3. **エラー隔離と警告出力（指針 10「黙って失敗しない」）**:
    - Lazy cleanup 呼び出し全体を `try ... except Exception as exc:` で囲む。
@@ -233,8 +236,8 @@ herdr-orchestrator cleanup-registry [--dry-run] [--json]
 2. **1 日 1 回レート制限のバイパス**:
    手動で `cleanup-registry` を実行した場合は、ユーザーが明示的に即時クリーンアップを要求しているため、`last_cleanup_at` による 1 日 1 回のレート制限をバイパスする（`ignore_rate_limit=True`）。
 3. **排他制御と `last_cleanup_at` 更新**:
-   - `--dry-run` が `False`（実削除モード）の場合は、`cleanup_run_lock(nonblocking=False)` を取得して他のクリーンアップと直列化し、削除完了後に `last_cleanup_at` を現在時刻（UTC ISO 8601）で更新する。
-   - `--dry-run` が `True` の場合は、完全読み取り専用で動作し、`cleanup.lock` の取得や `last_cleanup_at` の更新は行わない。
+   - `--dry-run` が `False`（実削除モード）の場合は、`cleanup_run_lock(nonblocking=False)`（ロックファイル `cleanup.run.lock`）を取得して他のクリーンアップと直列化し、削除完了後に `last_cleanup_at` を現在時刻（UTC ISO 8601）で更新する。
+   - `--dry-run` が `True` の場合は、完全読み取り専用で動作し、`cleanup.run.lock` の取得や `last_cleanup_at` の更新は行わない。
 
 <a id="sec-5-3"></a>
 
@@ -287,7 +290,7 @@ herdr-orchestrator cleanup-registry [--dry-run] [--json]
 
 ### 6.1 2段階判定（Phase 1: ロックなし事前フィルタ → Phase 2: ロック取得後再検証・削除）
 
-現行の `_try_delete_task_if_eligible(task_id, cutoff)` は、対象が作成直後の稼働中 task であっても無条件に `with io.task_mutation_lock(task_id):` を取得してから JSON を読み込むため、稼働中 task の状態更新とロック競合を起こし、さらに全 task 分の `.json.lock` ファイルを生成してしまう。
+現行の `_try_delete_task_if_eligible(task_id, cutoff)` は、対象が作成直後の稼働中 task であっても無条件に `with io.task_mutation_lock(task_id):` をブロッキング取得してから JSON を読み込むため、稼働中 task の状態更新（`mutate_task`）とロック競合・待ち合わせを起こす（また、`create` 直後で一度も `mutate_task` されていない task に対しても不要な `.json.lock` を新規作成してしまう）。
 
 これを解消するため、`_try_delete_task_if_eligible()` を以下の **2 段階判定**に改修する。
 
@@ -295,7 +298,7 @@ herdr-orchestrator cleanup-registry [--dry-run] [--json]
 flowchart TD
   Start["task_<id>.json を走査"] --> P1["Phase 1: ロックなしで JSON を読み込み"]
   P1 --> P1Check{"_task_eligible_for_cleanup(doc, cutoff) ?"}
-  P1Check -->|"False (または読込失敗)"| Skip["ロックを取得せず即スキップ"]
+  P1Check -->|"False (または読込・構造エラー)"| Skip["ロックを取得せず即スキップ"]
   P1Check -->|"True"| P2Lock["Phase 2: io.task_mutation_lock(task_id) を取得"]
   P2Lock --> P2Read["ロック保持下で JSON を再読み込み"]
   P2Read --> P2Check{"_task_eligible_for_cleanup(doc, cutoff) ?"}
@@ -306,8 +309,8 @@ flowchart TD
 ```
 
 1. **Phase 1（ロックなし事前フィルタ）**:
-   - `io.task_mutation_lock(task_id)` を**取得せずに** `task_<id>.json` を読み込む（`OSError` / `JSONDecodeError` 等が発生した場合は削除対象外として即スキップする）。
-   - `_task_eligible_for_cleanup(doc, cutoff)` を評価し、`False` であればロックファイルに一切触れずに `None` を返す。これにより、稼働中 task や 30 日未満の task に対してロック競合や新規 `.json.lock` ファイル生成が一切発生しなくなる。
+   - `io.task_mutation_lock(task_id)` を**取得せずに** `task_<id>.json` を読み込み、`_task_eligible_for_cleanup(doc, cutoff)` を評価する。ファイル読み込みや JSON パースの失敗（`OSError` / `JSONDecodeError`）だけでなく、必須キー欠落や型不正等の構造破損（`KeyError` / `TypeError` / `ValueError`、またはトップレベルが `dict` でない場合）が発生した場合も、削除対象外（`False`）としてロックファイルに一切触れずに即スキップする。
+   - これにより、稼働中 task や 30 日未満の task、および破損 JSON に対してロック競合や不要なロック取得が一切発生しなくなる。
 2. **Phase 2（ロック取得後の再検証と削除）**:
    - Phase 1 を通過した task（30 日以上経過かつ terminal 状態）に対してのみ、`with io.task_mutation_lock(task_id):` で排他ロックを取得する。
    - ロック保持下で再度 `task_<id>.json` を読み込み、`_task_eligible_for_cleanup(doc, cutoff)` を再検証する（Phase 1 と Phase 2 の間に `reset-completion` 等で状態が変化していた場合は削除を中止する）。
@@ -322,9 +325,16 @@ flowchart TD
 1. **タスク削除直後の `<task_id>.json.lock` 削除**:
    - Phase 2 で `<task_id>.json` と `<task_id>.handoff.lock` を削除し、`with io.task_mutation_lock(task_id):` ブロックを抜けて `flock(LOCK_UN)` およびファイルディスクリプタ `close()` が完了した**直後**に、`not path.exists()`（`<task_id>.json` が存在しないこと）を確認した上で `io.registry_lock_path(task_id).unlink(missing_ok=True)` を実行する。
    - `task_id` は UUIDv4 であり、一度削除された `task_id` が新規タスクで再利用されることはない。また、万が一別プロセスが同時にその `task_id` を参照しようとしても `<task_id>.json` がすでに存在しないため `task_not_found` となるだけであり、ロック解放直後の `.json.lock` unlink は競合安全である。
-2. **既存の孤立ロックファイル（Orphan Lock Files）のスイープ**:
+2. **既存の孤立ロックファイル（Orphan Lock Files）のスイープと安全性不変条件**:
    - 過去のバージョンで削除された task の残骸や、異常終了等で残った `task_<id>.json.lock` / `task_<id>.handoff.lock`（対応する `task_<id>.json` が存在しないもの）を回収するため、`cleanup_tasks()` 実行時に `tasks/` ディレクトリ内の `task_*.json.lock` および `task_*.handoff.lock` を走査する。
-   - 対応する `task_<id>.json` が存在しないロックファイルについて、非ブロッキング `flock(LOCK_EX | LOCK_NB)` が取得できること（どのプロセスも保持していないこと）を確認した上で `unlink(missing_ok=True)` する。これにより、万が一新規 `create` や `handoff` がまさにロックを取得中であるケースとも競合しない。
+   - 対応する `task_<id>.json` が存在しないロックファイルについて、非ブロッキング `flock(LOCK_EX | LOCK_NB)` が取得できること（どのプロセスも保持していないこと）を確認した上で `unlink(missing_ok=True)` する。
+   - **競合安全性の根拠（Registry 操作の不変条件）**:
+     一般に `flock(LOCK_NB)` 後の `unlink` 単体では「別プロセスが open 済みの古い inode を後から lock する」競合を防げないが、Task Registry には以下の**不変条件**が存在するため安全である：
+     1. `create_task_document`（`io.py`）はロックを取得せずに `task_<id>.json` を先に原子的に作成する。
+     2. `mutate_task`（`io.py`）は `task_<id>.json` の存在（`path.exists()`）を確認してから `task_mutation_lock`（`<task_id>.json.lock`）を open / lock する。
+     3. `handoff` の `<task_id>.handoff.lock` は `create` 完了後にのみ取得される。
+     4. `task_id`（UUIDv4）は再利用されない。
+        したがって、`task_<id>.json` が存在しないロックファイルは「これから新規作成される task」のものではあり得ず、仮に別プロセスが同時にそのロックを開こうとしても対象 task はすでに削除済み（`task_not_found`）であるため、アクティブな task のロック実体が失われることはない（※ 将来にわたり「JSON 作成が先、ロック取得が後」の順序不変条件を維持すること）。
 
 <a id="sec-6-3"></a>
 
@@ -388,6 +398,8 @@ flowchart TD
 | `skills/herdr-orchestrator/scripts/orchestrator/public_cli.py`           | `PUBLIC_COMMANDS` / `_COMMAND_HELP` / `argparse` への `cleanup-registry [--dry-run] [--json]` 追加と `_cmd_cleanup_registry` 実装                                                                 |
 | `skills/herdr-orchestrator/scripts/task-registry.py`                     | 内部 CLI `cleanup` サブコマンドの出力互換維持と拡張フィールド対応                                                                                                                                 |
 | `skills/herdr-orchestrator/SKILL.md`                                     | 公開 CLI 一覧への `cleanup-registry` 追記および `doctor` 診断項目の説明更新                                                                                                                       |
+| `skills/herdr-orchestrator/references/public-cli.md`                     | コマンド一覧および `cleanup-registry` / `doctor` / `result-submit`（§6.1 含む）の説明更新（D-2 波及対応）                                                                                         |
+| `skills/herdr-orchestrator/install/README.md`                            | §2.1 コマンド分類表の `result-submit` 備考欄への「完了後に 1 日 1 回の lazy cleanup（§6.8）を実行する」旨の追記および `cleanup-registry` の追加（D-2 波及対応）                                   |
 | `tests/test_orchestrator_phase2_registry.py`（または専用テストファイル） | 下記 §8.2 のテストケース（RC-01〜RC-10）の追加                                                                                                                                                    |
 
 <a id="sec-8-2"></a>
@@ -396,15 +408,15 @@ flowchart TD
 
 指針 10（「テストは引数変換だけでなく実際の結果を検証する」）に基づき、実装時に以下の自動テストを追加・検証する。
 
-| テスト ID | 検証カテゴリ                 | テスト内容と期待される結果                                                                                                                                                                                                                                                                     |
-| --------- | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **RC-01** | 2 段階判定・非対象保護       | 30 日未満の task、または 30 日経過していても `task.status` が非 terminal（`created`, `in_progress`, `unknown`）や `completion.status` が `pending` / `processing` の場合、Phase 1 でスキップされ、`<task_id>.json.lock` が新規作成されないこと                                                 |
-| **RC-02** | `.json.lock` 残存解消        | 30 日超かつ terminal の削除対象 task が削除された際、`<task_id>.json`、`<task_id>.handoff.lock` に加えて `<task_id>.json.lock` も完全に unlink され残存しないこと                                                                                                                              |
-| **RC-03** | 孤立ロックファイル回収       | 対応する `task_<id>.json` が存在しない孤立した `task_<id>.json.lock` / `task_<id>.handoff.lock` が存在する場合、`cleanup_tasks` 実行時に安全に削除され `orphan_locks_deleted` に計上されること（ただし他プロセスが flock 保持中のロックは削除しないこと）                                      |
-| **RC-04** | `result-submit` Lazy Cleanup | `result-submit`（初回確定、`not replay`）実行時に `cleanup_tasks` が自動実行され、30 日超の古い terminal task が削除されて `last_cleanup_at` が更新されること                                                                                                                                  |
-| **RC-05** | レート制限と Replay スキップ | `last_cleanup_at` が 24 時間以内の場合、および `result-submit` が `replay: true` の場合は、古い task が存在しても lazy cleanup がスキップされること                                                                                                                                            |
-| **RC-06** | `result-submit` エラー隔離   | `cleanup_tasks` が例外を送出するようモンキーパッチした状態で `result-submit` を実行しても、`result-submit` は終了コード `0` で正常完了し、`sys.stderr` に `warning: lazy registry cleanup failed:` が出力されること（指針 10）                                                                 |
-| **RC-07** | `doctor` Read-Only 可視化    | `herdr-orchestrator doctor` の JSON 出力に `registry_cleanup`（`total_tasks`, `eligible_count`, `eligible_by_repository`, `orphan_lock_files_count`, `last_cleanup_at` 等）が含まれ、実行前後でファイル・ロック・スタンプが一切変化しないこと（`tasks/` 未作成時もディレクトリを作らないこと） |
-| **RC-08** | `cleanup-registry --dry-run` | `herdr-orchestrator cleanup-registry --dry-run`（`HERDR_ENV` 未設定環境を含む）が削除対象リストと件数を JSON で返し、実ファイルおよび `last_cleanup_at` を変更しないこと                                                                                                                       |
-| **RC-09** | `cleanup-registry` 実削除    | `herdr-orchestrator cleanup-registry` が `last_cleanup_at` の 24 時間レート制限を無視して即時実行され、対象 task とロックファイルを削除し、`last_cleanup_at` を更新すること                                                                                                                    |
-| **RC-10** | 非ブロッキング競合回避       | 別プロセスが `cleanup.lock` を保持中に `result-submit`（または `cleanup_tasks(nonblocking=True)`）が呼ばれた場合、ブロックせず即座に `skipped_lock: True` で返ること                                                                                                                           |
+| テスト ID | 検証カテゴリ                 | テスト内容と期待される結果                                                                                                                                                                                                                                                                                     |
+| --------- | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **RC-01** | 2 段階判定・非対象・破損保護 | 30 日未満の task、30 日経過していても `task.status` が非 terminal（`created`, `in_progress`, `unknown`）や `completion.status` が `pending` / `processing` の task、および構文破損・必須キー欠落（`KeyError` / `TypeError` 等）の破損 JSON が Phase 1 で例外なくスキップされ、ロック取得や削除が行われないこと |
+| **RC-02** | `.json.lock` 残存解消        | 30 日超かつ terminal の削除対象 task が削除された際、`<task_id>.json`、`<task_id>.handoff.lock` に加えて `<task_id>.json.lock` も完全に unlink され残存しないこと                                                                                                                                              |
+| **RC-03** | 孤立ロックファイル回収       | 対応する `task_<id>.json` が存在しない孤立した `task_<id>.json.lock` / `task_<id>.handoff.lock` が存在する場合、`cleanup_tasks` 実行時に安全に削除され `orphan_locks_deleted` に計上されること（ただし他プロセスが flock 保持中のロックは削除しないこと）                                                      |
+| **RC-04** | `result-submit` Lazy Cleanup | `result-submit`（初回確定、`not replay`）実行時に `cleanup_tasks` が自動実行され、30 日超の古い terminal task が削除されて `last_cleanup_at` が更新されること                                                                                                                                                  |
+| **RC-05** | レート制限と Replay スキップ | `last_cleanup_at` が 24 時間以内の場合、および `result-submit` が `replay: true` の場合は、古い task が存在しても lazy cleanup がスキップされること                                                                                                                                                            |
+| **RC-06** | `result-submit` エラー隔離   | `cleanup_tasks` が例外を送出するようモンキーパッチした状態で `result-submit` を実行しても、`result-submit` は終了コード `0` で正常完了し、`sys.stderr` に `warning: lazy registry cleanup failed:` が出力されること（指針 10）                                                                                 |
+| **RC-07** | `doctor` Read-Only 可視化    | `herdr-orchestrator doctor` の JSON 出力に `registry_cleanup`（`total_tasks`, `eligible_count`, `eligible_by_repository`, `orphan_lock_files_count`, `last_cleanup_at` 等）が含まれ、実行前後でファイル・ロック・スタンプが一切変化しないこと（`tasks/` 未作成時もディレクトリを作らないこと）                 |
+| **RC-08** | `cleanup-registry --dry-run` | `herdr-orchestrator cleanup-registry --dry-run`（`HERDR_ENV` 未設定環境を含む）が削除対象リストと件数を JSON で返し、実ファイルおよび `last_cleanup_at` を変更しないこと                                                                                                                                       |
+| **RC-09** | `cleanup-registry` 実削除    | `herdr-orchestrator cleanup-registry` が `last_cleanup_at` の 24 時間レート制限を無視して即時実行され、対象 task とロックファイルを削除し、`last_cleanup_at` を更新すること                                                                                                                                    |
+| **RC-10** | 非ブロッキング競合回避       | 別プロセスが `cleanup.run.lock` を保持中に `result-submit`（または `cleanup_tasks(nonblocking=True)`）が呼ばれた場合、ブロックせず即座に `skipped_lock: True` で返ること                                                                                                                                       |
