@@ -55,7 +55,7 @@ description: >-
 
 ### モード A: 定期見直し・全体監査（Audit / Overhaul）
 
-レビュー関連文書群と過去のレビュー記録（`docs/reviews/internal/<instance-id>/INDEX.md` および個別 `RV*.md`）を横断点検し、改善提案をまとめる手順（[repo-workflow §6](../repo-workflow/SKILL.md#discussion) 準拠）。
+レビュー関連文書群と過去のレビュー記録（現行の `docs/reviews/internal/<instance-id>/INDEX.md`、アーカイブが存在する場合は `docs/reviews/internal/<instance-id>/archive/INDEX.md`、および個別 `RV*.md`）を横断点検し、改善提案をまとめる手順（[repo-workflow §6](../repo-workflow/SKILL.md#discussion) 準拠）。
 
 1. `herdr-orchestrator task-status <task.id>` で受信確認を行う（[repo-workflow §2.1](../repo-workflow/SKILL.md#worker-receive)）。
 2. 対象文書の行数・バイト数・重複・矛盾、および RV 記録（判定内訳、P0〜P3 件数、同一コミット再レビュー回数等）を実測・集計する。

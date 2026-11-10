@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
 
+from .cleanup import RETENTION_DAYS, scan_cleanup_candidates
 from .lock import LockAcquisitionError, ReviewLock
 from .recorder import (
     TaskRecordConflictError,
@@ -407,6 +408,48 @@ def cmd_reindex(args: argparse.Namespace) -> int:
         return 2
 
 
+def cmd_cleanup_candidates(args: argparse.Namespace) -> int:
+    try:
+        worktree = _resolve_worktree(args.worktree)
+    except FileNotFoundError as e:
+        print(f"[ERROR] {e}", file=sys.stderr)
+        return 1
+
+    data = scan_cleanup_candidates(worktree)
+
+    if args.json:
+        print(json.dumps(data, indent=2, ensure_ascii=False))
+        return 0
+
+    lines = [
+        f"Retention Policy: {data['retention_days']} days",
+        f"Active Instance: {data['instance_id'] or 'None'}",
+        f"Archive Candidates ({len(data['archive_candidates'])} files):",
+    ]
+    for ac in data["archive_candidates"]:
+        lines.append(f"  - {ac['path']} -> {ac['archive_to']} ({ac['review_id']}, age: {ac['age_days']} days)")
+    if not data["archive_candidates"]:
+        lines.append("  (none)")
+
+    lines.append(f"Delete Candidates ({len(data['delete_candidates'])} files):")
+    for dc in data["delete_candidates"]:
+        lines.append(f"  - {dc['path']} (category: {dc['category']}, age: {dc['age_days']} days)")
+    if not data["delete_candidates"]:
+        lines.append("  (none)")
+
+    protected = data["protected_count"]
+    by_reason = protected["by_reason"]
+    lines.append(f"Protected Count: {protected['total']} files")
+    lines.append(f"  - within_retention: {by_reason['within_retention']}")
+    lines.append(f"  - active_task: {by_reason['active_task']}")
+    lines.append(f"  - future_or_unreadable: {by_reason['future_or_unreadable']}")
+    lines.append(f"  - control_file: {by_reason['control_file']}")
+    lines.append(f"  - symlink: {by_reason['symlink']}")
+
+    print("\n".join(lines))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="repo-review-helper",
@@ -452,6 +495,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_reindex.add_argument("--worktree", help="Path to worktree (default: cwd)")
     p_reindex.add_argument("--instance-id", help="Instance ID to reindex (default: active instance)")
     p_reindex.set_defaults(func=cmd_reindex)
+
+    # cleanup-candidates
+    p_clean = subparsers.add_parser(
+        "cleanup-candidates",
+        help="List cleanup and archive candidates older than retention policy (read-only)",
+    )
+    p_clean.add_argument("--worktree", help="Path to worktree (default: cwd)")
+    p_clean.add_argument("--json", action="store_true", help="Output as JSON")
+    p_clean.set_defaults(func=cmd_cleanup_candidates)
 
     return parser
 

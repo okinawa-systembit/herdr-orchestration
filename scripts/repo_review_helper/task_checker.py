@@ -28,6 +28,8 @@ def fetch_task_list(
     repo_identity: str,
     *,
     use_cli: bool = False,
+    task_type: str | None = "review",
+    statuses: list[str] | None = None,
 ) -> dict[str, Any]:
     """
     Fetch review tasks using orchestrator list command or CLI.
@@ -42,8 +44,14 @@ def fetch_task_list(
                 cli_bin = str(repo_script)
 
         if cli_bin:
+            cmd = [cli_bin, "task-list", "--repository", repo_identity, "--limit", "1000"]
+            if task_type:
+                cmd.extend(["--type", task_type])
+            if statuses:
+                for st in statuses:
+                    cmd.extend(["--status", st])
             proc = subprocess.run(
-                [cli_bin, "task-list", "--repository", repo_identity, "--type", "review", "--limit", "1000"],
+                cmd,
                 cwd=str(worktree),
                 capture_output=True,
                 text=True,
@@ -55,11 +63,14 @@ def fetch_task_list(
                     pass
 
     # Fallback to direct Python call with max limit 1000 (R64-01)
-    payload, code = run_task_list(
-        repository=repo_identity,
-        type="review",
-        limit=1000,
-    )
+    call_kwargs: dict[str, Any] = {
+        "repository": repo_identity,
+        "type": task_type,
+        "limit": 1000,
+    }
+    if statuses is not None:
+        call_kwargs["statuses"] = statuses
+    payload, code = run_task_list(**call_kwargs)
     if code != 0:
         return {"complete": False, "truncated": False, "tasks": [], "error_code": code}
     return payload
