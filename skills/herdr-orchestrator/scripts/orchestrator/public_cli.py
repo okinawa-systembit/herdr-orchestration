@@ -44,6 +44,8 @@ from orchestrator.live_agent import (
     verify_live_agent_context,
 )
 from orchestrator.registry.errors import RegistryError
+from orchestrator.registry import operations as registry_ops
+from orchestrator.paths import tasks_dir
 from orchestrator.env import HerdrEnvError, require_herdr_env
 from orchestrator.errors import emit_error
 from orchestrator.registry.schema import STANDARD_ROLES, TASK_STATUSES
@@ -81,6 +83,7 @@ PUBLIC_COMMANDS = (
     "identity",
     "role",
     "project",
+    "cleanup-registry",
 )
 
 _COMMAND_HELP: dict[str, str] = {
@@ -97,12 +100,40 @@ _COMMAND_HELP: dict[str, str] = {
     "identity": "リポジトリ識別子（Repository Identity UUID）を管理（init または show）",
     "role": "リポジトリごとの論理ロールと pane_id の紐づけを管理（set, show, clear）",
     "project": "プロジェクトカタログ（projects.json）を管理（register, show, clear）",
+    "cleanup-registry": "Task Registry の古いタスクとロックファイルを整理（--dry-run 対応、HERDR_ENV 不要）",
 }
 
 
 def _cmd_doctor(_: argparse.Namespace) -> int:
     payload, exit_code = run_doctor()
     return emit_json(payload, exit_code=exit_code)
+
+
+def _cmd_cleanup_registry(ns: argparse.Namespace) -> int:
+    dry_run = getattr(ns, "dry_run", False)
+    try:
+        res = registry_ops.cleanup_tasks(
+            nonblocking=False,
+            ignore_rate_limit=True,
+            dry_run=dry_run,
+        )
+    except RegistryError as exc:
+        emit_registry_error(exc)
+
+    out = {
+        "command": "cleanup-registry",
+        "scope": "global",
+        "shared_across_repositories": True,
+        "registry_path": str(tasks_dir()),
+        "retention_days": registry_ops._RETENTION_DAYS,
+        "dry_run": dry_run,
+        "deleted": res.get("deleted", []),
+        "deleted_count": res.get("deleted_count", len(res.get("deleted", []))),
+        "deleted_by_repository": res.get("deleted_by_repository", {}),
+        "orphan_locks_deleted": res.get("orphan_locks_deleted", 0),
+        "last_cleanup_at": res.get("last_cleanup_at"),
+    }
+    return emit_json(out, exit_code=0)
 
 
 def _cmd_reconcile_dispatch(ns: argparse.Namespace) -> int:
@@ -1016,6 +1047,19 @@ def build_parser() -> argparse.ArgumentParser:
                 action="store_true",
                 help="JSON 出力を明示（指定の有無に関わらず常に JSON 出力）",
             )
+        elif name == "cleanup-registry":
+            p.add_argument(
+                "--dry-run",
+                action="store_true",
+                default=False,
+                help="ファイルの削除および last_cleanup_at の更新を行わず対象タスク一覧を表示",
+            )
+            p.add_argument(
+                "--json",
+                action="store_true",
+                default=True,
+                help="JSON 形式で出力（互換性フラグ）",
+            )
         elif name == "identity":
             id_sub = p.add_subparsers(dest="identity_action", required=True)
             id_sub.add_parser(
@@ -1150,6 +1194,7 @@ def main(argv: list[str] | None = None) -> int:
         "identity": _cmd_identity,
         "role": _cmd_role,
         "project": _cmd_project,
+        "cleanup-registry": _cmd_cleanup_registry,
     }
     handler = handlers[ns.command]
     return handler(ns)

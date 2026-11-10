@@ -2,7 +2,7 @@
 
 - **対象 Issue**: [Issue #157](https://github.com/okinawa-systembit/herdr-orchestration/issues/157)
 - **親 Issue**: [Issue #112](https://github.com/okinawa-systembit/herdr-orchestration/issues/112)（将来仕様（update コマンド等）およびロードマップ §23 検証項目のバックログ追跡）
-- **ステータス**: 設計承認
+- **ステータス**: 実装完了（PR #161 にてマージ済み）
 - **関連文書**:
   - [01-foundation.md](herdr-orchestrator/01-foundation.md#sec-2-4): 設計原則の Orchestrator 適用（§2.4〜§2.10）
   - [03-task-registry.md](herdr-orchestrator/03-task-registry.md#sec-6-8): Task Registry Retention / Cleanup（§6.8）および Locking（§6.5）
@@ -238,6 +238,8 @@ herdr-orchestrator cleanup-registry [--dry-run] [--json]
 3. **排他制御と `last_cleanup_at` 更新**:
    - `--dry-run` が `False`（実削除モード）の場合は、`cleanup_run_lock(nonblocking=False)`（ロックファイル `cleanup.run.lock`）を取得して他のクリーンアップと直列化し、削除完了後に `last_cleanup_at` を現在時刻（UTC ISO 8601）で更新する。
    - `--dry-run` が `True` の場合は、完全読み取り専用で動作し、`cleanup.run.lock` の取得や `last_cleanup_at` の更新は行わない。
+4. **エージェント実行承認（execpolicy allow）との整合**:
+   `cleanup-registry` による削除対象は [§6.8](herdr-orchestrator/03-task-registry.md#sec-6-8) の条件（作成から 30 日以上経過かつ terminal 状態）を満たす task および孤立ロックに限られ、[§3.1-4](#sec-3-1) の定義のとおり Orchestrator 内部メタデータのガベージコレクションであり destructive operation には該当しない。したがって Codex 実行承認テンプレート（`codex-execpolicy-snippet.rules`、[install/README.md §2.1](../skills/herdr-orchestrator/install/README.md#21-コマンド分類と許可方針)）において `cleanup-registry` はメンテナンス系として自動許可（`allow`）の対象とする（ただし読み取り専用コマンドとは性質が異なるため、execpolicy ルール行および justification は読み取り系から分離して個別に定義する）。
 
 <a id="sec-5-3"></a>
 

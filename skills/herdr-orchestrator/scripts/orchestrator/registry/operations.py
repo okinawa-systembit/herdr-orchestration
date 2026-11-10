@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import copy
+import fcntl
+import json
+import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from orchestrator.paths import handoff_lock_path
+from orchestrator.paths import handoff_lock_path, tasks_dir
 from orchestrator.registry.errors import RegistryError
 from orchestrator.registry import io
 from orchestrator.registry.paths_safe import require_result_artifact, validate_result_ref
@@ -28,23 +31,51 @@ def _is_initial_dispatch_failure_terminal(doc: dict[str, Any]) -> bool:
     )
 
 
-def _task_eligible_for_cleanup(doc: dict[str, Any], cutoff: datetime) -> bool:
-    task_status = doc["task"]["status"]
-    completion_status = doc["completion"]["status"]
-    if task_status not in ("succeeded", "failed", "cancelled"):
-        return False
-    if completion_status not in ("not_applicable", "sent", "failed", "skipped"):
-        return False
-    created = doc["timestamps"].get("created_at")
-    if not isinstance(created, str):
+def _task_eligible_for_cleanup(doc: Any, cutoff: datetime) -> bool:
+    if not isinstance(doc, dict):
         return False
     try:
+        task = doc.get("task")
+        if not isinstance(task, dict):
+            return False
+        task_status = task.get("status")
+        completion = doc.get("completion")
+        if not isinstance(completion, dict):
+            return False
+        completion_status = completion.get("status")
+
+        if task_status not in ("succeeded", "failed", "cancelled"):
+            return False
+        if completion_status not in ("not_applicable", "sent", "failed", "skipped"):
+            return False
+
+        timestamps = doc.get("timestamps")
+        if not isinstance(timestamps, dict):
+            return False
+        created = timestamps.get("created_at")
+        if not isinstance(created, str):
+            return False
         created_dt = datetime.fromisoformat(created)
         if created_dt.tzinfo is None:
             created_dt = created_dt.replace(tzinfo=timezone.utc)
-    except ValueError:
+        return created_dt <= cutoff
+    except (KeyError, TypeError, ValueError):
         return False
-    return created_dt <= cutoff
+
+
+def _extract_repository_identity(doc: Any) -> str:
+    if not isinstance(doc, dict):
+        return "unknown"
+    ctx = doc.get("context")
+    if not isinstance(ctx, dict):
+        return "unknown"
+    repo = ctx.get("repository")
+    if not isinstance(repo, dict):
+        return "unknown"
+    ident = repo.get("identity")
+    if ident:
+        return str(ident)
+    return "unknown"
 
 
 def create_task(payload: dict[str, Any]) -> dict[str, Any]:
@@ -517,50 +548,287 @@ def reconcile_dispatch(
         return result
 
 
-def _try_delete_task_if_eligible(task_id: str, cutoff: datetime) -> bool:
+def _try_delete_task_if_eligible(
+    task_id: str,
+    cutoff: datetime,
+    *,
+    out_repo_id: list[str | None] | None = None,
+) -> bool:
+    """
+    2-stage deletion of eligible tasks (docs/herdr-orchestrator-task-registry-cleanup.md §6.1).
+    Phase 1: Read without lock to filter out ineligible / active / corrupted tasks.
+    Phase 2: Acquire task_mutation_lock, re-verify eligibility, and delete.
+    Returns True if deleted, False otherwise.
+    If out_repo_id is provided, appends the repository identity or 'unknown'.
+    """
     path = io.task_file_path(task_id)
+    if not path.exists():
+        return False
+
+    # Phase 1: Lock-free preliminary filter
+    try:
+        raw = path.read_text(encoding="utf-8")
+        doc = json.loads(raw)
+        if not _task_eligible_for_cleanup(doc, cutoff):
+            return False
+    except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
+        return False
+
+    # Phase 2: Lock-protected re-verification and deletion
+    repo_id: str | None = None
     with io.task_mutation_lock(task_id):
         if not path.exists():
             return False
-        doc = io.read_task_document_unlocked(path)
+        try:
+            doc = io.read_task_document_unlocked(path)
+        except RegistryError:
+            return False
         if not _task_eligible_for_cleanup(doc, cutoff):
             return False
-        doc = io.read_task_document_unlocked(path)
-        if not _task_eligible_for_cleanup(doc, cutoff):
-            return False
-        path.unlink()
+
+        repo_id = _extract_repository_identity(doc)
+
+        path.unlink(missing_ok=True)
         handoff_lock_path(task_id).unlink(missing_ok=True)
+
+    # Post-lock cleanup of task_<id>.json.lock (§6.2)
+    if not path.exists():
+        io.registry_lock_path(task_id).unlink(missing_ok=True)
+
+    if out_repo_id is not None:
+        out_repo_id.append(repo_id)
+
     return True
 
 
-def cleanup_tasks(*, now: datetime | None = None) -> dict[str, Any]:
+def _sweep_orphan_locks(root: Path, *, dry_run: bool = False) -> int:
+    """
+    Sweep orphan lock files (task_*.json.lock and task_*.handoff.lock without corresponding task_*.json).
+    Uses non-blocking flock to ensure safety (§6.2).
+    Returns count of orphan locks deleted (or detected in dry-run).
+    """
+    orphan_count = 0
+    if not root.exists() or not root.is_dir():
+        return 0
+
+    for entry in sorted(root.iterdir(), key=lambda p: p.name):
+        name = entry.name
+        task_id: str | None = None
+        if name.startswith("task_") and name.endswith(".json.lock"):
+            task_id = name[:-len(".json.lock")]
+        elif name.startswith("task_") and name.endswith(".handoff.lock"):
+            task_id = name[:-len(".handoff.lock")]
+
+        if not task_id:
+            continue
+
+        task_json = io.task_file_path(task_id)
+        if task_json.exists():
+            continue
+
+        # Found orphan lock file
+        if dry_run:
+            orphan_count += 1
+            continue
+
+        try:
+            fd = os.open(str(entry), os.O_RDWR)
+        except OSError:
+            continue
+
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except (OSError, IOError):
+            os.close(fd)
+            continue
+
+        try:
+            entry.unlink(missing_ok=True)
+            orphan_count += 1
+        finally:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+            except OSError:
+                pass
+            os.close(fd)
+
+    return orphan_count
+
+
+def inspect_cleanup_status(*, now: datetime | None = None) -> dict[str, Any]:
+    """
+    Completely read-only status inspection for doctor and diagnostics (docs/herdr-orchestrator-task-registry-cleanup.md §4.1).
+    Does NOT create directories, acquire locks, or modify any files.
+    """
     current = now or datetime.now(timezone.utc)
-    with io.cleanup_run_lock() as acquired:
-        if not acquired:
-            return {"deleted": [], "skipped_rate_limit": True}
-        root = io.ensure_registry_layout()
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+
+    root = tasks_dir()
+    if not root.exists() or not root.is_dir():
+        return {
+            "registry_path": str(root),
+            "shared_across_repositories": True,
+            "retention_days": _RETENTION_DAYS,
+            "total_tasks": 0,
+            "eligible_count": 0,
+            "eligible_by_repository": {},
+            "orphan_lock_files_count": 0,
+            "last_cleanup_at": None,
+        }
+
+    total_tasks = 0
+    eligible_count = 0
+    eligible_by_repository: dict[str, int] = {}
+    cutoff = current - timedelta(days=_RETENTION_DAYS)
+
+    task_files = sorted(root.glob("task_*.json"))
+    for path in task_files:
+        if path.name.endswith(".json.lock"):
+            continue
+        total_tasks += 1
+        try:
+            raw = path.read_text(encoding="utf-8")
+            doc = json.loads(raw)
+            if _task_eligible_for_cleanup(doc, cutoff):
+                eligible_count += 1
+                repo_id = _extract_repository_identity(doc)
+                eligible_by_repository[repo_id] = eligible_by_repository.get(repo_id, 0) + 1
+        except Exception:
+            continue
+
+    orphan_lock_files_count = _sweep_orphan_locks(root, dry_run=True)
+    stamp_raw = io.read_cleanup_stamp(root)
+
+    return {
+        "registry_path": str(root),
+        "shared_across_repositories": True,
+        "retention_days": _RETENTION_DAYS,
+        "total_tasks": total_tasks,
+        "eligible_count": eligible_count,
+        "eligible_by_repository": eligible_by_repository,
+        "orphan_lock_files_count": orphan_lock_files_count,
+        "last_cleanup_at": stamp_raw,
+    }
+
+
+def cleanup_tasks(
+    *,
+    now: datetime | None = None,
+    nonblocking: bool = False,
+    ignore_rate_limit: bool = False,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """
+    Task Registry cleanup (docs/herdr-orchestrator-task-registry-cleanup.md §6.3, §6.8).
+    Supports dry-run, non-blocking lock, and rate-limit bypass.
+    """
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+
+    cutoff = current - timedelta(days=_RETENTION_DAYS)
+    root = tasks_dir()
+
+    if dry_run:
+        if not root.exists() or not root.is_dir():
+            return {
+                "deleted": [],
+                "deleted_count": 0,
+                "deleted_by_repository": {},
+                "orphan_locks_deleted": 0,
+                "last_cleanup_at": None,
+                "skipped_lock": False,
+                "skipped_rate_limit": False,
+            }
+        deleted_eligible: list[str] = []
+        deleted_by_repo: dict[str, int] = {}
+        for path in sorted(root.glob("task_*.json")):
+            if path.name.endswith(".json.lock"):
+                continue
+            task_id = path.stem
+            try:
+                raw = path.read_text(encoding="utf-8")
+                doc = json.loads(raw)
+                if _task_eligible_for_cleanup(doc, cutoff):
+                    deleted_eligible.append(task_id)
+                    repo_id = _extract_repository_identity(doc)
+                    deleted_by_repo[repo_id] = deleted_by_repo.get(repo_id, 0) + 1
+            except Exception:
+                continue
+
+        orphan_count = _sweep_orphan_locks(root, dry_run=True)
         stamp_raw = io.read_cleanup_stamp(root)
-        if stamp_raw:
+        return {
+            "deleted": sorted(deleted_eligible),
+            "deleted_count": len(deleted_eligible),
+            "deleted_by_repository": deleted_by_repo,
+            "orphan_locks_deleted": orphan_count,
+            "last_cleanup_at": stamp_raw,
+            "skipped_lock": False,
+            "skipped_rate_limit": False,
+        }
+
+    # Real cleanup with lock
+    with io.cleanup_run_lock(nonblocking=nonblocking) as acquired:
+        stamp_raw = io.read_cleanup_stamp(root) if (root.exists() and root.is_dir()) else None
+        if not acquired:
+            return {
+                "deleted": [],
+                "deleted_count": 0,
+                "deleted_by_repository": {},
+                "orphan_locks_deleted": 0,
+                "last_cleanup_at": stamp_raw,
+                "skipped_lock": True,
+                "skipped_rate_limit": False,
+            }
+
+        layout_root = io.ensure_registry_layout()
+        stamp_raw = io.read_cleanup_stamp(layout_root)
+        if not ignore_rate_limit and stamp_raw:
             try:
                 last = datetime.fromisoformat(stamp_raw)
                 if last.tzinfo is None:
                     last = last.replace(tzinfo=timezone.utc)
                 if current - last < timedelta(days=1):
-                    return {"deleted": [], "skipped_rate_limit": True}
+                    return {
+                        "deleted": [],
+                        "deleted_count": 0,
+                        "deleted_by_repository": {},
+                        "orphan_locks_deleted": 0,
+                        "last_cleanup_at": stamp_raw,
+                        "skipped_lock": False,
+                        "skipped_rate_limit": True,
+                    }
             except ValueError:
                 pass
 
         deleted: list[str] = []
-        cutoff = current - timedelta(days=_RETENTION_DAYS)
-        for path in sorted(root.glob("task_*.json")):
-            if ".json.lock" in path.name:
+        deleted_by_repo = {}
+        for path in sorted(layout_root.glob("task_*.json")):
+            if path.name.endswith(".json.lock"):
                 continue
             task_id = path.stem
             try:
-                if _try_delete_task_if_eligible(task_id, cutoff):
+                repo_holder: list[str | None] = []
+                was_deleted = _try_delete_task_if_eligible(task_id, cutoff, out_repo_id=repo_holder)
+                if was_deleted:
                     deleted.append(task_id)
+                    r_id = repo_holder[0] if repo_holder else "unknown"
+                    deleted_by_repo[r_id] = deleted_by_repo.get(r_id, 0) + 1
             except RegistryError:
                 continue
 
-        io.write_cleanup_stamp(root, current.replace(microsecond=0).isoformat())
-        return {"deleted": deleted, "skipped_rate_limit": False}
+        orphan_deleted = _sweep_orphan_locks(layout_root, dry_run=False)
+        new_stamp = current.replace(microsecond=0).isoformat()
+        io.write_cleanup_stamp(layout_root, new_stamp)
+
+        return {
+            "deleted": sorted(deleted),
+            "deleted_count": len(deleted),
+            "deleted_by_repository": deleted_by_repo,
+            "orphan_locks_deleted": orphan_deleted,
+            "last_cleanup_at": new_stamp,
+            "skipped_lock": False,
+            "skipped_rate_limit": False,
+        }

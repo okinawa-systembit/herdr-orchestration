@@ -286,7 +286,7 @@ Herdr CLI / Task Registry / repository check
 3. CLI の command name / subcommand を安定させる。
 4. 各 Agent の allowlist / approval policy は利用可能な範囲でユーザーグローバル設定として利用する。
 5. approval bypass を動作要件にしない。
-6. destructive operation は自動許可対象へ含めない。
+6. destructive operation は自動許可対象へ含めない（※ ただし [§6.8](03-task-registry.md#sec-6-8) に基づく作成後 30 日経過タスクおよび孤立ロックの自動整理は、Orchestrator 内部メタデータのガベージコレクションであり destructive operation には該当しない。[クリーンアップ設計書 §3.1](../herdr-orchestrator-task-registry-cleanup.md#sec-3-1) を参照）。
 
 <a id="sec-15-3"></a>
 
