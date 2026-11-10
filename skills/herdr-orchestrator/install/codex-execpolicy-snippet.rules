@@ -21,24 +21,30 @@
 #    - リポジトリ作業・検証用の任意ルールです。通常利用のみの場合は追記不要です。
 # ==============================================================================
 
-# --- 1. 診断・読み取り・整理系 (PATH 経由: ~/.local/bin -> ~/.agents/skills/...) ---
-prefix_rule(pattern=["herdr-orchestrator", ["doctor", "task-status", "task-result", "task-list", "cleanup-registry"]], decision="allow", justification="Orchestrator CLI on PATH: Read-only diagnostics, status checks, and registry cleanup")
+# --- 1. 診断・読み取り系 (PATH 経由: ~/.local/bin -> ~/.agents/skills/...) ---
+prefix_rule(pattern=["herdr-orchestrator", ["doctor", "task-status", "task-result", "task-list"]], decision="allow", justification="Orchestrator CLI on PATH: Read-only diagnostics and status checks")
 prefix_rule(pattern=["herdr-orchestrator", "identity", "show"], decision="allow", justification="Orchestrator CLI on PATH: Read-only repository identity inspection (identity init is intentionally excluded)")
 prefix_rule(pattern=["herdr-orchestrator", "role", "show"], decision="allow", justification="Orchestrator CLI on PATH: Read-only role binding inspection (role set/clear are intentionally excluded)")
 
-# --- 2. 自動化のための書き込み例外 (PATH 経由) ---
-# NOTE: result-submit は Task Registry の更新および completion 連鎖実行を伴う書き込み操作ですが、
+# --- 2. メンテナンス系 (PATH 経由) ---
+# NOTE: cleanup-registry は Task Registry 内の 30 日経過タスクおよび孤立ロックの整理（内部ガベージコレクション）であり、
+# 利用者データ破壊を伴わないため例外的に自動許可しています（設計書 §5.2 参照）。
+prefix_rule(pattern=["herdr-orchestrator", "cleanup-registry"], decision="allow", justification="Orchestrator CLI on PATH: Task Registry metadata cleanup (30-day retention and orphan locks)")
+
+# --- 3. 自動化のための書き込み例外 (PATH 経由) ---
+# NOTE: result-submit は Task Registry の更新、completion 連鎖実行、および lazy cleanup を伴う書き込み操作ですが、
 # Worker Agent による自動結果提出を阻害しないために例外的に自動許可しています。
 prefix_rule(pattern=["herdr-orchestrator", "result-submit"], decision="allow", justification="Orchestrator CLI on PATH: Automated worker result submission and completion triggering")
 
-# --- 3. 絶対パスフォールバック (Agent が PATH ではなく絶対パスで実行する場合用) ---
+# --- 4. 絶対パスフォールバック (Agent が PATH ではなく絶対パスで実行する場合用) ---
 # ※ GLOBAL_INSTALL_ABS を実際のインストール先ディレクトリに置換して利用してください。
 #   例: /home/<user>/.agents/skills/herdr-orchestration
-prefix_rule(pattern=["GLOBAL_INSTALL_ABS/scripts/herdr-orchestrator", ["doctor", "task-status", "task-result", "task-list", "cleanup-registry"]], decision="allow", justification="Orchestrator CLI absolute path fallback: Read-only diagnostics, status checks, and registry cleanup")
+prefix_rule(pattern=["GLOBAL_INSTALL_ABS/scripts/herdr-orchestrator", ["doctor", "task-status", "task-result", "task-list"]], decision="allow", justification="Orchestrator CLI absolute path fallback: Read-only diagnostics and status checks")
 prefix_rule(pattern=["GLOBAL_INSTALL_ABS/scripts/herdr-orchestrator", "identity", "show"], decision="allow", justification="Orchestrator CLI absolute path fallback: Read-only repository identity inspection")
 prefix_rule(pattern=["GLOBAL_INSTALL_ABS/scripts/herdr-orchestrator", "role", "show"], decision="allow", justification="Orchestrator CLI absolute path fallback: Read-only role binding inspection")
+prefix_rule(pattern=["GLOBAL_INSTALL_ABS/scripts/herdr-orchestrator", "cleanup-registry"], decision="allow", justification="Orchestrator CLI absolute path fallback: Task Registry metadata cleanup")
 prefix_rule(pattern=["GLOBAL_INSTALL_ABS/scripts/herdr-orchestrator", "result-submit"], decision="allow", justification="Orchestrator CLI absolute path fallback: Automated worker result submission and completion triggering")
 
-# --- 4. 開発・検証用コマンド (リポジトリルートでのテスト・検証用 / 任意設定) ---
+# --- 5. 開発・検証用コマンド (リポジトリルートでのテスト・検証用 / 任意設定) ---
 prefix_rule(pattern=["npm", "run", "test:orchestrator"], decision="allow", justification="Orchestrator unit tests (repo root)")
 prefix_rule(pattern=["npm", "run", "verify:orchestrator"], decision="allow", justification="Orchestrator pre-adoption verify (repo root)")

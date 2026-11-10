@@ -47,6 +47,11 @@ def _find_outdated_role_bindings() -> list[dict[str, Any]]:
 
 def run_doctor() -> tuple[dict[str, Any], int]:
     threshold = stale_dispatch_threshold_sec()
+    try:
+        cleanup_status = registry_ops.inspect_cleanup_status()
+    except Exception as exc:
+        cleanup_status = {"error": str(exc)}
+
     out: dict[str, Any] = {
         "command": "doctor",
         "stage": 5,
@@ -56,7 +61,7 @@ def run_doctor() -> tuple[dict[str, Any], int]:
             "candidates": registry_ops.find_stale_dispatch_candidates(min_age_sec=threshold),
         },
         "outdated_role_bindings": _find_outdated_role_bindings(),
-        "registry_cleanup": registry_ops.inspect_cleanup_status(),
+        "registry_cleanup": cleanup_status,
     }
     exit_code = 0
     if herdr_env_enabled():

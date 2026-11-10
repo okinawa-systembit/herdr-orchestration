@@ -153,8 +153,22 @@ class TaskRegistryCleanupTests(unittest.TestCase):
             path_bad_keys = tasks_dir() / "task_bad_keys.json"
             path_bad_keys.write_text(json.dumps({"some_key": "val"}), encoding="utf-8")
 
-            # Execute cleanup
-            res = registry_ops.cleanup_tasks(now=now, ignore_rate_limit=True)
+            # Remove .json.lock files to verify Phase 1 does not inadvertently create them
+            for tid in (id_young, id_in_prog, id_comp_pend, id_comp_proc):
+                (tasks_dir() / f"{tid}.json.lock").unlink(missing_ok=True)
+
+            locked_task_ids: list[str] = []
+            real_lock = registry_io.task_mutation_lock
+
+            @contextlib.contextmanager
+            def spy_task_mutation_lock(task_id: str):
+                locked_task_ids.append(task_id)
+                with real_lock(task_id):
+                    yield
+
+            with patch.object(registry_io, "task_mutation_lock", side_effect=spy_task_mutation_lock):
+                # Execute cleanup
+                res = registry_ops.cleanup_tasks(now=now, ignore_rate_limit=True)
 
             self.assertEqual(res["deleted"], [])
             self.assertEqual(res["deleted_count"], 0)
@@ -164,6 +178,15 @@ class TaskRegistryCleanupTests(unittest.TestCase):
             self.assertTrue(path_comp_proc.exists())
             self.assertTrue(path_corrupt.exists())
             self.assertTrue(path_bad_keys.exists())
+
+            # Verification of Phase 1 lock-free filtering: none of the ineligible tasks should acquire lock
+            self.assertEqual(locked_task_ids, [], "Phase 1 must filter out ineligible tasks without acquiring lock")
+            # Verification that no .json.lock files were created for un-locked tasks
+            for tid in (id_young, id_in_prog, id_comp_pend, id_comp_proc):
+                self.assertFalse(
+                    (tasks_dir() / f"{tid}.json.lock").exists(),
+                    f"{tid}.json.lock must not be created by cleanup check",
+                )
 
     # -------------------------------------------------------------------------
     # RC-02: .json.lock complete unlinking
@@ -182,10 +205,12 @@ class TaskRegistryCleanupTests(unittest.TestCase):
             self.assertTrue(json_lock.exists())
             self.assertTrue(handoff_lock.exists())
 
-            res = registry_ops.cleanup_tasks(now=now, ignore_rate_limit=True)
-            self.assertIn(task_id, res["deleted"])
-            self.assertFalse(path.exists())
-            self.assertFalse(json_lock.exists(), "task_*.json.lock must be completely unlinked")
+            # Test _try_delete_task_if_eligible directly (isolated from _sweep_orphan_locks)
+            cutoff = now - timedelta(days=30)
+            deleted = registry_ops._try_delete_task_if_eligible(task_id, cutoff)
+            self.assertTrue(deleted, "_try_delete_task_if_eligible must return True for eligible task")
+            self.assertFalse(path.exists(), "task JSON must be deleted")
+            self.assertFalse(json_lock.exists(), "task_*.json.lock must be deleted immediately after lock release")
             self.assertFalse(handoff_lock.exists(), "task_*.handoff.lock must be completely unlinked")
 
     # -------------------------------------------------------------------------

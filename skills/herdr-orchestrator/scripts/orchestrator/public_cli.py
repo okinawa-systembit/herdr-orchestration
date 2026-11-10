@@ -125,7 +125,7 @@ def _cmd_cleanup_registry(ns: argparse.Namespace) -> int:
         "scope": "global",
         "shared_across_repositories": True,
         "registry_path": str(tasks_dir()),
-        "retention_days": 30,
+        "retention_days": registry_ops._RETENTION_DAYS,
         "dry_run": dry_run,
         "deleted": res.get("deleted", []),
         "deleted_count": res.get("deleted_count", len(res.get("deleted", []))),

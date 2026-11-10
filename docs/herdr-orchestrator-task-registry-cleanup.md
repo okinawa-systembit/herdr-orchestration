@@ -238,6 +238,8 @@ herdr-orchestrator cleanup-registry [--dry-run] [--json]
 3. **排他制御と `last_cleanup_at` 更新**:
    - `--dry-run` が `False`（実削除モード）の場合は、`cleanup_run_lock(nonblocking=False)`（ロックファイル `cleanup.run.lock`）を取得して他のクリーンアップと直列化し、削除完了後に `last_cleanup_at` を現在時刻（UTC ISO 8601）で更新する。
    - `--dry-run` が `True` の場合は、完全読み取り専用で動作し、`cleanup.run.lock` の取得や `last_cleanup_at` の更新は行わない。
+4. **エージェント実行承認（execpolicy allow）との整合**:
+   `cleanup-registry` による削除対象は [§6.8](herdr-orchestrator/03-task-registry.md#sec-6-8) の条件（作成から 30 日以上経過かつ terminal 状態）を満たす task および孤立ロックに限られ、[§3.1-4](#sec-3-1) の定義のとおり Orchestrator 内部メタデータのガベージコレクションであり destructive operation には該当しない。したがって Codex 実行承認テンプレート（`codex-execpolicy-snippet.rules`、[install/README.md §2.1](../skills/herdr-orchestrator/install/README.md#21-コマンド分類と許可方針)）において `cleanup-registry` はメンテナンス系として自動許可（`allow`）の対象とする（ただし読み取り専用コマンドとは性質が異なるため、execpolicy ルール行および justification は読み取り系から分離して個別に定義する）。
 
 <a id="sec-5-3"></a>
 

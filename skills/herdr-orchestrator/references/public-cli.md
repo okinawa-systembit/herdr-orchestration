@@ -291,10 +291,13 @@ herdr-orchestrator cleanup-registry
 Codex を利用する場合、自律実行の中断を防ぐために `~/.codex/rules/default.rules` へ許可ルールを追加します（テンプレート: `skills/herdr-orchestrator/install/codex-execpolicy-snippet.rules`）。
 
 ```python
-# 読み取り・診断・メンテナンス系（自動許可）
-prefix_rule(pattern=["herdr-orchestrator", ["doctor", "task-status", "task-result", "task-list", "cleanup-registry"]], decision="allow")
+# 読み取り・診断系（自動許可）
+prefix_rule(pattern=["herdr-orchestrator", ["doctor", "task-status", "task-result", "task-list"]], decision="allow")
 prefix_rule(pattern=["herdr-orchestrator", "identity", "show"], decision="allow")
 prefix_rule(pattern=["herdr-orchestrator", "role", "show"], decision="allow")
+
+# メンテナンス系（自動許可: 内部メタデータ整理）
+prefix_rule(pattern=["herdr-orchestrator", "cleanup-registry"], decision="allow")
 
 # 結果提出（自動許可）
 prefix_rule(pattern=["herdr-orchestrator", "result-submit"], decision="allow")

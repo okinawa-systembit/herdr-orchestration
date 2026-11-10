@@ -63,6 +63,21 @@ def _task_eligible_for_cleanup(doc: Any, cutoff: datetime) -> bool:
         return False
 
 
+def _extract_repository_identity(doc: Any) -> str:
+    if not isinstance(doc, dict):
+        return "unknown"
+    ctx = doc.get("context")
+    if not isinstance(ctx, dict):
+        return "unknown"
+    repo = ctx.get("repository")
+    if not isinstance(repo, dict):
+        return "unknown"
+    ident = repo.get("identity")
+    if ident:
+        return str(ident)
+    return "unknown"
+
+
 def create_task(payload: dict[str, Any]) -> dict[str, Any]:
     validate_create_payload(payload)
     task_id = generate_task_id()
@@ -571,11 +586,7 @@ def _try_delete_task_if_eligible(
         if not _task_eligible_for_cleanup(doc, cutoff):
             return False
 
-        ctx_repo = doc.get("context", {}).get("repository", {})
-        if isinstance(ctx_repo, dict) and ctx_repo.get("identity"):
-            repo_id = str(ctx_repo["identity"])
-        else:
-            repo_id = "unknown"
+        repo_id = _extract_repository_identity(doc)
 
         path.unlink(missing_ok=True)
         handoff_lock_path(task_id).unlink(missing_ok=True)
@@ -681,11 +692,7 @@ def inspect_cleanup_status(*, now: datetime | None = None) -> dict[str, Any]:
             doc = json.loads(raw)
             if _task_eligible_for_cleanup(doc, cutoff):
                 eligible_count += 1
-                ctx_repo = doc.get("context", {}).get("repository", {})
-                if isinstance(ctx_repo, dict) and ctx_repo.get("identity"):
-                    repo_id = str(ctx_repo["identity"])
-                else:
-                    repo_id = "unknown"
+                repo_id = _extract_repository_identity(doc)
                 eligible_by_repository[repo_id] = eligible_by_repository.get(repo_id, 0) + 1
         except Exception:
             continue
@@ -745,11 +752,7 @@ def cleanup_tasks(
                 doc = json.loads(raw)
                 if _task_eligible_for_cleanup(doc, cutoff):
                     deleted_eligible.append(task_id)
-                    ctx_repo = doc.get("context", {}).get("repository", {})
-                    if isinstance(ctx_repo, dict) and ctx_repo.get("identity"):
-                        repo_id = str(ctx_repo["identity"])
-                    else:
-                        repo_id = "unknown"
+                    repo_id = _extract_repository_identity(doc)
                     deleted_by_repo[repo_id] = deleted_by_repo.get(repo_id, 0) + 1
             except Exception:
                 continue
