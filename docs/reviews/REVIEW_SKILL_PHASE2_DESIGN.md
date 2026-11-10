@@ -1,6 +1,6 @@
 # 内部レビュー記録・作業領域の保持期間とアーカイブ設計書（Phase 2）
 
-- **ステータス**: 設計中
+- **ステータス**: 設計承認
 - **対象 Issue**: [Issue #97](https://github.com/okinawa-systembit/herdr-orchestration/issues/97)
 - **対象**: このリポジトリの内部レビュー記録（`docs/reviews/internal/`）および作業領域（`.input/`）
 
@@ -78,7 +78,7 @@ A 領域における保持期間は、中央 Task Registry の保持期間（[Ta
 | `.input/inbox/*`、`.input/review/sent/*` | `task.instruction`（自由記述）または `result.ref`（`task-list` 非出力）から参照される | **機械（30日閾値）＋エージェント判断**: 自由記述の構文解析は行わない。CLI は30日超（`> 30 days`）の閾値のみを機械判定し、現在進行中のタスクで使用中でないかは削除実行前にエージェントが確認する。                                                                                                                                                                                                              |
 
 - **`RV*.md` における Active Task 機械判定の詳細**:
-  - **非 terminal 状態での絞り込み（1000件上限による `truncated` 回避）**: 完了済みタスクの蓄積により `task-list` の上限（1000件）に達して全 RV が永久保護される事態を防ぐため、`task-list` 呼び出し時は `--status created --status in_progress --status unknown`（必要に応じて `--repository <identity> --type review --limit 1000`）を指定して **active（非 terminal）なタスクのみ**を取得する。
+  - **非 terminal 状態での絞り込み（1000件上限による `truncated` 回避）**: 完了済みタスクの蓄積により `task-list` の上限（1000件）に達して全 RV が永久保護される事態を防ぐため、`task-list` 呼び出し時は `--status created --status in_progress --status unknown`（必要に応じて `--repository <identity> --limit 1000` を併用。`--type` での絞り込みは行わず全種別のタスクを対象とする）を指定して **active（非 terminal）なタスクのみ**を取得する。
   - **ID 照合と不在時の扱い**: 取得した active タスクの ID 集合に `RV*.md` の `task_id` が含まれる場合は **`active_task`（保護）** とする。一方、active タスク集合に含まれない場合（既に terminal となったタスク、Registry からクリーンアップ済みの古い `task_id`、またはフロントマターを持たない旧形式レコードの `task_id == "-"`）は active ではない（**`eligible`**）と判定する。
   - **`task-list` 取得失敗・切り詰め時のフェイルセーフ**: `task-list` の呼び出し自体に失敗した場合、または active タスクのみで絞り込んでもなお `complete == false` や `truncated == true` となった場合は、安全側に倒して30日超の対象 `RV*.md` を **`active_task`（保護）** として扱い、`stderr` に警告を出力する（[指針 10](../core-principles.md#guideline-10)）。
 - **補足（`.input/` における30日超タスクの非対称性について）**: 作成から30日を超えてなお実行中（非 terminal）のまま残るタスクは通常運用では極めて稀であるため、`.input/` 側を「30日閾値の機械判定＋削除前のエージェント確認」としても実運用上のリスクはない。
