@@ -121,9 +121,9 @@ rm -f .input/tmp/pr-body.md
    - PR（設計 PR または実装 PR）が作成された後、PR 上に最終判定コメントを記録する場合は、他のロールがブランチ作業中でない（作業ツリーが `main` で clean である）ことを確認してから `レビュワー` に最終判定コメント投稿を依頼する。
    - `設計担当` から返却された実装依頼書の下書き（`.input/inbox/implementation-request-issue-<N>.md`）を確認する。
    - **原則として、設計 PR が人間によって `main` にマージされたことを確認してから**、`実装担当` へ `handoff` する（未マージの設計ブランチの上に実装ブランチを積み重ねない）。特例でマージ前に並行着手させる場合は、依頼書に「設計ブランチから切り、設計 PR マージ後に `main` へ rebase すること」を明記する。
-   - 実装 PR がマージされた後、用済みとなった実装依頼書ファイルを削除して整理する。
+   - 実装 PR がマージされた後も、`result-submit --result-ref` の参照整合性（`artifact_missing` 防止）を保つため、実装依頼書ファイルは即削除せず保持する（30日保持期間およびクリーンアップ基準は [Phase 2 設計書](../../../docs/reviews/REVIEW_SKILL_PHASE2_DESIGN.md) を参照）。
 4. **相談結果の正本化**:
-   - エージェント間相談（[#discussion](#discussion)）で合意・決定した内容は、必ず GitHub Issue または設計書へ転記して正本化し、用済みの相談・回答ファイルは削除する。
+   - エージェント間相談（[#discussion](#discussion)）で合意・決定した内容は、必ず GitHub Issue または設計書へ転記して正本化する。相談・回答ファイルは `result.ref` の参照整合性を保つため即削除せず保持する（保持期間は [Phase 2 設計書](../../../docs/reviews/REVIEW_SKILL_PHASE2_DESIGN.md) を参照）。
 
 ---
 
@@ -217,9 +217,9 @@ rm -f .input/tmp/pr-body.md
    - `.input/inbox/discussion-<topic>-response.md` を作成する（過剰なパーミッション強制は不要）。
    - **回答の冒頭に「結論（先に要点）」を置き**、コードやコマンドで確認した**事実**と**推論・提案**を分けて記述する。
    - `herdr-orchestrator result-submit <task.id> --result-status succeeded --result-ref .input/inbox/discussion-<topic>-response.md --summary "<200字以内の要約>"` で提出する（GitHub への投稿やコミット・push は行わない）。
-4. **正本化と片付け（Requester）**:
+4. **正本化と保持（Requester）**:
    - **相談ファイルは正本ではない**（Git 追跡外）。相談で決まったことは、依頼元（メイン）が必ず **GitHub Issue または設計書へ転記して正本化**する（基本方針: 原則 6）。
-   - 正本化が完了したら、依頼元（または作成者）が相談ファイルと回答ファイルを削除してよい（ワイドレビュー A-7 で残存有無を点検）。
+   - 正本化が完了した後も、`result-submit --result-ref` の参照整合性（`artifact_missing` 防止）を保つため、相談ファイルと回答ファイルは即削除せず30日間保持する（保持期間およびクリーンアップ基準は [Phase 2 設計書](../../../docs/reviews/REVIEW_SKILL_PHASE2_DESIGN.md) を参照。ワイドレビュー A-7 では30日超の残存有無を点検）。
 
 ---
 
