@@ -2,7 +2,7 @@
 
 - **対象 Issue**: [Issue #157](https://github.com/okinawa-systembit/herdr-orchestration/issues/157)
 - **親 Issue**: [Issue #112](https://github.com/okinawa-systembit/herdr-orchestration/issues/112)（将来仕様（update コマンド等）およびロードマップ §23 検証項目のバックログ追跡）
-- **ステータス**: 設計中
+- **ステータス**: 設計承認
 - **関連文書**:
   - [01-foundation.md](herdr-orchestrator/01-foundation.md#sec-2-4): 設計原則の Orchestrator 適用（§2.4〜§2.10）
   - [03-task-registry.md](herdr-orchestrator/03-task-registry.md#sec-6-8): Task Registry Retention / Cleanup（§6.8）および Locking（§6.5）
@@ -400,6 +400,7 @@ flowchart TD
 | `skills/herdr-orchestrator/SKILL.md`                                     | 公開 CLI 一覧への `cleanup-registry` 追記および `doctor` 診断項目の説明更新                                                                                                                       |
 | `skills/herdr-orchestrator/references/public-cli.md`                     | コマンド一覧および `cleanup-registry` / `doctor` / `result-submit`（§6.1 含む）の説明更新（D-2 波及対応）                                                                                         |
 | `skills/herdr-orchestrator/install/README.md`                            | §2.1 コマンド分類表の `result-submit` 備考欄への「完了後に 1 日 1 回の lazy cleanup（§6.8）を実行する」旨の追記および `cleanup-registry` の追加（D-2 波及対応）                                   |
+| `docs/herdr-orchestrator/07-skill-and-implementation.md`                 | §15.2 の「destructive operation は自動許可対象へ含めない」に、§6.8 の保持期間による自動整理は除く旨と本設計書 §3.1 への参照リンクを追記                                                           |
 | `tests/test_orchestrator_phase2_registry.py`（または専用テストファイル） | 下記 §8.2 のテストケース（RC-01〜RC-10）の追加                                                                                                                                                    |
 
 <a id="sec-8-2"></a>
