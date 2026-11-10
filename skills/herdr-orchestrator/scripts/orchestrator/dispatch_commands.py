@@ -56,6 +56,7 @@ def run_doctor() -> tuple[dict[str, Any], int]:
             "candidates": registry_ops.find_stale_dispatch_candidates(min_age_sec=threshold),
         },
         "outdated_role_bindings": _find_outdated_role_bindings(),
+        "registry_cleanup": registry_ops.inspect_cleanup_status(),
     }
     exit_code = 0
     if herdr_env_enabled():

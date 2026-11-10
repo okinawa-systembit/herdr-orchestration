@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -467,4 +468,11 @@ def result_submit(
         chain = best_effort_completion_after_result(task_id)
         if chain.get("attempted"):
             payload["completion_chain"] = chain
+        try:
+            registry_ops.cleanup_tasks(nonblocking=True, ignore_rate_limit=False)
+        except Exception as exc:
+            print(
+                f"[herdr-orchestrator] warning: lazy registry cleanup failed: {exc}",
+                file=sys.stderr,
+            )
     return payload

@@ -29,6 +29,7 @@
 | `task-result <task_id>`                                   | Requester による結果確定データの取得・成果物パス解決                                                                                        | 必須               |
 | `resume-task` / `reset-completion` / `recover-completion` | completion 状態の再試行・復旧                                                                                                               | 必須               |
 | `reconcile-dispatch`                                      | 未確定 dispatch の整合性復旧                                                                                                                | 必須               |
+| `cleanup-registry`                                        | Task Registry の古いタスクと孤立ロックファイルを整理（`--dry-run`, `--json`）                                                               | 免除（ペイン外可） |
 | `update`                                                  | 【未実装・将来仕様】配布環境の最新化（現行版の更新は `install.sh` を再実行。README『アップデート』参照）                                    | 免除（ペイン外可） |
 
 ※ Task Registry の JSON ファイル直接編集は禁止されています。すべての操作は本 CLI を介してアトミックに行われます。
@@ -39,13 +40,14 @@
 
 ### 2.1 環境診断 (`doctor`)
 
-Herdr セッションペイン内で実行し、環境変数や古い設定ファイルの有無を確認します。
+Herdr セッションペイン内で実行し、環境変数や古い設定ファイルの有無、および Task Registry のクリーンアップ蓄積状況を確認します。
 
 ```bash
 herdr-orchestrator doctor
 ```
 
 正常時は終了コード 0 で診断 JSON が出力されます。セッション外で実行した場合は `herdr_env: false` となり終了コード 1 が返ります。
+診断 JSON の `registry_cleanup` フィールドには、全リポジトリ共有の Task Registry における総タスク数（`total_tasks`）、完了から 30 日以上経過して削除対象となるタスク件数（`eligible_count`）およびリポジトリ別内訳（`eligible_by_repository`）、孤立ロックファイル数（`orphan_lock_files_count`）、前回クリーンアップ日時（`last_cleanup_at`）が含まれます。
 
 ### 2.2 リポジトリ識別子の初期化 (`identity init` / `identity show`)
 
@@ -237,6 +239,8 @@ herdr-orchestrator result-submit <task_id> \
   --summary "調査完了。設定ファイルのタイムアウト値不足が原因でした。"
 ```
 
+- **自動 lazy cleanup**: `result-submit` 完了時、バックグラウンドで 1 日 1 回、完了後 30 日以上経過した古いタスクおよび孤立ロックファイルの非ブロッキングクリーンアップ（[§6.8](../../../docs/herdr-orchestrator/03-task-registry.md#sec-6-8)）が best-effort で実行されます。クリーンアップが失敗した場合でも警告を標準エラー出力するのみで、結果提出自体の成功は維持されます。
+
 ### 5.4 結果の読み取り (`task-result`)
 
 Requester Agent が Worker の提出結果を取得します。
@@ -260,6 +264,24 @@ herdr-orchestrator reconcile-dispatch <task_id> \
 
 ※ `task.status: created` かつ `dispatch.status: pending` のタスクのみが対象です。
 
+### 5.6 Task Registry の整理 (`cleanup-registry`)
+
+Task Registry 内の古いタスク（作成から 30 日以上経過かつ terminal 状態）および対応するタスクが存在しない孤立ロックファイルを整理します（詳細は [クリーンアップ設計書](../../../docs/herdr-orchestrator-task-registry-cleanup.md) を参照）。
+
+```bash
+# 実削除を行わず、削除対象タスク一覧と孤立ロック数を確認
+herdr-orchestrator cleanup-registry --dry-run
+
+# 実際に削除を実行
+herdr-orchestrator cleanup-registry
+```
+
+- `--dry-run`: ファイル削除および `last_cleanup_at` 更新を行わず、削除対象 task ID 一覧と集計情報のみを返却します（完全読み取り専用）。
+- `--json`: JSON 出力を明示（指定の有無に関わらず常に同一の JSON 出力）。
+- **`HERDR_ENV=1` 免除**: ローカルファイルシステム上の Task Registry のみを操作するため、Herdr ペイン外（通常のターミナル）からも直接実行可能です。
+- **全リポジトリ共通スコープ**: Task Registry（`~/.local/state/herdr-orchestrator/tasks`）はホスト上の全リポジトリ・全 worktree で共有されているため、どのディレクトリから実行しても Registry 全体が対象となります（出力 JSON に `scope: "global"`, `shared_across_repositories: true` を明示）。
+- **レート制限バイパス**: 手動実行時は 1 日 1 回のレート制限をバイパスして即座にクリーンアップを実行します。
+
 ---
 
 ## 6. Codex Agent 固有の設定
@@ -269,8 +291,8 @@ herdr-orchestrator reconcile-dispatch <task_id> \
 Codex を利用する場合、自律実行の中断を防ぐために `~/.codex/rules/default.rules` へ許可ルールを追加します（テンプレート: `skills/herdr-orchestrator/install/codex-execpolicy-snippet.rules`）。
 
 ```python
-# 読み取り・診断系（自動許可）
-prefix_rule(pattern=["herdr-orchestrator", ["doctor", "task-status", "task-result", "task-list"]], decision="allow")
+# 読み取り・診断・メンテナンス系（自動許可）
+prefix_rule(pattern=["herdr-orchestrator", ["doctor", "task-status", "task-result", "task-list", "cleanup-registry"]], decision="allow")
 prefix_rule(pattern=["herdr-orchestrator", "identity", "show"], decision="allow")
 prefix_rule(pattern=["herdr-orchestrator", "role", "show"], decision="allow")
 
