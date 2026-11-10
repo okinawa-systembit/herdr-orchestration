@@ -2,7 +2,7 @@
 
 - **対象 Issue**: [Issue #157](https://github.com/okinawa-systembit/herdr-orchestration/issues/157)
 - **親 Issue**: [Issue #112](https://github.com/okinawa-systembit/herdr-orchestration/issues/112)（将来仕様（update コマンド等）およびロードマップ §23 検証項目のバックログ追跡）
-- **ステータス**: 実装中
+- **ステータス**: 実装完了（PR #161 にてマージ済み）
 - **関連文書**:
   - [01-foundation.md](herdr-orchestrator/01-foundation.md#sec-2-4): 設計原則の Orchestrator 適用（§2.4〜§2.10）
   - [03-task-registry.md](herdr-orchestrator/03-task-registry.md#sec-6-8): Task Registry Retention / Cleanup（§6.8）および Locking（§6.5）
