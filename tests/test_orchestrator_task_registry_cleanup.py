@@ -85,12 +85,16 @@ class TaskRegistryCleanupTests(unittest.TestCase):
             "HERDR_WORKSPACE_ID": "w1",
             "HERDR_TAB_ID": "w1:t1",
         }
+        self.env_patcher = patch.dict(os.environ, self.env)
+        self.env_patcher.start()
+
         # Ensure fixture worktree exists
         self.fixture_dir = Path("/tmp/herdr-orchestrator-fixture")
         self.fixture_dir.mkdir(parents=True, exist_ok=True)
         (self.fixture_dir / "out.md").write_text("ok\n", encoding="utf-8")
 
     def tearDown(self) -> None:
+        self.env_patcher.stop()
         self.tmp.cleanup()
 
     def _setup_terminal_task(
