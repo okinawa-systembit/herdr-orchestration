@@ -28,7 +28,7 @@
 [Phase 1 設計書](REVIEW_SKILL_PHASE1_DESIGN.md)および[Phase 1 詳細実装設計書](REVIEW_SKILL_PHASE1_IMPLEMENTATION.md)により、`scripts/repo-review-helper` を用いた内部レビュー記録（`docs/reviews/internal/<instance-id>/RV*.md`）の原子的保存・採番および `.input/inbox/` を介した配送基盤が確立された。一方で、Phase 1 では「通常運用での保持期間・明示的な廃止手順は別フェーズで決める」（[Phase 1 設計書 §10](REVIEW_SKILL_PHASE1_DESIGN.md#sec-10)）としていたため、長期運用に伴い以下の課題が生じていた。
 
 1. **記録・一時ファイルの蓄積**: `docs/reviews/internal/<instance-id>/` 直下の `RV*.md`（130件超）や `.input/inbox/`、`.input/review/sent/` のファイルが整理基準のないまま蓄積し、一覧性（[基本方針: 原則 2 人間中心の可観測性](../core-principles.md#principle-2)）が低下する。
-2. **保持期間内の早期削除による `artifact_missing` 事故**: レビュー記録（`RV*.md`）、相談回答（`discussion-*-response.md`）、実装依頼書下書き（`implementation-request-*.md`）は Orchestrator の `result-submit --result-ref` に指定される成果物（[Result Contract §10](../herdr-orchestrator/06-results-and-workflows.md#sec-10)）である。中央 Task Registry の保持期間（30日）内にこれらを削除すると、`herdr-orchestrator task-result` が `artifact_missing` エラーとなる。
+2. **保持期間内の早期削除による `artifact_missing` 事故**: レビュー記録（`RV*.md`）、相談回答（`discussion-*-response.md`）、実装依頼書下書き（`implementation-request-*.md`）、PR 最終コメントの送信済み控え（`.input/review/sent/*`）は Orchestrator の `result-submit --result-ref` に指定される成果物（[Result Contract §10](../herdr-orchestrator/06-results-and-workflows.md#sec-10)）である。中央 Task Registry の保持期間（30日）内にこれらを削除すると、`herdr-orchestrator task-result` が `artifact_missing` エラーとなる。
 3. **自然言語指示による誤削除リスク**: 人間から「掃除して」「不要ファイルを消して」と指示された際、エージェントが保護期間や制御ファイルの役割を考慮せず `rm -rf .input/*` 等を実行すると、進行中タスクの破壊や保持期間内の参照切れを引き起こす。
 
 ### 1.2 適用範囲と責務境界（A 領域 vs B 領域）
@@ -72,13 +72,16 @@ A 領域における保持期間は、中央 Task Registry の保持期間（[Ta
 
 進行中（非 terminal）のタスクに関連するファイルが誤って移動・削除されることを防ぐため、[基本方針: 指針 8（機械検査とエージェント判断の境界）](../core-principles.md#guideline-8)に基づき、対象ごとに以下の通り判定方法を分担する。
 
-| 対象パス                                 | タスクとの紐づけ構造                                                                  | 判定主体と保護ルール                                                                                                                                                                                                                                   |
-| :--------------------------------------- | :------------------------------------------------------------------------------------ | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `docs/reviews/internal/<id>/RV*.md`      | フロントマターに機械制御値 `task_id` が記録されている                                 | **機械判定（`cleanup-candidates`）**: `herdr-orchestrator task-list`（[task-list 設計書](../herdr-orchestrator-task-list.md)）で該当 `task_id` が非 terminal（`queued` / `dispatched` / `in_progress`）であれば機械的に `active_task` として保護する。 |
-| `.input/inbox/*`、`.input/review/sent/*` | `task.instruction`（自由記述）または `result.ref`（`task-list` 非出力）から参照される | **機械（30日閾値）＋エージェント判断**: 自由記述の構文解析は行わない。CLI は30日超（`> 30 days`）の閾値のみを機械判定し、現在進行中のタスクで使用中でないかは削除実行前にエージェントが確認する。                                                      |
+| 対象パス                                 | タスクとの紐づけ構造                                                                  | 判定主体と保護ルール                                                                                                                                                                                                                                                                                                                                                                                           |
+| :--------------------------------------- | :------------------------------------------------------------------------------------ | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `docs/reviews/internal/<id>/RV*.md`      | フロントマターに機械制御値 `task_id` が記録されている                                 | **機械判定（`cleanup-candidates`）**: 非 terminal（`task.status ∉ {succeeded, failed, cancelled}`、[Task Registry 設計書 §6.3](../herdr-orchestrator/03-task-registry.md#sec-6-3)・[§6.8](../herdr-orchestrator/03-task-registry.md#sec-6-8)）のタスクのみを `task-list`（[task-list 設計書](../herdr-orchestrator-task-list.md)）で取得し、該当 `task_id` が含まれれば機械的に `active_task` として保護する。 |
+| `.input/inbox/*`、`.input/review/sent/*` | `task.instruction`（自由記述）または `result.ref`（`task-list` 非出力）から参照される | **機械（30日閾値）＋エージェント判断**: 自由記述の構文解析は行わない。CLI は30日超（`> 30 days`）の閾値のみを機械判定し、現在進行中のタスクで使用中でないかは削除実行前にエージェントが確認する。                                                                                                                                                                                                              |
 
-- **補足（30日超タスクの非対称性について）**: 作成から30日を超えてなお実行中（`in_progress`）のまま残るタスクは通常運用では極めて稀であるため、`.input/` 側を「30日閾値の機械判定＋削除前のエージェント確認」としても実運用上のリスクはない。
-- **`task-list` 取得失敗・切り詰め時のフェイルセーフ**: `RV*.md` の判定において、`herdr-orchestrator task-list` の呼び出しに失敗した場合、または応答の `complete == false` や `truncated == true`（件数上限による切り詰め）により全アクティブタスクの不在を確定できない場合は、安全側に倒して対象 `RV*.md` を **`active_task`（保護）** として扱い、`stderr` に警告を出力する（[指針 10](../core-principles.md#guideline-10)）。
+- **`RV*.md` における Active Task 機械判定の詳細**:
+  - **非 terminal 状態での絞り込み（1000件上限による `truncated` 回避）**: 完了済みタスクの蓄積により `task-list` の上限（1000件）に達して全 RV が永久保護される事態を防ぐため、`task-list` 呼び出し時は `--status created --status in_progress --status unknown`（必要に応じて `--repository <identity> --type review --limit 1000`）を指定して **active（非 terminal）なタスクのみ**を取得する。
+  - **ID 照合と不在時の扱い**: 取得した active タスクの ID 集合に `RV*.md` の `task_id` が含まれる場合は **`active_task`（保護）** とする。一方、active タスク集合に含まれない場合（既に terminal となったタスク、Registry からクリーンアップ済みの古い `task_id`、またはフロントマターを持たない旧形式レコードの `task_id == "-"`）は active ではない（**`eligible`**）と判定する。
+  - **`task-list` 取得失敗・切り詰め時のフェイルセーフ**: `task-list` の呼び出し自体に失敗した場合、または active タスクのみで絞り込んでもなお `complete == false` や `truncated == true` となった場合は、安全側に倒して30日超の対象 `RV*.md` を **`active_task`（保護）** として扱い、`stderr` に警告を出力する（[指針 10](../core-principles.md#guideline-10)）。
+- **補足（`.input/` における30日超タスクの非対称性について）**: 作成から30日を超えてなお実行中（非 terminal）のまま残るタスクは通常運用では極めて稀であるため、`.input/` 側を「30日閾値の機械判定＋削除前のエージェント確認」としても実運用上のリスクはない。
 
 ---
 
@@ -93,7 +96,7 @@ A 領域における保持期間は、中央 Task Registry の保持期間（[Ta
 1. `mkdir -p docs/reviews/internal/<instance-id>/archive` を実行する。
 2. `cleanup-candidates` がリストアップした個別ファイルパスを指定して `mv docs/reviews/internal/<instance-id>/RVNNN.md docs/reviews/internal/<instance-id>/archive/RVNNN.md` を実行する。
 3. 後述の `archive/INDEX.md` を作成・追記する。
-4. `scripts/repo-review-helper reindex` を実行し、直下の `docs/reviews/internal/<instance-id>/INDEX.md` を現役レコード（30日以内）のみの一覧に更新する。
+4. `scripts/repo-review-helper reindex` を実行し、直下の `docs/reviews/internal/<instance-id>/INDEX.md` を直下に残る現役レコード（アーカイブされなかったレコード）のみの一覧に更新する。
 
 ### 3.2 `archive/INDEX.md` の位置付けと形式
 
@@ -156,7 +159,7 @@ A 領域における保持期間は、中央 Task Registry の保持期間（[Ta
 
 ### 6.2 30日以内ファイルの削除要求に対する拒否と人間への委任
 
-- 人間から自然言語で「掃除して」「不要ファイルを消して」と指示された場合は、30日を超えた候補（`cleanup-candidates` の出力対象）のみを整理し、30日以内のファイルには一切手を触れない。
+- 人間から自然言語で「掃除して」「不要ファイルを消して」と指示された場合は、30日を超えた候補（`cleanup-candidates` の出力対象）のみを整理し、30日以内のファイル（コマンド引数用の一時バッファ `.input/tmp/*` を除く）には一切手を触れない。
 - 万が一、人間から**「30日以内のものも含めて全部消して」「強制的にリセットして」と明示的に指示された場合であっても、エージェントは自ら削除を実行してはならない**。
 - この場合、エージェントは以下の点を人間に説明し、**人間自身の端末操作（手動での `rm` / `mv` 実行）に委任する**：
   1. 30日以内のファイルを削除すると、進行中タスクの破壊や `herdr-orchestrator task-result` における `artifact_missing` エラーが発生するリスクがあること。
@@ -188,7 +191,7 @@ scripts/repo-review-helper cleanup-candidates [--worktree <path>] [--json]
 - **期間短縮・強制オプションの不採用（フェイルセーフ）**:
   - `--days`、`--force`、`--all` 等の保持期間を変更・バイパスするオプションは**仕様として一切設けない**（[原則 1 KISS](../core-principles.md#principle-1)）。未知のフラグが渡された場合は `argparse` の標準動作により終了コード `2` で拒絶する。
 - **保持期間定数の共有**:
-  - 保持期間 `30` 日は、Orchestrator Registry 側の定数（`skills/herdr-orchestrator/scripts/orchestrator/registry/operations.py`）と同一の値（`RETENTION_DAYS = 30`）を使用する。
+  - `repo-review-helper` 側の保持期間定数（`RETENTION_DAYS = 30`）は、Orchestrator Registry 側の `_RETENTION_DAYS`（`skills/herdr-orchestrator/scripts/orchestrator/registry/operations.py`）と同一の値（`30`）とし、単体テスト `P2-01` で両者の値が一致することを検証する。
 
 ### 7.2 走査・判定の動作規則
 
@@ -229,7 +232,7 @@ scripts/repo-review-helper cleanup-candidates [--worktree <path>] [--json]
       "age_days": 31.5
     },
     {
-      "path": ".input/review/sent/pr-12-reviewer-round-1.md",
+      "path": ".input/review/sent/20261001-120000-000000-reviewer-draft.md",
       "category": "review_sent",
       "age_days": 40.1
     }
@@ -283,13 +286,13 @@ scripts/repo-review-helper cleanup-candidates [--worktree <path>] [--json]
 
 実装時は `tests/test_repo_review_helper.py` に以下のテストケースを追加し、`npm run test:orchestrator` で検証する（[基本方針: 指針 10](../core-principles.md#guideline-10) に従い、実際の出力 JSON・終了コード・`stderr`・ファイル状態をアサートする）。
 
-| テスト ID | 検証項目                                     | 期待される結果                                                                                                                                                                                                                                                                                                                                                             |
-| :-------- | :------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **P2-01** | **保持期間定数の一致検証**                   | `repo-review-helper` の保持期間定数（`30`）が `orchestrator.registry.operations` の保持期間定数と一致し、出力 JSON の `retention_days` が `30` であること。                                                                                                                                                                                                                |
-| **P2-02** | **`RV*.md` のタイムスタンプ判定と境界値**    | `parse_review_metadata` の `created_at` が30日超（例: 31日前）なら `archive_candidates` に入り、30日以内（例: 30日ちょうど・29日前）なら `within_retention` になること。タイムゾーンなし・不正値時は `st_mtime` にフォールバックし、`created_at` または `st_mtime` が未来時刻なら `future_or_unreadable` として保護されること。                                            |
-| **P2-03** | **`RV*.md` の Active Task 機械保護**         | 30日超の `RV*.md` であっても、`task_id` が `task-list` 上で非 terminal（`in_progress` 等）の場合は `active_task` として保護されること。また、`task-list` がエラー・`complete=false`・`truncated=true` の場合も安全側に倒して `active_task` として保護し、`stderr` に警告を出すこと。                                                                                       |
-| **P2-04** | **`.input/` の許可リストと制御ファイル保護** | `.input/inbox/*` および `.input/review/sent/*` の直下通常ファイルで `st_mtime > 30 days` のものだけが `delete_candidates` に入り、`<= 30 days` は `within_retention` となること。`.input/review/{state.json,reviewer-draft.md,incoming.md}` は期間に関わらず `control_file` として保護され、サブディレクトリや `.` 始まりファイル、`.input/tmp/*` は候補に含まれないこと。 |
-| **P2-05** | **Symlink 非追従（`lstat` 検査）**           | `<instance-id>/`、`.input/inbox/`、`.input/review/sent/` 内の symlink（30日超のファイルへのリンクを含む）をたどらず候補から除外し、`protected_count.by_reason.symlink` に計上して `stderr` に `[WARN]` を出力すること。                                                                                                                                                    |
-| **P2-06** | **未初期化・ディレクトリ不在時の耐障害性**   | レビュー補助状態が未初期化、または `.input/inbox/`・`.input/review/sent/` が存在しない環境でも `rc=0` で正常終了し、`instance_id: null`・空配列を返すこと。                                                                                                                                                                                                                |
-| **P2-07** | **期間短縮・強制オプションの不在確認**       | `--days` や `--force` を渡した際に `argparse` が未定義オプションとして `rc=2` で拒絶すること。                                                                                                                                                                                                                                                                             |
-| **P2-08** | **`archive/` 移動後の `reindex`・採番継続**  | `RV001.md`〜`RV003.md` を `archive/` へ移動し `archive/INDEX.md` を作成した状態で `reindex` を実行してもエラーにならず直下 `INDEX.md` が更新され、続く `record-save` で `RV004` が採番されること（`RV001` に巻き戻らないこと）。                                                                                                                                           |
+| テスト ID | 検証項目                                     | 期待される結果                                                                                                                                                                                                                                                                                                                                                                                                              |
+| :-------- | :------------------------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **P2-01** | **保持期間定数の一致検証**                   | `repo-review-helper` の保持期間定数（`RETENTION_DAYS = 30`）が `orchestrator.registry.operations._RETENTION_DAYS` と一致し、出力 JSON の `retention_days` が `30` であること。                                                                                                                                                                                                                                              |
+| **P2-02** | **`RV*.md` のタイムスタンプ判定と境界値**    | `parse_review_metadata` の `created_at` が30日超（例: 31日前）なら `archive_candidates` に入り、30日以内（例: 30日ちょうど・29日前）なら `within_retention` になること。タイムゾーンなし・不正値時は `st_mtime` にフォールバックし、`created_at` または `st_mtime` が未来時刻なら `future_or_unreadable` として保護されること。                                                                                             |
+| **P2-03** | **`RV*.md` の Active Task 機械保護**         | 30日超の `RV*.md` について、`task-list`（非 terminal 状態 `created` / `in_progress` / `unknown` で絞り込み）に含まれる `task_id` は `active_task` として保護され、含まれない `task_id`（terminal 済み・Registry 不在・`"-"`）は `archive_candidates`（`eligible`）になること。また、`task-list` がエラー・`complete=false`・`truncated=true` の場合は安全側に倒して `active_task` として保護し、`stderr` に警告を出すこと。 |
+| **P2-04** | **`.input/` の許可リストと制御ファイル保護** | `.input/inbox/*` および `.input/review/sent/*` の直下通常ファイルで `st_mtime > 30 days` のものだけが `delete_candidates` に入り、`<= 30 days` は `within_retention` となること。`.input/review/{state.json,reviewer-draft.md,incoming.md}` は期間に関わらず `control_file` として保護され、サブディレクトリや `.` 始まりファイル、`.input/tmp/*` は候補に含まれないこと。                                                  |
+| **P2-05** | **Symlink 非追従（`lstat` 検査）**           | `<instance-id>/`、`.input/inbox/`、`.input/review/sent/` 内の symlink（30日超のファイルへのリンクを含む）をたどらず候補から除外し、`protected_count.by_reason.symlink` に計上して `stderr` に `[WARN]` を出力すること。                                                                                                                                                                                                     |
+| **P2-06** | **未初期化・ディレクトリ不在時の耐障害性**   | レビュー補助状態が未初期化、または `.input/inbox/`・`.input/review/sent/` が存在しない環境でも `rc=0` で正常終了し、`instance_id: null`・空配列を返すこと。                                                                                                                                                                                                                                                                 |
+| **P2-07** | **期間短縮・強制オプションの不在確認**       | `--days` や `--force` を渡した際に `argparse` が未定義オプションとして `rc=2` で拒絶すること。                                                                                                                                                                                                                                                                                                                              |
+| **P2-08** | **`archive/` 移動後の `reindex`・採番継続**  | `RV001.md`〜`RV003.md` を `archive/` へ移動し `archive/INDEX.md` を作成した状態で `reindex` を実行してもエラーにならず直下 `INDEX.md` が更新され、続く `record-save` で `RV004` が採番されること（`RV001` に巻き戻らないこと）。                                                                                                                                                                                            |
