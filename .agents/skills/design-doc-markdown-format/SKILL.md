@@ -3,7 +3,8 @@ name: design-doc-markdown-format
 description: >-
   Formats and lints Markdown after creating or editing Herdr Orchestrator design
   documents. Use when changing AGENTS.md, docs/herdr-orchestrator-design.md,
-  docs/herdr-orchestrator/*.md, docs/herdr-agent-review-guidelines.md, or when
+  docs/herdr-orchestrator/*.md, docs/herdr-orchestrator-*.md,
+  docs/herdr-agent-review-guidelines.md, docs/reviews/*.md, or when
   the user mentions 設計書, design doc, or Markdown formatting in this repo.
 ---
 
@@ -17,8 +18,10 @@ Herdr Orchestrator の設計書を**作成・変更・修正したら、作業�
 
 - [AGENTS.md](../../../AGENTS.md)
 - [docs/herdr-orchestrator-design.md](../../../docs/herdr-orchestrator-design.md)
-- [docs/herdr-orchestrator/*.md](../../../docs/herdr-orchestrator/)
+- [docs/herdr-orchestrator/\*.md](../../../docs/herdr-orchestrator/)
+- [docs/herdr-orchestrator-\*.md](../../../docs/)（個別設計書・実装 INDEX・検証記録）
 - [docs/herdr-agent-review-guidelines.md](../../../docs/herdr-agent-review-guidelines.md)
+- [docs/reviews/\*.md](../../../docs/reviews/)（レビュー設計書・運用規約方針 ※ `docs/reviews/internal/**` は除外）
 
 ## 手順
 
