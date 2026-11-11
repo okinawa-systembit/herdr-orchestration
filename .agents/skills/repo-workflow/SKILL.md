@@ -269,6 +269,7 @@ rm -f .input/tmp/pr-body.md
 ## 9. 作業領域・レビュー記録の整理手順とセーフティガードレール
 
 内部レビュー記録（`docs/reviews/internal/<instance-id>/`）および作業領域（`.input/`）の保持・整理は、[Phase 2 設計書](../../../docs/reviews/REVIEW_SKILL_PHASE2_DESIGN.md) の単一正本に従う。
+※ 中央 Task Registry（`~/.local/state/herdr-orchestrator/`）の整理は直接 `rm` せず `herdr-orchestrator cleanup-registry` を使用する（[Task Registry クリーンアップ設計書 §7.2](../../../docs/herdr-orchestrator-task-registry-cleanup.md#sec-7-2)）。
 
 ### 9.1 整理手順（`cleanup-candidates` の利用）
 
