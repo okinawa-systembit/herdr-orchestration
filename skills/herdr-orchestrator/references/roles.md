@@ -17,10 +17,13 @@
 - `handoff` 実行時に指定したロールが未登録（`worker_role_not_bound`）だった場合は、エラー出力 JSON の `available_roles`（ローカル / グローバルの登録済みロール一覧）または `herdr-orchestrator role show` で実際の登録名を確認すること。
 
 > [!NOTE]
-> **標準ロール名と日本語名の使い分け**:
-> `reviewer` と `レビュワー`、`implementer` と `実装者` はそれぞれ**別のロール名**として扱われます。
-> `repo-review` や `repo-workflow` などのリポジトリ標準ツールは英語の標準ロール名（`--worker-role reviewer`）で handoff を行うため、連携ツールを使用するワークスペースでは標準ロール名（`reviewer`, `implementer`）で登録し、UI 表示を日本語にしたい場合は `--label "レビュワー"` のように指定することを推奨します。  
-> ※ 同様に、`レビュワー` と `レビュアー` のような表記揺れ・送り仮名の違いも**完全に別のロール名**として区別されるため、登録時のロール名と完全一致で指定してください。
+> **ロール名の言語と表記の統一**:
+> 日本語ロール名（例: `レビュワー`、`実装担当`）と英語ロール名（例: `reviewer`、`implementer`）はどちらも完全にサポートされており、Role Binding 登録後の動作は同一です。ただし両者は**完全に別のロール名**として扱われ、`レビュワー` と `レビュアー`、`実装担当` と `実装者` のような表記揺れや同義語も区別されます。
+>
+> - **リポジトリ（ワークスペース）内での統一**: 人間が日本語で「レビュワーに依頼して」と指示する運用であればロール名自体を日本語（`レビュワー`、`実装担当` 等）で登録し、英語で運用する場合は英語（`reviewer`、`implementer` 等）で登録するなど、同一リポジトリ内では表記を統一してください。
+> - **登録名と `--to` の完全一致**: `handoff --to <role>` には、`role show` で確認した登録名を完全一致で指定してください（日本語で登録したなら `--to レビュワー`、英語で登録したなら `--to reviewer`）。
+> - **`--label` は UI 表示専用**: `--label` は人間が Herdr UI 上でペインを識別するための表示用であり、`handoff` の宛先解決・照合には一切使われません（表示名を「レビュワー」にしても、ロール名が `reviewer` であれば `--to レビュワー` では届きません）。
+> - **英語標準 4 ロールのフォールバック**: 英語の標準 4 ロール（`design` / `reviewer` / `implementer` / `orchestrator`）のみ、Role Binding 未登録時に Pattern A 命名への自動フォールバックが機能します（次節「Role と `pane_id` の紐づけ」末尾参照）。Role Binding を登録して運用する場合は日本語・英語の差はありません。
 
 ## Role と `pane_id` の紐づけ（Role Binding: ローカル / グローバル）
 
@@ -39,6 +42,13 @@ Herdr 本体の自動セッション復元（`resume`）に干渉しないよう
 
 ```bash
 # herdr pane list で自ペイン（例: w15:p1, w15:p2）のセッションや CWD + agent 種別を確認してロールを紐づける
+# ※ 例 1・例 2 はどちらか一方のみを実行します（同一ペインに再登録すると前のロールは自動的に置き換わります）。
+
+# 例 1: 日本語ロール名で登録する場合（指示や handoff も --to レビュワー / --to 実装担当 で統一）
+herdr-orchestrator role set 実装担当 --pane w15:p1 --label "実装担当"
+herdr-orchestrator role set レビュワー --pane w15:p2 --label "レビュワー"
+
+# 例 2: 英語ロール名で登録する場合（指示や handoff も --to implementer / --to reviewer で統一）
 herdr-orchestrator role set implementer --pane w15:p1 --label "実装者"
 herdr-orchestrator role set reviewer --pane w15:p2 --label "レビュワー"
 
