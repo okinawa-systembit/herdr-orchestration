@@ -23,7 +23,7 @@
 > - **リポジトリ（ワークスペース）内での統一**: 人間が日本語で「レビュワーに依頼して」と指示する運用であればロール名自体を日本語（`レビュワー`、`実装担当` 等）で登録し、英語で運用する場合は英語（`reviewer`、`implementer` 等）で登録するなど、同一リポジトリ内では表記を統一してください。
 > - **登録名と `--to` の完全一致**: `handoff --to <role>` には、`role show` で確認した登録名を完全一致で指定してください（日本語で登録したなら `--to レビュワー`、英語で登録したなら `--to reviewer`）。
 > - **`--label` は UI 表示専用**: `--label` は人間が Herdr UI 上でペインを識別するための表示用であり、`handoff` の宛先解決・照合には一切使われません（表示名を「レビュワー」にしても、ロール名が `reviewer` であれば `--to レビュワー` では届きません）。
-> - **英語標準 4 ロールのフォールバック**: 英語の標準 4 ロール（`design` / `reviewer` / `implementer` / `orchestrator`）のみ、Role Binding 未登録時に Pattern A 命名への自動フォールバックが機能します（本節末尾参照）。Role Binding を登録して運用する場合は日本語・英語の差はありません。
+> - **英語標準 4 ロールのフォールバック**: 英語の標準 4 ロール（`design` / `reviewer` / `implementer` / `orchestrator`）のみ、Role Binding 未登録時に Pattern A 命名への自動フォールバックが機能します（次節「Role と `pane_id` の紐づけ」末尾参照）。Role Binding を登録して運用する場合は日本語・英語の差はありません。
 
 ## Role と `pane_id` の紐づけ（Role Binding: ローカル / グローバル）
 
@@ -42,6 +42,8 @@ Herdr 本体の自動セッション復元（`resume`）に干渉しないよう
 
 ```bash
 # herdr pane list で自ペイン（例: w15:p1, w15:p2）のセッションや CWD + agent 種別を確認してロールを紐づける
+# ※ 例 1・例 2 はどちらか一方のみを実行します（同一ペインに再登録すると前のロールは自動的に置き換わります）。
+
 # 例 1: 日本語ロール名で登録する場合（指示や handoff も --to レビュワー / --to 実装担当 で統一）
 herdr-orchestrator role set 実装担当 --pane w15:p1 --label "実装担当"
 herdr-orchestrator role set レビュワー --pane w15:p2 --label "レビュワー"
