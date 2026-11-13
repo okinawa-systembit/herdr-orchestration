@@ -86,7 +86,7 @@ ${XDG_STATE_HOME:-$HOME/.local/state}/herdr-orchestrator/tasks/
 }
 ```
 
-`schema_version` は必須とし、MVP は `1` のみ受け入れる。未知 version は推測して処理せずエラーにする。
+`schema_version` は必須とし、MVP は `1` のみ受け入れる。未知 version は推測して処理せずエラーにする。`cancel-task` 実行時のみ `task.cancel_reason`（非空文字列）および `task.cancelled_by`（`role`, `pane_id`, `agent_name` を持つ監査用オブジェクト）を任意フィールドとして `task` に記録する（[タスクキャンセル設計書 §3.2](../herdr-orchestrator-task-cancellation.md#sec-3-2)）。
 
 `context.repository.identity` は repository の論理 identity であり path として使用しない。`context.worktree.path` は task が実際に操作する checkout / worktree root の絶対 path とし、成果物の保存・参照・path safety の基準に使用する。Git の共通 repository directory や別 worktree の root を `context.worktree.path` として代用しない。
 
@@ -132,28 +132,31 @@ ${XDG_STATE_HOME:-$HOME/.local/state}/herdr-orchestrator/tasks/
 
 #### Event Transition Matrix
 
-| Event                                                                                     | `task.status` | `dispatch.status` | `result.status` | `completion.status`                                                             |
-| ----------------------------------------------------------------------------------------- | ------------- | ----------------- | --------------- | ------------------------------------------------------------------------------- |
-| sync task create                                                                          | `created`     | `pending`         | `pending`       | `not_applicable`                                                                |
-| async task create (`completion.action=resume_requester`)                                  | `created`     | `pending`         | `pending`       | `pending`                                                                       |
-| async task create (`completion.action=none`)                                              | `created`     | `pending`         | `pending`       | `not_applicable`                                                                |
-| initial dispatch success                                                                  | `in_progress` | `sent`            | `pending`       | 維持                                                                            |
-| initial dispatch skipped by safety/context validation                                     | `failed`      | `skipped`         | `unavailable`   | `resume_requester` は `skipped`; `none` / sync は `not_applicable`              |
-| initial dispatch definite failure                                                         | `failed`      | `failed`          | `unavailable`   | `resume_requester` は `skipped`; `none` / sync は `not_applicable`              |
-| initial dispatch uncertain (`resume_requester`)                                           | `unknown`     | `uncertain`       | `pending`       | `pending`                                                                       |
-| initial dispatch uncertain (`none`)                                                       | `unknown`     | `uncertain`       | `pending`       | `not_applicable`                                                                |
-| worker result succeeded (`resume_requester`)                                              | `succeeded`   | 維持              | `succeeded`     | `pending`                                                                       |
-| worker result succeeded (`none`)                                                          | `succeeded`   | 維持              | `succeeded`     | `not_applicable`                                                                |
-| worker result failed (`resume_requester`)                                                 | `failed`      | 維持              | `failed`        | `pending`                                                                       |
-| worker result failed (`none`)                                                             | `failed`      | 維持              | `failed`        | `not_applicable`                                                                |
-| worker result unavailable (`resume_requester`)                                            | `failed`      | 維持              | `unavailable`   | `pending`                                                                       |
-| worker result unavailable (`none`)                                                        | `failed`      | 維持              | `unavailable`   | `not_applicable`                                                                |
-| completion claim                                                                          | 維持          | 維持              | 維持            | `pending -> processing`                                                         |
-| completion send success                                                                   | 維持          | 維持              | 維持            | `processing -> sent`                                                            |
-| completion definite failure                                                               | 維持          | 維持              | 維持            | `processing -> failed`                                                          |
-| completion delivery uncertain                                                             | 維持          | 維持              | 維持            | `processing -> uncertain`                                                       |
-| completion intentionally not sent                                                         | 維持          | 維持              | 維持            | `pending / processing -> skipped`                                               |
-| explicit task cancellation before terminal result **（MVP では event 無効・将来拡張用）** | `cancelled`   | 現在値を保持      | 現在値を保持    | `resume_requester` で pending なら `skipped`; `none` / sync は `not_applicable` |
+| Event                                                    | `task.status` | `dispatch.status` | `result.status` | `completion.status`                                                                                        |
+| -------------------------------------------------------- | ------------- | ----------------- | --------------- | ---------------------------------------------------------------------------------------------------------- |
+| sync task create                                         | `created`     | `pending`         | `pending`       | `not_applicable`                                                                                           |
+| async task create (`completion.action=resume_requester`) | `created`     | `pending`         | `pending`       | `pending`                                                                                                  |
+| async task create (`completion.action=none`)             | `created`     | `pending`         | `pending`       | `not_applicable`                                                                                           |
+| initial dispatch success                                 | `in_progress` | `sent`            | `pending`       | 維持                                                                                                       |
+| initial dispatch skipped by safety/context validation    | `failed`      | `skipped`         | `unavailable`   | `resume_requester` は `skipped`; `none` / sync は `not_applicable`                                         |
+| initial dispatch definite failure                        | `failed`      | `failed`          | `unavailable`   | `resume_requester` は `skipped`; `none` / sync は `not_applicable`                                         |
+| initial dispatch uncertain (`resume_requester`)          | `unknown`     | `uncertain`       | `pending`       | `pending`                                                                                                  |
+| initial dispatch uncertain (`none`)                      | `unknown`     | `uncertain`       | `pending`       | `not_applicable`                                                                                           |
+| worker result succeeded (`resume_requester`)             | `succeeded`   | 維持              | `succeeded`     | `pending`                                                                                                  |
+| worker result succeeded (`none`)                         | `succeeded`   | 維持              | `succeeded`     | `not_applicable`                                                                                           |
+| worker result failed (`resume_requester`)                | `failed`      | 維持              | `failed`        | `pending`                                                                                                  |
+| worker result failed (`none`)                            | `failed`      | 維持              | `failed`        | `not_applicable`                                                                                           |
+| worker result unavailable (`resume_requester`)           | `failed`      | 維持              | `unavailable`   | `pending`                                                                                                  |
+| worker result unavailable (`none`)                       | `failed`      | 維持              | `unavailable`   | `not_applicable`                                                                                           |
+| completion claim                                         | 維持          | 維持              | 維持            | `pending -> processing`                                                                                    |
+| completion send success                                  | 維持          | 維持              | 維持            | `processing -> sent`                                                                                       |
+| completion definite failure                              | 維持          | 維持              | 維持            | `processing -> failed`                                                                                     |
+| completion delivery uncertain                            | 維持          | 維持              | 維持            | `processing -> uncertain`                                                                                  |
+| completion intentionally not sent                        | 維持          | 維持              | 維持            | `pending / processing -> skipped`                                                                          |
+| explicit task cancellation before terminal result        | `cancelled`   | 現在値を保持      | 現在値を保持    | `resume_requester` で `pending` なら `skipped`; `none` / sync は `not_applicable`（`processing` 中は拒否） |
+
+> [!NOTE]
+> `explicit task cancellation before terminal result`（`cancel-task` 公開 CLI）は**設計承認済み・未実装**（[Issue #173](https://github.com/okinawa-systembit/herdr-orchestration/issues/173) / [タスクキャンセル設計書](../herdr-orchestrator-task-cancellation.md) にて実装予定）である。
 
 `completion.action=resume_requester` の初回 dispatch が `failed` / `skipped` で worker が task を受け取っていないことが確定している場合、`completion.status` を `pending` のまま残さず `skipped` に確定する。この terminal パターンは [§9.13](05-completion-and-recovery.md#sec-9-13) claim および [§9.14](05-completion-and-recovery.md#sec-9-14) reset の対象外とする。`completion.action=none` は async でも `not_applicable` を維持する。人間起点の handoff では requester チャットへ配送不能を報告する。
 
@@ -173,8 +176,6 @@ worker result event（上表の `worker result *` 行）は、`task.status` が 
 
 #### Allowed Transitions
 
-MVP では `cancelled` への遷移は発生しない（[Mutation Rules](#mutation-rules)）。下表の `-> cancelled` は将来拡張用に予約する。
-
 `task.status`:
 
 ```text
@@ -182,17 +183,17 @@ created
   -> in_progress
   -> failed
   -> unknown
-  -> cancelled  # MVP 無効
+  -> cancelled
 
 in_progress
   -> succeeded
   -> failed
-  -> cancelled  # MVP 無効
+  -> cancelled
 
 unknown
   -> succeeded
   -> failed
-  -> cancelled  # MVP 無効
+  -> cancelled
 
 succeeded / failed / cancelled
   -> terminal（通常フローでは逆行しない）
@@ -268,7 +269,7 @@ sent
 - `result-submit` は [§10.3](06-results-and-workflows.md#sec-10-3) worker submit context を満たす場合のみ `update-result` する。`agent.name` のみの一致では不十分。context 確認不能は拒否する。
 - `result.status` が既に terminal の task へ同一 canonical payload を再 submit した場合は成功 replay とし Registry を変更しない。payload が異なる場合は拒否する。
 - handoff の手動再試行は原則として新しい `task.id` を発行する。同一依頼の dedup キーは MVP では導入しない。
-- MVP では public CLI に task cancellation を公開しない。`cancelled` と Matrix 上の cancellation event は将来拡張用に予約し、通常運用では遷移しない。
+- `cancel-task` は `task.status ∈ {created, in_progress, unknown}` かつ `completion.status != processing` の task にのみ受理し、file lock 下で再読込・検証の上で `task.status = cancelled`・`task.cancel_reason`・`task.cancelled_by` を記録し、`dispatch.status` / `result.status` を保持、`completion.action=resume_requester` かつ `completion.status=pending` なら `completion.status=skipped` へ遷移させる（終端 task・`completion.status=processing`・空 `--reason` は拒否。詳細: [タスクキャンセル設計書](../herdr-orchestrator-task-cancellation.md)）。
 - `claim-completion` は [§9.13](05-completion-and-recovery.md#sec-9-13) の **completion eligibility** を満たす task に限り `pending -> processing` を atomic claim する。`completion.action=none` / `not_applicable` の task は claim 対象にしない。
 - `reset-completion` public CLI は [§9.14](05-completion-and-recovery.md#sec-9-14) の reset 受理条件を満たす task のみ `processing|failed|uncertain|skipped -> pending` とする。claim eligibility は要求しない。
 - `finish-completion` は `processing -> sent|failed|uncertain|skipped` だけを通常遷移として許可する。
@@ -296,20 +297,21 @@ Registry update は file lock、temporary file、atomic replace を使用する�
 
 Agent が使用する public surface は固定する。
 
-| Command              | Main input                                                                                                      | Registry side effect                                                                                          | Output                                                                                                                                                 |
-| -------------------- | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `handoff`            | task type/mode/instruction, target role, context, completion action                                             | create + dispatch update                                                                                      | canonical task summary + `task.id`                                                                                                                     |
-| `result-submit`      | `task.id`, result status/ref/summary                                                                            | result + task update; `completion.action=resume_requester` なら completion claim/finalize を best-effort 続行 | canonical result summary (+ completion 結果があれば同梱)                                                                                               |
-| `task-status`        | `task.id`                                                                                                       | none                                                                                                          | canonical task/status JSON                                                                                                                             |
-| `task-result`        | `task.id`                                                                                                       | none                                                                                                          | validated result metadata/content locator                                                                                                              |
-| `task-list`          | 任意 `--repository`, `--worktree`, `--type`, `--status`, `--limit`（1〜1000）                                   | none                                                                                                          | 一覧 JSON（終了コード: 0 / 1 / 2 / 3。exit 3 は部分成功専用コード。詳細は [docs/herdr-orchestrator-task-list.md](../herdr-orchestrator-task-list.md)） |
-| `resume-task`        | `task.id`                                                                                                       | completion claim/finalize（eligibility 必須）                                                                 | completion result                                                                                                                                      |
-| `reset-completion`   | `task.id`                                                                                                       | completion を `pending` へ戻す（recovery 履歴付き）                                                           | reset 結果                                                                                                                                             |
-| `recover-completion` | `task.id`                                                                                                       | 診断 + 必要時 `reset-completion` + claim/finalize                                                             | recovery + completion 結果                                                                                                                             |
-| `doctor`             | none                                                                                                            | none                                                                                                          | environment diagnostics + stale dispatch 候補（§6.12 の A/B）の報告                                                                                    |
-| `reconcile-dispatch` | `task.id`、任意 `--dispatch-outcome {uncertain\|failed}`、`failed` 時は必須 `--dispatch-reason <code>`（§6.12） | dispatch / task update（明示復旧）                                                                            | reconcile 結果                                                                                                                                         |
-| `identity`           | `init` または `show`                                                                                            | `.git/config` の `herdr.repository-id` 初期化・参照                                                           | `repository_id` JSON                                                                                                                                   |
-| `role`               | `set <role> [--pane <pane_id>]`、`show`、`clear [<role>\|--all]`                                                | `${XDG_STATE_HOME:-$HOME/.local/state}/herdr-orchestrator/roles/<repository_id>.json` の更新・参照            | リポジトリごとの `role` ⇔ `pane_id` マッピング JSON（`HERDR_ENV=1` 下の `set` で対象ペイン・worktree 未確認時は `warning` 付き）                       |
+| Command              | Main input                                                                                                      | Registry side effect                                                                                                                                    | Output                                                                                                                                                 |
+| -------------------- | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `handoff`            | task type/mode/instruction, target role, context, completion action                                             | create + dispatch update                                                                                                                                | canonical task summary + `task.id`                                                                                                                     |
+| `result-submit`      | `task.id`, result status/ref/summary                                                                            | result + task update; `completion.action=resume_requester` なら completion claim/finalize を best-effort 続行                                           | canonical result summary (+ completion 結果があれば同梱)                                                                                               |
+| `task-status`        | `task.id`                                                                                                       | none                                                                                                                                                    | canonical task/status JSON                                                                                                                             |
+| `task-result`        | `task.id`                                                                                                       | none                                                                                                                                                    | validated result metadata/content locator                                                                                                              |
+| `task-list`          | 任意 `--repository`, `--worktree`, `--type`, `--status`, `--limit`（1〜1000）                                   | none                                                                                                                                                    | 一覧 JSON（終了コード: 0 / 1 / 2 / 3。exit 3 は部分成功専用コード。詳細は [docs/herdr-orchestrator-task-list.md](../herdr-orchestrator-task-list.md)） |
+| `resume-task`        | `task.id`                                                                                                       | completion claim/finalize（eligibility 必須）                                                                                                           | completion result                                                                                                                                      |
+| `reset-completion`   | `task.id`                                                                                                       | completion を `pending` へ戻す（recovery 履歴付き）                                                                                                     | reset 結果                                                                                                                                             |
+| `recover-completion` | `task.id`                                                                                                       | 診断 + 必要時 `reset-completion` + claim/finalize                                                                                                       | recovery + completion 結果                                                                                                                             |
+| `doctor`             | none                                                                                                            | none                                                                                                                                                    | environment diagnostics + stale dispatch 候補（§6.12 の A/B）の報告                                                                                    |
+| `reconcile-dispatch` | `task.id`、任意 `--dispatch-outcome {uncertain\|failed}`、`failed` 時は必須 `--dispatch-reason <code>`（§6.12） | dispatch / task update（明示復旧）                                                                                                                      | reconcile 結果                                                                                                                                         |
+| `identity`           | `init` または `show`                                                                                            | `.git/config` の `herdr.repository-id` 初期化・参照                                                                                                     | `repository_id` JSON                                                                                                                                   |
+| `role`               | `set <role> [--pane <pane_id>]`、`show`、`clear [<role>\|--all]`                                                | `${XDG_STATE_HOME:-$HOME/.local/state}/herdr-orchestrator/roles/<repository_id>.json` の更新・参照                                                      | リポジトリごとの `role` ⇔ `pane_id` マッピング JSON（`HERDR_ENV=1` 下の `set` で対象ペイン・worktree 未確認時は `warning` 付き）                       |
+| `cancel-task`        | `task.id`、必須 `--reason "<理由>"`（`HERDR_ENV=1` 非必須）                                                     | `task.status=cancelled`（および条件により `completion.status=skipped`）へ終端化（[タスクキャンセル設計書](../herdr-orchestrator-task-cancellation.md)） | cancel 結果 JSON（`cancelled_by` 監査情報を含む）                                                                                                      |
 
 `reconcile-dispatch` の `--dispatch-outcome`（A 向け。省略時は Registry 不変の **人間判断待ち**）:
 

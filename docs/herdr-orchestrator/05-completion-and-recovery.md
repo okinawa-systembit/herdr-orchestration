@@ -298,12 +298,16 @@ completion.action = resume_requester
 completion.status ∈ {processing, failed, uncertain, skipped}
 ```
 
-次の **初回配送失敗・worker 未受領 terminal** パターンは reset **拒否**（`completion.status=skipped` を維持）:
+次の **初回配送失敗・worker 未受領 terminal** パターンおよび **`task.status = cancelled` 終端パターン**は reset **拒否**（`completion.status=skipped` を維持）:
 
 ```text
+# 初回配送失敗・worker 未受領 terminal
 dispatch.status ∈ {failed, skipped}
 task.status = failed
 result.status = unavailable
+
+# 明示キャンセル終端（[タスクキャンセル設計書 §3.3](../herdr-orchestrator-task-cancellation.md#sec-3-3)）
+task.status = cancelled
 ```
 
 §9.4 の requester 状態による `skipped`（通常 `dispatch.status=sent` かつ `result.status` terminal）とは区別する。
