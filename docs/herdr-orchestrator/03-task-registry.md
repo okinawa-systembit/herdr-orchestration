@@ -156,7 +156,7 @@ ${XDG_STATE_HOME:-$HOME/.local/state}/herdr-orchestrator/tasks/
 | explicit task cancellation before terminal result        | `cancelled`   | 現在値を保持      | 現在値を保持    | `resume_requester` で `pending` なら `skipped`; `none` / sync は `not_applicable`（`processing` 中は拒否） |
 
 > [!NOTE]
-> `explicit task cancellation before terminal result`（`cancel-task` 公開 CLI）は**設計承認済み・未実装**（[Issue #173](https://github.com/okinawa-systembit/herdr-orchestration/issues/173) / [タスクキャンセル設計書](../herdr-orchestrator-task-cancellation.md) にて実装予定）である。
+> `explicit task cancellation before terminal result`（`cancel-task` 公開 CLI）は**未実装**（詳細は [Issue #173](https://github.com/okinawa-systembit/herdr-orchestration/issues/173) / [タスクキャンセル設計書](../herdr-orchestrator-task-cancellation.md) を参照。ステータスは同設計書ヘッダーを正本とする）である。
 
 `completion.action=resume_requester` の初回 dispatch が `failed` / `skipped` で worker が task を受け取っていないことが確定している場合、`completion.status` を `pending` のまま残さず `skipped` に確定する。この terminal パターンは [§9.13](05-completion-and-recovery.md#sec-9-13) claim および [§9.14](05-completion-and-recovery.md#sec-9-14) reset の対象外とする。`completion.action=none` は async でも `not_applicable` を維持する。人間起点の handoff では requester チャットへ配送不能を報告する。
 
@@ -183,7 +183,6 @@ created
   -> in_progress
   -> failed
   -> unknown
-  -> cancelled
 
 in_progress
   -> succeeded
@@ -269,7 +268,7 @@ sent
 - `result-submit` は [§10.3](06-results-and-workflows.md#sec-10-3) worker submit context を満たす場合のみ `update-result` する。`agent.name` のみの一致では不十分。context 確認不能は拒否する。
 - `result.status` が既に terminal の task へ同一 canonical payload を再 submit した場合は成功 replay とし Registry を変更しない。payload が異なる場合は拒否する。
 - handoff の手動再試行は原則として新しい `task.id` を発行する。同一依頼の dedup キーは MVP では導入しない。
-- `cancel-task` は `task.status ∈ {created, in_progress, unknown}` かつ `completion.status != processing` の task にのみ受理し、file lock 下で再読込・検証の上で `task.status = cancelled`・`task.cancel_reason`・`task.cancelled_by` を記録し、`dispatch.status` / `result.status` を保持、`completion.action=resume_requester` かつ `completion.status=pending` なら `completion.status=skipped` へ遷移させる（終端 task・`completion.status=processing`・空 `--reason` は拒否。詳細: [タスクキャンセル設計書](../herdr-orchestrator-task-cancellation.md)）。
+- `cancel-task` は `task.status ∈ {in_progress, unknown}` かつ `completion.status != processing` の task にのみ受理し、file lock 下で再読込・検証の上で `task.status = cancelled`・`task.cancel_reason`・`task.cancelled_by` を記録し、`dispatch.status` / `result.status` を保持、`completion.action=resume_requester` かつ `completion.status=pending` なら `completion.status=skipped` へ遷移させる（`created` は `reconcile-dispatch` で処理するため拒否。終端 task・`completion.status=processing`・空 `--reason` も拒否。詳細: [タスクキャンセル設計書](../herdr-orchestrator-task-cancellation.md)）。
 - `claim-completion` は [§9.13](05-completion-and-recovery.md#sec-9-13) の **completion eligibility** を満たす task に限り `pending -> processing` を atomic claim する。`completion.action=none` / `not_applicable` の task は claim 対象にしない。
 - `reset-completion` public CLI は [§9.14](05-completion-and-recovery.md#sec-9-14) の reset 受理条件を満たす task のみ `processing|failed|uncertain|skipped -> pending` とする。claim eligibility は要求しない。
 - `finish-completion` は `processing -> sent|failed|uncertain|skipped` だけを通常遷移として許可する。

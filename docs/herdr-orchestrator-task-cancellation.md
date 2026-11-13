@@ -75,15 +75,19 @@
 
 ### 3.1 4 軸の状態遷移ルール
 
-| 軸                  | `cancel-task` 適用時の遷移                                                                                        | 補足                                                                              |
-| ------------------- | ----------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| `task.status`       | `{created, in_progress, unknown} -> cancelled`                                                                    | 既に terminal（`succeeded` / `failed` / `cancelled`）の場合は `registry_conflict` |
-| `dispatch.status`   | **現在値を保持**（`pending` / `sent` / `uncertain` 等を変更しない）                                               | 初回配送の観測事実を保存する                                                      |
-| `result.status`     | **現在値を保持**（`pending` のまま維持）                                                                          | terminal result は提出されていないという事実を保持する                            |
-| `completion.status` | `completion.action == "resume_requester"` かつ `pending` なら `skipped`；`none` / `sync` は `not_applicable` 維持 | `completion.status == "processing"` の場合は `registry_conflict` で拒否           |
+| 軸                  | `cancel-task` 適用時の遷移                                                                                        | 補足                                                                                                                    |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `task.status`       | `{in_progress, unknown} -> cancelled`                                                                             | `created`（`reconcile-dispatch` 対象）または既に terminal（`succeeded` / `failed` / `cancelled`）は `registry_conflict` |
+| `dispatch.status`   | **現在値を保持**（`pending` / `sent` / `uncertain` 等を変更しない）                                               | 初回配送の観測事実を保存する                                                                                            |
+| `result.status`     | **現在値を保持**（`pending` のまま維持）                                                                          | terminal result は提出されていないという事実を保持する                                                                  |
+| `completion.status` | `completion.action == "resume_requester"` かつ `pending` なら `skipped`；`none` / `sync` は `not_applicable` 維持 | `completion.status == "processing"` の場合は `registry_conflict` で拒否                                                 |
 
+- **`created` タスクを対象外とする理由**:
+  `task.status = created` は Worker へまだ配送完了していない段階（`dispatch.status ∈ {pending, uncertain}`）であり、既存の `reconcile-dispatch`（[03-task-registry.md §6.12](herdr-orchestrator/03-task-registry.md#sec-6-12)）が終端化の責務を持つため、`cancel-task` では受理しない。
 - **キャンセル後の遅れた `result-submit` の拒否**:
   `update-result` は `task.status ∈ {in_progress, unknown}` のみを受理するため、`cancelled` 遷移後に Worker から遅れて `result-submit` が実行されても既存の Mutation Rules により `registry_conflict` で自然に拒否される。
+- **sync handoff 待機中のキャンセル検知**:
+  `handoff --mode sync` の結果待機ループ（`handoff_commands.py` の `_wait_for_result_terminal`）が待機中に `doc["task"]["status"] == "cancelled"` を観測した場合は、タイムアウトを待たずに即座に非リトライ可能エラー `task_cancelled`（`retryable=False`、終了コード `1`）で失敗終了する。
 
 <a id="sec-3-2"></a>
 
@@ -126,12 +130,14 @@
 
 <a id="sec-3-4"></a>
 
-### 3.4 `task-list` 診断用不変条件 I7 との同期
+### 3.4 `task-list` の `overview.state` および診断用不変条件 I7 との同期
 
-[03-task-registry.md §6.3](herdr-orchestrator/03-task-registry.md#sec-6-3) の「診断用不変条件 I1〜I7 との同期」規定に従い、`cancelled` 有効化に合わせて [herdr-orchestrator-task-list.md §4.4](herdr-orchestrator-task-list.md#44-派生分類-overviewstate) の不変条件 I7 および `list_commands.py` の判定を以下のとおり同期する。
+[03-task-registry.md §6.3](herdr-orchestrator/03-task-registry.md#sec-6-3) の「診断用不変条件 I1〜I7 との同期」規定および [herdr-orchestrator-task-list.md §4.4](herdr-orchestrator-task-list.md#44-派生分類-overviewstate) に従い、`cancelled` 有効化に合わせて `overview.state` 判定と不変条件 I7 および `list_commands.py` を以下のとおり同期する。
 
-- **改定前**: `task.status = cancelled` は MVP 無効のため無条件で `inconsistent_state_combination` 警告対象。
-- **改定後（I7）**: `task.status = cancelled` ⇒ `result.status = pending` ∧ `completion.status ∈ {not_applicable, skipped}`。正常にキャンセルされたタスクには警告を付与せず、上記条件に反する不整合がある場合のみ警告する。
+- **`overview.state` の判定順序（`list_commands.py` の `_calculate_overview_state`）**:
+  `unknown` 由来のキャンセルでは `dispatch.status = uncertain` かつ `result.status = pending` が保持され、また通常キャンセルでも `result.status = pending` が保持されるため、従来の判定順序（`uncertain` → `open` → `closed`）のままでは `uncertain` または `open` に誤分類される。これを防ぐため、判定表の先頭（順 1）に **`task.status = cancelled` かつ `result.status = pending` かつ `completion.status ∈ {not_applicable, skipped}` → `closed`** を追加する（`cancelled` 有効化に伴う既定意味論への整合であり、`list_format_version = 1` は据え置く）。
+- **不変条件 I7（改定前）**: `task.status = cancelled` は MVP 無効のため無条件で `inconsistent_state_combination` 警告対象。
+- **不変条件 I7（改定後）**: `task.status = cancelled` ⇒ `result.status = pending` ∧ `completion.status ∈ {not_applicable, skipped}`。正常にキャンセルされたタスクには警告を付与せず、上記条件に反する不整合がある場合のみ警告する。
 
 ---
 
@@ -158,6 +164,7 @@ herdr-orchestrator cancel-task <task_id> --reason "<理由>" [--json]
 2. **Worker 本人確認の免除と監査用 `caller` 記録**:
    Worker ペイン喪失時の復旧手段であるため、`verify_worker_submit_context()` は実行しない。代わりに、コマンド実行時の環境情報からベストエフォートで実行者情報（`cancelled_by`）を解決して Registry および出力 JSON に記録する。
    - 環境変数 `HERDR_PANE_ID` が設定されている場合は `pane_id` として記録し、可能であれば（`HERDR_ENV=1` 下で Role Binding が解決できる場合）該当リポジトリの `role` を記録する。解決できない場合や通常のターミナルからの実行時は `role: "unbound"`、`pane_id: os.environ.get("HERDR_PANE_ID") or None`、`agent_name: null` とする（`herdr` CLI の起動失敗で `cancel-task` 自体を失敗させない）。
+   - **監査メタデータの位置づけ**: `cancelled_by` は実行時の環境変数（`HERDR_PANE_ID` 等）に基づくベストエフォートの監査メタデータであり、残留環境変数等により実行者本人の厳密な同一性・正確性を保証するものではない。
 
 <a id="sec-4-2"></a>
 
@@ -165,12 +172,12 @@ herdr-orchestrator cancel-task <task_id> --reason "<理由>" [--json]
 
 `operations.cancel_task(task_id, *, reason: str, cancelled_by: dict[str, Any] | None = None)` は、`io.mutate_task(task_id, mutator)` により `<task_id>.json.lock` の排他ロック下で JSON を再読込し、compare-and-set で検証・更新する。
 
-| 検証条件                                                        | エラーコード        | 終了コード                                | 説明                                                              |
-| --------------------------------------------------------------- | ------------------- | ----------------------------------------- | ----------------------------------------------------------------- |
-| `task_id` 形式不正、`--reason` 空文字・空白のみ・2000 文字超過  | `invalid_input`     | `1`（構文欠落時は `argparse` により `2`） | Registry を変更せず拒否                                           |
-| 対象タスク JSON が存在しない                                    | `task_not_found`    | `1`                                       | Registry を変更せず拒否                                           |
-| `task.status ∉ {created, in_progress, unknown}`（既に終端状態） | `registry_conflict` | `1`                                       | `succeeded` / `failed` / `cancelled` は再遷移・二重キャンセル不可 |
-| `completion.status == "processing"`                             | `registry_conflict` | `1`                                       | 進行中の completion との競合を防止                                |
+| 検証条件                                                               | エラーコード        | 終了コード                                | 説明                                                                           |
+| ---------------------------------------------------------------------- | ------------------- | ----------------------------------------- | ------------------------------------------------------------------------------ |
+| `task_id` 形式不正、`--reason` 空文字・空白のみ・2000 文字超過         | `invalid_input`     | `1`（構文欠落時は `argparse` により `2`） | Registry を変更せず拒否                                                        |
+| 対象タスク JSON が存在しない                                           | `task_not_found`    | `1`                                       | Registry を変更せず拒否                                                        |
+| `task.status ∉ {in_progress, unknown}`（`created` または既に終端状態） | `registry_conflict` | `1`                                       | `created` は `reconcile-dispatch` を案内。終端状態は再遷移・二重キャンセル不可 |
+| `completion.status == "processing"`                                    | `registry_conflict` | `1`                                       | 進行中の completion との競合を防止                                             |
 
 <a id="sec-4-3"></a>
 
@@ -234,7 +241,7 @@ herdr-orchestrator cancel-task <task_id> --reason "<理由>" [--json]
 2. **Worker ペイン・worktree 生存確認**:
    `herdr pane list` 等で対象 Worker ペイン（`worker.pane_id`）および `context.worktree.path` が生存しているかを確認する。
 3. **分岐 A: Worker ペインが生存（同一 cwd / 同一リポジトリ維持）**:
-   同一ペインでエージェントが再起動・枠回復可能な場合は、その Worker ペインから `herdr-orchestrator result-submit <task_id> --result-status unavailable --summary "<中断理由>"` を提出させて正規に `failed` 終端化する。
+   同一ペインでエージェントが再起動・枠回復可能な場合は、その Worker ペインから `herdr-orchestrator result-submit <task_id> --result-status unavailable --summary "<中断理由>"` を提出させて正規に `failed` 終端化する。なお、`worker_context_unverified` 等で `result-submit` が拒否された場合は分岐 B（`cancel-task`）へ進む。
 4. **分岐 B: Worker ペイン喪失・worktree 削除・別用途転用等で復帰不能**:
    `herdr-orchestrator cancel-task <task_id> --reason "<中断理由>"` を実行し、`task.status = cancelled`（および `completion.status = skipped`）へ安全に終端化する（JSON ファイルの直接編集・直接 `rm` は行わない）。
 
@@ -242,40 +249,50 @@ herdr-orchestrator cancel-task <task_id> --reason "<理由>" [--json]
 
 <a id="sec-7"></a>
 
-## 7. 実装・検証計画（テスト計画 CT-01〜CT-09）
+## 7. 実装・検証計画（テスト計画 CT-01〜CT-10）
 
 <a id="sec-7-1"></a>
 
 ### 7.1 変更対象ファイル一覧
 
-| 対象ファイル                                                             | 変更内容                                                                                                                   |
-| ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
-| `skills/herdr-orchestrator/scripts/orchestrator/registry/schema.py`      | `validate_loaded_task` に任意の `task.cancel_reason` / `task.cancelled_by` の型・非空検証を追加                            |
-| `skills/herdr-orchestrator/scripts/orchestrator/registry/operations.py`  | `cancel_task()` の実装、および `reset_completion()` での `task.status == "cancelled"` 拒否追加                             |
-| `skills/herdr-orchestrator/scripts/orchestrator/public_cli.py`           | `PUBLIC_COMMANDS` / `_COMMAND_HELP` / `argparse` への `cancel-task` 追加と `_cmd_cancel_task` 実装（`HERDR_ENV=1` 非必須） |
-| `skills/herdr-orchestrator/scripts/orchestrator/list_commands.py`        | `_has_inconsistent_state()` の I7 判定を改定仕様（§3.4）に同期し、`cancelled is inactive in MVP` コメントを更新            |
-| `skills/herdr-orchestrator/references/handoff.md`                        | §6 の Recovery Runbook（Worker 途中停止時の確認・`unavailable` 提出・`cancel-task` 判断フロー）を追記                      |
-| `skills/herdr-orchestrator/references/public-cli.md`                     | 公開 CLI 一覧および `cancel-task` の使用例・仕様を追記（D-2）                                                              |
-| `skills/herdr-orchestrator/SKILL.md`                                     | Public CLI の復旧・再開欄に `cancel-task` を追記（D-2）                                                                    |
-| `skills/herdr-orchestrator/install/README.md`                            | §2.1 コマンド分類表に `cancel-task`（allow しない）を追記（D-2）                                                           |
-| `docs/herdr-orchestrator/03-task-registry.md`                            | 設計 PR で更新済みの「設計承認済み・未実装」NOTE を実装完了に合わせて解除                                                  |
-| `docs/herdr-orchestrator-task-cancellation.md`                           | 実装 PR（`Closes #173`）作成時にヘッダーの `- **ステータス**:` を `実装完了（PR #NN にてマージ済み）` へ更新（D-1 必須）   |
-| `tests/test_orchestrator_phase2_registry.py`（または専用テストファイル） | 下記 §7.2 のテストケース（CT-01〜CT-09）を追加                                                                             |
+| 対象ファイル                                                             | 変更内容                                                                                                                                                     |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `skills/herdr-orchestrator/scripts/orchestrator/registry/schema.py`      | `validate_loaded_task` に任意の `task.cancel_reason` / `task.cancelled_by` の型・非空検証を追加                                                              |
+| `skills/herdr-orchestrator/scripts/orchestrator/registry/operations.py`  | `cancel_task()` の実装、および `reset_completion()` での `task.status == "cancelled"` 拒否追加                                                               |
+| `skills/herdr-orchestrator/scripts/orchestrator/public_cli.py`           | `PUBLIC_COMMANDS` / `_COMMAND_HELP` / `argparse` への `cancel-task` 追加と `_cmd_cancel_task` 実装（`HERDR_ENV=1` 非必須）                                   |
+| `skills/herdr-orchestrator/scripts/orchestrator/handoff_commands.py`     | `_wait_for_result_terminal()` で `task.status == "cancelled"` を検知した際に即座に `task_cancelled`（`retryable=False`、exit 1）を返す処理を追加             |
+| `skills/herdr-orchestrator/scripts/orchestrator/list_commands.py`        | `_calculate_overview_state()` 先頭へ `cancelled` の `closed` 判定を追加し、`_has_inconsistent_state()` の I7 判定を改定仕様（§3.4）に同期                    |
+| `skills/herdr-orchestrator/references/handoff.md`                        | §6 の Recovery Runbook（Worker 途中停止時の確認・`unavailable` 提出・`cancel-task` 判断フロー）を追記                                                        |
+| `skills/herdr-orchestrator/references/worker-receive.md`                 | Worker が `task.status = cancelled` を観測した場合、または `result-submit` 時にキャンセル等で拒否された場合に作業を中断し人間/Requester へ報告する案内を追記 |
+| `skills/herdr-orchestrator/references/public-cli.md`                     | 公開 CLI 一覧および `cancel-task` の使用例・仕様を追記（D-2）                                                                                                |
+| `skills/herdr-orchestrator/SKILL.md`                                     | Public CLI の復旧・再開欄に `cancel-task` を追記（D-2）                                                                                                      |
+| `skills/herdr-orchestrator/install/README.md`                            | §2.1 コマンド分類表に `cancel-task`（allow しない）を追記（D-2）                                                                                             |
+| `docs/herdr-orchestrator/03-task-registry.md`                            | 設計 PR で更新済みの「未実装」NOTE を実装完了に合わせて解除                                                                                                  |
+| `docs/herdr-orchestrator/07-skill-and-implementation.md`                 | §14.2 等の内部操作一覧に `cancel_task`（`cancel`）を追記                                                                                                     |
+| `docs/herdr-orchestrator-task-cancellation.md`                           | 実装 PR（`Closes #173`）作成時にヘッダーの `- **ステータス**:` を `実装完了（PR #NN にてマージ済み）` へ更新（D-1 必須）                                     |
+| `tests/test_orchestrator_phase2_registry.py`（または専用テストファイル） | 下記 §7.2 のテストケース（CT-01〜CT-10）を追加                                                                                                               |
 
 <a id="sec-7-2"></a>
 
-### 7.2 テスト計画（CT-01〜CT-09）
+### 7.2 テスト計画（CT-01〜CT-10）
 
 指針 10（「テストは引数変換だけでなく実際の結果を検証する」）に基づき、実装時に以下の自動テストを追加・検証する。
 
-| テスト ID | 検証項目                                  | テスト内容と期待される結果                                                                                                                                                                                                                                                                                |
-| --------- | ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **CT-01** | `in_progress` / `created` からの遷移      | `task.status = in_progress`（および `created`）のタスクに `cancel-task` を実行すると、`task.status = cancelled` となり `dispatch` と `result`（`pending`）が保持され、`task.cancel_reason` と `task.cancelled_by` が記録されること                                                                        |
-| **CT-02** | `unknown` からの遷移                      | `task.status = unknown`・`dispatch.status = uncertain` のタスクに `cancel-task` を実行すると、`task.status = cancelled` となり `dispatch.status = uncertain`・`result.status = pending` が保持されること                                                                                                  |
-| **CT-03** | `completion` の状態別遷移                 | `completion.action = resume_requester` かつ `pending` の場合は `skipped` に遷移し、`none` / `sync` の場合は `not_applicable` を維持すること                                                                                                                                                               |
-| **CT-04** | `completion = processing` 拒否            | `completion.status = processing` のタスクに対する `cancel-task` が `registry_conflict`（exit 1）で拒否され、Registry が変更されないこと                                                                                                                                                                   |
-| **CT-05** | 終端タスク拒否・`reset-completion` 拒否   | `succeeded` / `failed` / `cancelled` のタスクへの `cancel-task` が `registry_conflict` で拒否されること。また `cancelled` タスクへの `reset-completion` / `resume-task` も `registry_conflict` で拒否されること                                                                                           |
-| **CT-06** | `--reason` 必須・空文字拒否               | `--reason` が空文字・空白のみ・未指定の場合にエラー（Registry 未変更）となること                                                                                                                                                                                                                          |
-| **CT-07** | キャンセル後の遅れた `result-submit` 拒否 | `cancelled` に遷移したタスクに対して後から `result-submit` を実行しても、`registry_conflict` で拒否され `task.status = cancelled` が維持されること                                                                                                                                                        |
-| **CT-08** | 30 日後の `cleanup-registry` 削除         | `cancelled` かつ `completion.status ∈ {skipped, not_applicable}` のタスクが、作成から 30 日経過後に `cleanup-registry`（および `cleanup_tasks`）で削除対象になること                                                                                                                                      |
-| **CT-09** | `HERDR_ENV` 非必須・CLI 出力・I7 同期     | `HERDR_ENV` 未設定環境から `herdr-orchestrator cancel-task` が実行でき、`cancelled_by.role = "unbound"` を含む JSON を返し、さらに `task-list` の `overview.state` が `"closed"`・`overview.warnings` に `inconsistent_state_combination` が付かないこと（不整合な `cancelled` データには警告が付くこと） |
+| テスト ID | 検証項目                                  | テスト内容と期待される結果                                                                                                                                                                                                                                                                                                                  |
+| --------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **CT-01** | `in_progress` からの遷移                  | `task.status = in_progress` のタスクに `cancel-task` を実行すると、`task.status = cancelled` となり `dispatch` と `result`（`pending`）が保持され、`task.cancel_reason` と `task.cancelled_by` が記録されること                                                                                                                             |
+| **CT-02** | `unknown` からの遷移                      | `task.status = unknown`・`dispatch.status = uncertain` のタスクに `cancel-task` を実行すると、`task.status = cancelled` となり `dispatch.status = uncertain`・`result.status = pending` が保持されること                                                                                                                                    |
+| **CT-03** | `completion` の状態別遷移                 | `completion.action = resume_requester` かつ `pending` の場合は `skipped` に遷移し、`none` / `sync` の場合は `not_applicable` を維持すること                                                                                                                                                                                                 |
+| **CT-04** | `completion = processing` 拒否            | `completion.status = processing` のタスクに対する `cancel-task` が `registry_conflict`（exit 1）で拒否され、Registry が変更されないこと                                                                                                                                                                                                     |
+| **CT-05** | `created`・終端拒否・`reset-completion`   | `created` / `succeeded` / `failed` / `cancelled` のタスクへの `cancel-task` が `registry_conflict` で拒否されること（`created` は `reconcile-dispatch` 対象）。また `cancelled` タスクへの `reset-completion` / `resume-task` も `registry_conflict` で拒否されること                                                                       |
+| **CT-06** | `--reason` 必須・空文字拒否               | `--reason` が空文字・空白のみ・未指定の場合にエラー（Registry 未変更）となること                                                                                                                                                                                                                                                            |
+| **CT-07** | キャンセル後の遅れた `result-submit` 拒否 | `cancelled` に遷移したタスクに対して後から `result-submit` を実行しても、`registry_conflict` で拒否され `task.status = cancelled` が維持されること                                                                                                                                                                                          |
+| **CT-08** | 30 日後の `cleanup-registry` 削除         | `cancelled` かつ `completion.status ∈ {skipped, not_applicable}` のタスクが、作成から 30 日経過後に `cleanup-registry`（および `cleanup_tasks`）で削除対象になること                                                                                                                                                                        |
+| **CT-09** | `HERDR_ENV` 非必須・`task-list` 整合      | `HERDR_ENV` 未設定環境から `cancel-task` が実行でき、`cancelled_by.role = "unbound"` を含む JSON を返し、`in_progress` 由来（`dispatch=sent`）および `unknown` 由来（`dispatch=uncertain`）双方の `cancelled` タスクで `task-list` の `overview.state == "closed"`・`overview.warnings == []` となること（不整合 `cancelled` には警告付与） |
+| **CT-10** | sync handoff 待機中のキャンセル検知       | `handoff --mode sync` の結果待機中（`_wait_for_result_terminal`）に別経路で対象タスクが `cancelled` になった場合、タイムアウトを待たずに `task_cancelled`（`retryable=False`、exit 1）で終了すること                                                                                                                                        |
+
+<a id="sec-7-3"></a>
+
+### 7.3 実機確認項目
+
+実装完了後の実機検証フェーズ（[docs/herdr-orchestrator-verification-log.md](herdr-orchestrator-verification-log.md)）において、疑似的な Worker ペイン閉鎖・worktree 削除を伴う `cancel-task` の実行、および `task-list` 上での `overview.state = closed` 表示を確認・記録する。

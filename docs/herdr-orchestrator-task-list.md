@@ -340,9 +340,10 @@ Issue #62 の受け入れ条件「完了済み・未完了・不確定な task �
 
 | 順  | `overview.state` | 判定条件（4軸照合）                                                                                                                                                                      | 意味                                                                                                |
 | --- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| 1   | `uncertain`      | `task.status = unknown`、または (`dispatch.status = uncertain` かつ `result.status = pending`)、または `completion.status = uncertain`                                                   | worker への配送成否または requester への復帰配送成否が観測できていない。blind resend 禁止の対象     |
-| 2   | `open`           | `task.status ∈ {created, in_progress}`、または `result.status = pending`、または `completion.status ∈ {pending, processing, failed}`                                                     | 通常フロー（タスク処理中・結果待ち）または明示的な復旧操作（completion 再開）による続きが残っている |
-| 3   | `closed`         | 上記以外（正常系では `task.status ∈ {succeeded, failed, cancelled}` かつ `result.status ∈ {succeeded, failed, unavailable}` かつ `completion.status ∈ {not_applicable, sent, skipped}`） | task・result・completion がすべて terminal。処理は完結している（成功・失敗は問わない）              |
+| 1   | `closed`         | `task.status = cancelled` かつ `result.status = pending` かつ `completion.status ∈ {not_applicable, skipped}`                                                                            | worker 結果到達前に明示キャンセルされ終端化した task。配送成否が `uncertain` だった場合も終了済み   |
+| 2   | `uncertain`      | `task.status = unknown`、または (`dispatch.status = uncertain` かつ `result.status = pending`)、または `completion.status = uncertain`                                                   | worker への配送成否または requester への復帰配送成否が観測できていない。blind resend 禁止の対象     |
+| 3   | `open`           | `task.status ∈ {created, in_progress}`、または `result.status = pending`、または `completion.status ∈ {pending, processing, failed}`                                                     | 通常フロー（タスク処理中・結果待ち）または明示的な復旧操作（completion 再開）による続きが残っている |
+| 4   | `closed`         | 上記以外（正常系では `task.status ∈ {succeeded, failed, cancelled}` かつ `result.status ∈ {succeeded, failed, unavailable}` かつ `completion.status ∈ {not_applicable, sent, skipped}`） | task・result・completion がすべて terminal。処理は完結している（成功・失敗は問わない）              |
 
 #### 条件の詳細と4軸状態遷移との整合性
 

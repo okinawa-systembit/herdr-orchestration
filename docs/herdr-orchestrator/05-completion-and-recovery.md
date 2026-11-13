@@ -306,9 +306,11 @@ dispatch.status ∈ {failed, skipped}
 task.status = failed
 result.status = unavailable
 
-# 明示キャンセル終端（[タスクキャンセル設計書 §3.3](../herdr-orchestrator-task-cancellation.md#sec-3-3)）
+# 明示キャンセル終端
 task.status = cancelled
 ```
+
+明示キャンセル終端の詳細は [タスクキャンセル設計書 §3.3](../herdr-orchestrator-task-cancellation.md#sec-3-3) を参照。
 
 §9.4 の requester 状態による `skipped`（通常 `dispatch.status=sent` かつ `result.status` terminal）とは区別する。
 
