@@ -13,7 +13,7 @@
 
 | コマンド                                                  | 説明                                                                                                                                        | `HERDR_ENV=1` 制約 |
 | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
-| `doctor`                                                  | 環境健全性診断、古い Role Binding 検出、stale dispatch 候補検出                                                                             | 必須               |
+| `doctor`                                                  | 環境健全性診断、古い Role Binding 検出、stale dispatch / stale `in_progress` 候補検出                                                       | 必須               |
 | `identity init`                                           | Git リポジトリ固有の UUID（Repository Identity）を初期化                                                                                    | 免除（ペイン外可） |
 | `identity show`                                           | 現在のリポジトリ固有 UUID を表示                                                                                                            | 免除（ペイン外可） |
 | `role set <role> [<pane_id>]`                             | ロールとペインを紐づけ（`--global`, `--label <name>`, `--pane <pane_id>`）                                                                  | 必須               |
@@ -49,6 +49,7 @@ herdr-orchestrator doctor
 
 正常時は終了コード 0 で診断 JSON が出力されます。セッション外で実行した場合は `herdr_env: false` となり終了コード 1 が返ります。
 診断 JSON の `registry_cleanup` フィールドには、全リポジトリ共有の Task Registry における総タスク数（`total_tasks`）、完了から 30 日以上経過して削除対象となるタスク件数（`eligible_count`）およびリポジトリ別内訳（`eligible_by_repository`）、孤立ロックファイル数（`orphan_lock_files_count`）、前回クリーンアップ日時（`last_cleanup_at`）が含まれます。
+また、`stale_in_progress` フィールド（`action: "await_human"`）には `task.status ∈ {in_progress, unknown}` かつ `result.status == "pending"` のうち、worktree 不在や Worker ペイン非生存・別用途転用などの強い信号（`signal_strength: "strong"`）または経過時間超過の弱い信号（`signal_strength: "weak"`、既定 86400 秒、環境変数 `HERDR_ORCHESTRATOR_STALE_IN_PROGRESS_SEC` で上書き可）に該当する要確認候補が読み取り専用で報告されます（候補の有無は終了コードに影響しません）。
 
 ### 2.2 リポジトリ識別子の初期化 (`identity init` / `identity show`)
 
