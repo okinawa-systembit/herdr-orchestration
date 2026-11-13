@@ -1,7 +1,7 @@
 # Herdr Orchestrator `doctor` での stale `in_progress` タスク検出・要確認一覧（`await_human`）設計書
 
 - **対象 Issue**: [Issue #174](https://github.com/okinawa-systembit/herdr-orchestration/issues/174)
-- **ステータス**: 設計承認
+- **ステータス**: 実装完了（PR #180 にてマージ済み）
 - **関連文書**:
   - [03-task-registry.md](herdr-orchestrator/03-task-registry.md#sec-6-5): Public CLI Contract（`doctor`）および `stale_dispatch` 診断（§6.5 / §6.12）
   - [herdr-orchestrator-task-cancellation.md](herdr-orchestrator-task-cancellation.md): タスクキャンセル（`cancel-task`）および復旧ランブック（Issue #173）

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import math
 import os
+import sys
 from typing import Any
 
 from orchestrator.env import herdr_env_enabled, herdr_env_payload
@@ -10,6 +12,7 @@ from orchestrator.registry import operations as registry_ops
 from orchestrator.registry.task_id import validate_task_id
 
 DEFAULT_STALE_DISPATCH_SEC = 300.0
+DEFAULT_STALE_IN_PROGRESS_SEC = 86400.0
 
 
 def stale_dispatch_threshold_sec() -> float:
@@ -17,6 +20,27 @@ def stale_dispatch_threshold_sec() -> float:
     if raw is None or raw == "":
         return DEFAULT_STALE_DISPATCH_SEC
     return float(raw)
+
+
+def stale_in_progress_threshold_sec() -> float:
+    raw = os.environ.get("HERDR_ORCHESTRATOR_STALE_IN_PROGRESS_SEC")
+    if raw is None or raw == "":
+        return DEFAULT_STALE_IN_PROGRESS_SEC
+    try:
+        val = float(raw)
+    except ValueError:
+        sys.stderr.write(
+            f"warning: invalid HERDR_ORCHESTRATOR_STALE_IN_PROGRESS_SEC={raw!r}; "
+            f"using default {DEFAULT_STALE_IN_PROGRESS_SEC}\n"
+        )
+        return DEFAULT_STALE_IN_PROGRESS_SEC
+    if math.isnan(val) or math.isinf(val) or val < 0:
+        sys.stderr.write(
+            f"warning: out-of-range HERDR_ORCHESTRATOR_STALE_IN_PROGRESS_SEC={raw!r}; "
+            f"using default {DEFAULT_STALE_IN_PROGRESS_SEC}\n"
+        )
+        return DEFAULT_STALE_IN_PROGRESS_SEC
+    return val
 
 
 def _find_outdated_role_bindings() -> list[dict[str, Any]]:
@@ -46,7 +70,22 @@ def _find_outdated_role_bindings() -> list[dict[str, Any]]:
 
 
 def run_doctor() -> tuple[dict[str, Any], int]:
+    from orchestrator.live_agent import list_live_panes_with_ui
+
     threshold = stale_dispatch_threshold_sec()
+    in_progress_threshold = stale_in_progress_threshold_sec()
+    live_panes = list_live_panes_with_ui()
+    in_progress_candidates = registry_ops.find_stale_in_progress_candidates(
+        min_age_sec=in_progress_threshold,
+        live_panes=live_panes,
+    )
+    strong_count = sum(
+        1 for c in in_progress_candidates if c.get("signal_strength") == "strong"
+    )
+    weak_count = sum(
+        1 for c in in_progress_candidates if c.get("signal_strength") == "weak"
+    )
+
     try:
         cleanup_status = registry_ops.inspect_cleanup_status()
     except Exception as exc:
@@ -59,6 +98,21 @@ def run_doctor() -> tuple[dict[str, Any], int]:
         "stale_dispatch": {
             "threshold_sec": threshold,
             "candidates": registry_ops.find_stale_dispatch_candidates(min_age_sec=threshold),
+        },
+        "stale_in_progress": {
+            "action": "await_human",
+            "threshold_sec": in_progress_threshold,
+            "pane_check_available": live_panes is not None,
+            "summary": {
+                "total_candidates": len(in_progress_candidates),
+                "strong_signal_count": strong_count,
+                "weak_signal_count": weak_count,
+            },
+            "candidates": in_progress_candidates,
+            "guidance": [
+                "strong_signal のタスクは Worker ペインまたは worktree が失われているため、事実確認の上で `herdr-orchestrator cancel-task <task_id> --reason \"<理由>\"` による終端化、または同一ペイン生存時は `result-submit --result-status unavailable` を検討してください（Issue #173）。",
+                "weak_signal のみのタスクは正常な長時間実行の可能性があるため、自動キャンセルせず `herdr-orchestrator task-status <task_id>` や対象ペインの状態を確認してください。",
+            ],
         },
         "outdated_role_bindings": _find_outdated_role_bindings(),
         "registry_cleanup": cleanup_status,

@@ -4,6 +4,7 @@ import copy
 import fcntl
 import json
 import os
+import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -137,15 +138,24 @@ def find_stale_dispatch_candidates(
     now: datetime | None = None,
 ) -> list[dict[str, Any]]:
     current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
     candidates: list[dict[str, Any]] = []
-    root = io.ensure_registry_layout()
+    root = tasks_dir()
+    if not root.exists() or not root.is_dir():
+        return []
     for path in sorted(root.glob("task_*.json")):
-        doc = io.read_task_document(path.stem)
-        task = doc["task"]
-        dispatch = doc["dispatch"]
-        if task["status"] != "created" or dispatch["status"] != "pending":
+        if path.name.endswith(".json.lock"):
             continue
-        updated = _parse_registry_timestamp(doc["timestamps"]["updated_at"])
+        try:
+            doc = io.read_task_document(path.stem)
+            task = doc["task"]
+            dispatch = doc["dispatch"]
+            if task["status"] != "created" or dispatch["status"] != "pending":
+                continue
+            updated = _parse_registry_timestamp(doc["timestamps"]["updated_at"])
+        except Exception:
+            continue
         age_sec = (current - updated).total_seconds()
         if age_sec < min_age_sec:
             continue
@@ -157,6 +167,197 @@ def find_stale_dispatch_candidates(
                 "updated_at": doc["timestamps"]["updated_at"],
                 "age_sec": round(age_sec, 3),
                 "worker_agent_name": doc["worker"]["agent_name"],
+            }
+        )
+    return candidates
+
+
+_PANE_ID_RE = re.compile(r"^w[0-9A-Za-z]+:p[0-9A-Za-z]+$")
+
+
+def _safe_is_dir(path_str: str | None) -> bool | None:
+    if not isinstance(path_str, str) or not path_str:
+        return None
+    try:
+        return Path(path_str).is_dir()
+    except OSError:
+        return None
+
+
+def _evaluate_worker_pane_status(
+    *,
+    worker_pane_id: str | None,
+    worker_agent_name: str | None,
+    target_worker_path: str | None,
+    worker_cwd_raw: str | None,
+    worktree_path_raw: str | None,
+    by_pane_id: dict[str, dict[str, Any]] | None,
+    by_name: dict[str, dict[str, Any]] | None,
+) -> tuple[str, list[str]]:
+    if by_pane_id is None or by_name is None:
+        return "unavailable", []
+
+    lookup_pane_id = worker_pane_id
+    if not lookup_pane_id and isinstance(worker_agent_name, str) and _PANE_ID_RE.match(worker_agent_name):
+        lookup_pane_id = worker_agent_name
+
+    matched_pane: dict[str, Any] | None = None
+    if lookup_pane_id:
+        matched_pane = by_pane_id.get(lookup_pane_id)
+    elif isinstance(worker_agent_name, str):
+        matched_pane = by_name.get(worker_agent_name)
+
+    if matched_pane is None:
+        return "missing", ["worker_pane_missing"]
+
+    if not matched_pane.get("agent") or matched_pane.get("agent_status") == "none":
+        return "agent_not_running", ["worker_agent_not_running"]
+
+    live_cwd_raw = matched_pane.get("cwd")
+    if isinstance(live_cwd_raw, str) and live_cwd_raw and target_worker_path:
+        from orchestrator.live_agent import is_path_within_worktree
+
+        live_cwd = Path(live_cwd_raw)
+        target_path = Path(target_worker_path)
+        in_target = is_path_within_worktree(live_cwd, target_path)
+        in_same_worktree = False
+        if (
+            not in_target
+            and isinstance(worker_cwd_raw, str)
+            and worker_cwd_raw
+            and isinstance(worktree_path_raw, str)
+            and worktree_path_raw
+        ):
+            wt_path = Path(worktree_path_raw)
+            if is_path_within_worktree(Path(worker_cwd_raw), wt_path) and is_path_within_worktree(
+                live_cwd, wt_path
+            ):
+                in_same_worktree = True
+        if not in_target and not in_same_worktree:
+            return "context_changed", ["worker_pane_context_changed"]
+
+    return "live", []
+
+
+def find_stale_in_progress_candidates(
+    *,
+    min_age_sec: float,
+    live_panes: list[dict[str, Any]] | None = None,
+    now: datetime | None = None,
+) -> list[dict[str, Any]]:
+    """
+    Detect stale in_progress / unknown tasks using 2-tier signals (Issue #174).
+    Completely read-only: does not create directories, acquire locks, or modify files.
+    """
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+
+    root = tasks_dir()
+    if not root.exists() or not root.is_dir():
+        return []
+
+    by_pane_id: dict[str, dict[str, Any]] | None = None
+    by_name: dict[str, dict[str, Any]] | None = None
+    if live_panes is not None:
+        by_pane_id = {}
+        by_name = {}
+        for pane in live_panes:
+            if not isinstance(pane, dict):
+                continue
+            pid = pane.get("pane_id")
+            if isinstance(pid, str) and pid:
+                by_pane_id[pid] = pane
+            pname = pane.get("name")
+            if isinstance(pname, str) and pname:
+                by_name[pname] = pane
+
+    candidates: list[dict[str, Any]] = []
+    for path in sorted(root.glob("task_*.json")):
+        if path.name.endswith(".json.lock"):
+            continue
+        try:
+            doc = io.read_task_document(path.stem)
+            task = doc["task"]
+            result = doc["result"]
+            if task["status"] not in ("in_progress", "unknown") or result["status"] != "pending":
+                continue
+            updated_at_raw = doc["timestamps"]["updated_at"]
+            updated = _parse_registry_timestamp(updated_at_raw)
+        except Exception:
+            continue
+
+        age_sec = (current - updated).total_seconds()
+        worktree_path_raw = doc["context"]["worktree"].get("path")
+        worker_cwd_raw = doc["worker"].get("cwd")
+        worktree_exists: bool | None = _safe_is_dir(worktree_path_raw)
+        target_worker_path: str | None = (
+            worker_cwd_raw
+            if isinstance(worker_cwd_raw, str) and worker_cwd_raw
+            else (
+                worktree_path_raw
+                if isinstance(worktree_path_raw, str) and worktree_path_raw
+                else None
+            )
+        )
+        worker_cwd_exists: bool | None = _safe_is_dir(target_worker_path)
+
+        reasons: list[str] = []
+        if target_worker_path is not None and worker_cwd_exists is False:
+            reasons.append("worktree_missing")
+
+        worker_pane_id = doc["worker"].get("pane_id")
+        worker_agent_name = doc["worker"].get("agent_name")
+        worker_pane_status, pane_reasons = _evaluate_worker_pane_status(
+            worker_pane_id=worker_pane_id,
+            worker_agent_name=worker_agent_name,
+            target_worker_path=target_worker_path,
+            worker_cwd_raw=worker_cwd_raw,
+            worktree_path_raw=worktree_path_raw,
+            by_pane_id=by_pane_id,
+            by_name=by_name,
+        )
+        reasons.extend(pane_reasons)
+
+        has_strong = len(reasons) > 0
+        is_age_stale = age_sec >= min_age_sec
+        if is_age_stale:
+            reasons.append("updated_at_stale")
+
+        if not has_strong and not is_age_stale:
+            continue
+
+        signal_strength = "strong" if has_strong else "weak"
+        if any(
+            r in reasons
+            for r in ("worktree_missing", "worker_pane_missing", "worker_pane_context_changed")
+        ):
+            suggested_action = "cancel-task"
+        elif "worker_agent_not_running" in reasons:
+            suggested_action = "recover_or_cancel"
+        else:
+            suggested_action = "verify_live_task"
+
+        candidates.append(
+            {
+                "task_id": doc["task"]["id"],
+                "task_status": task["status"],
+                "dispatch_status": doc["dispatch"]["status"],
+                "result_status": result["status"],
+                "signal_strength": signal_strength,
+                "reasons": reasons,
+                "updated_at": updated_at_raw,
+                "age_sec": round(age_sec, 3),
+                "repository_identity": doc["context"]["repository"]["identity"],
+                "worktree_path": worktree_path_raw,
+                "worktree_exists": worktree_exists,
+                "worker_role": doc["worker"].get("role"),
+                "worker_cwd": target_worker_path,
+                "worker_cwd_exists": worker_cwd_exists,
+                "worker_pane_id": worker_pane_id,
+                "worker_agent_name": worker_agent_name,
+                "worker_pane_status": worker_pane_status,
+                "suggested_action": suggested_action,
             }
         )
     return candidates

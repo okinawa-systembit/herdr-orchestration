@@ -68,7 +68,7 @@ Gitの初期化は自動実行していません。
 `handoff --mode async` 後に完了通知が返らず、Worker の利用枠切れ・クラッシュ・ペイン閉鎖等で未完了のまま滞留している場合は、以下の判断フローで終端化する（Registry JSON の直接編集や `rm` は厳禁）：
 
 1. **残存未完了タスクの確認**:
-   `herdr-orchestrator task-list --status in_progress`（または `unknown`）および `herdr-orchestrator task-status <task_id>` で対象タスクの状態を確認する。
+   `herdr-orchestrator doctor` の `stale_in_progress`（worktree 不在・ペイン非生存等の要確認一覧。`HERDR_ENV=1` 下でペイン確認可）、`herdr-orchestrator task-list --status in_progress`（または `unknown`）、および `herdr-orchestrator task-status <task_id>` で対象タスクの状態を確認する。
 2. **Worker ペイン・worktree 生存確認**:
    `herdr pane list` 等で対象 Worker ペイン（`worker.pane_id`）および `context.worktree.path` が生存しているかを確認する。
 3. **分岐 A: Worker ペインが生存（同一 cwd / 同一リポジトリ維持）**:
