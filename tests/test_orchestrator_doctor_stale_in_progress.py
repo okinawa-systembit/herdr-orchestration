@@ -438,6 +438,21 @@ class DoctorStaleInProgressTests(unittest.TestCase):
         self.assertEqual(before_mtime, after_mtime)
         self.assertEqual(before_files, after_files)
 
+        # 3. PermissionError on Path.is_dir() must not crash doctor
+        orig_is_dir = Path.is_dir
+
+        def fake_is_dir(p: Path) -> bool:
+            if str(p) == missing_dir:
+                raise PermissionError(13, "Permission denied")
+            return orig_is_dir(p)
+
+        with patch.object(Path, "is_dir", fake_is_dir):
+            with patch("orchestrator.live_agent.list_live_panes_with_ui", return_value=[]):
+                doc_perm, code_perm = run_doctor()
+        self.assertEqual(code_perm, 0)
+        self.assertEqual(doc_perm["stale_in_progress"]["summary"]["total_candidates"], 1)
+        self.assertIsNone(doc_perm["stale_in_progress"]["candidates"][0]["worker_cwd_exists"])
+
     # -------------------------------------------------------------------------
     # DT-08: disappears from candidates after terminalization
     # -------------------------------------------------------------------------

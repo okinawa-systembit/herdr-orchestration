@@ -175,6 +175,15 @@ def find_stale_dispatch_candidates(
 _PANE_ID_RE = re.compile(r"^w[0-9A-Za-z]+:p[0-9A-Za-z]+$")
 
 
+def _safe_is_dir(path_str: str | None) -> bool | None:
+    if not isinstance(path_str, str) or not path_str:
+        return None
+    try:
+        return Path(path_str).is_dir()
+    except OSError:
+        return None
+
+
 def _evaluate_worker_pane_status(
     *,
     worker_pane_id: str | None,
@@ -281,11 +290,7 @@ def find_stale_in_progress_candidates(
         age_sec = (current - updated).total_seconds()
         worktree_path_raw = doc["context"]["worktree"].get("path")
         worker_cwd_raw = doc["worker"].get("cwd")
-        worktree_exists: bool | None = (
-            Path(worktree_path_raw).is_dir()
-            if isinstance(worktree_path_raw, str) and worktree_path_raw
-            else None
-        )
+        worktree_exists: bool | None = _safe_is_dir(worktree_path_raw)
         target_worker_path: str | None = (
             worker_cwd_raw
             if isinstance(worker_cwd_raw, str) and worker_cwd_raw
@@ -295,12 +300,10 @@ def find_stale_in_progress_candidates(
                 else None
             )
         )
-        worker_cwd_exists: bool | None = (
-            Path(target_worker_path).is_dir() if target_worker_path is not None else None
-        )
+        worker_cwd_exists: bool | None = _safe_is_dir(target_worker_path)
 
         reasons: list[str] = []
-        if target_worker_path is not None and not worker_cwd_exists:
+        if target_worker_path is not None and worker_cwd_exists is False:
             reasons.append("worktree_missing")
 
         worker_pane_id = doc["worker"].get("pane_id")
