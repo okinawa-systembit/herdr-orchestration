@@ -340,21 +340,22 @@ Issue #62 の受け入れ条件「完了済み・未完了・不確定な task �
 
 | 順  | `overview.state` | 判定条件（4軸照合）                                                                                                                                                                      | 意味                                                                                                |
 | --- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| 1   | `uncertain`      | `task.status = unknown`、または (`dispatch.status = uncertain` かつ `result.status = pending`)、または `completion.status = uncertain`                                                   | worker への配送成否または requester への復帰配送成否が観測できていない。blind resend 禁止の対象     |
-| 2   | `open`           | `task.status ∈ {created, in_progress}`、または `result.status = pending`、または `completion.status ∈ {pending, processing, failed}`                                                     | 通常フロー（タスク処理中・結果待ち）または明示的な復旧操作（completion 再開）による続きが残っている |
-| 3   | `closed`         | 上記以外（正常系では `task.status ∈ {succeeded, failed, cancelled}` かつ `result.status ∈ {succeeded, failed, unavailable}` かつ `completion.status ∈ {not_applicable, sent, skipped}`） | task・result・completion がすべて terminal。処理は完結している（成功・失敗は問わない）              |
+| 1   | `closed`         | `task.status = cancelled` かつ `result.status = pending` かつ `completion.status ∈ {not_applicable, skipped}`                                                                            | worker 結果到達前に明示キャンセルされ終端化した task。配送成否が `uncertain` だった場合も終了済み   |
+| 2   | `uncertain`      | `task.status = unknown`、または (`dispatch.status = uncertain` かつ `result.status = pending`)、または `completion.status = uncertain`                                                   | worker への配送成否または requester への復帰配送成否が観測できていない。blind resend 禁止の対象     |
+| 3   | `open`           | `task.status ∈ {created, in_progress}`、または `result.status = pending`、または `completion.status ∈ {pending, processing, failed}`                                                     | 通常フロー（タスク処理中・結果待ち）または明示的な復旧操作（completion 再開）による続きが残っている |
+| 4   | `closed`         | 上記以外（正常系では `task.status ∈ {succeeded, failed, cancelled}` かつ `result.status ∈ {succeeded, failed, unavailable}` かつ `completion.status ∈ {not_applicable, sent, skipped}`） | task・result・completion がすべて terminal。処理は完結している（成功・失敗は問わない）              |
 
 #### 条件の詳細と4軸状態遷移との整合性
 
 1. **`dispatch.status = uncertain` の扱い**:
-   - 初回 dispatch が timeout / stalled となった直後は `task=unknown`, `dispatch=uncertain`, `result=pending` となり、第1行により `uncertain` に分類される。
-   - その後、worker から遅れて成果物が提出（`result-submit`）された場合、マトリクス（[§6.3](herdr-orchestrator/03-task-registry.md#sec-6-3)）に従って `dispatch.status=uncertain` は履歴として保持されたまま `task.status` が `succeeded` / `failed`、`result.status` が `succeeded` / `failed` へ遷移する。このとき結果が確定しているため第1行の `result.status = pending` 条件を満たさず、第2行（completion 未完了なら `open`）または第3行（completion 完了なら `closed`）へ適切に遷移する。
+   - 初回 dispatch が timeout / stalled となった直後は `task=unknown`, `dispatch=uncertain`, `result=pending` となり、第2行により `uncertain` に分類される。
+   - その後、worker から遅れて成果物が提出（`result-submit`）された場合、マトリクス（[§6.3](herdr-orchestrator/03-task-registry.md#sec-6-3)）に従って `dispatch.status=uncertain` は履歴として保持されたまま `task.status` が `succeeded` / `failed`、`result.status` が `succeeded` / `failed` へ遷移する。このとき結果が確定しているため第2行の `result.status = pending` 条件を満たさず、第3行（completion 未完了なら `open`）または第4行（completion 完了なら `closed`）へ適切に遷移する。
 2. **`result.status` の影響**:
    - `result.status = pending` は worker の処理が未完了、または成果物提出待ちであることを示すため、`open`（または dispatch 未確定時は `uncertain`）の判定根拠として機能する。
-   - `result.status` が `succeeded` / `failed` / `unavailable` に到達して初めて `closed` の候補となる。
+   - `result.status` が `succeeded` / `failed` / `unavailable` に到達して初めて `closed` の候補となる（第1行の `cancelled` 終端を除く）。
 3. **`completion.status` の扱い**:
    - `completion.status = failed` は requester への復帰配送が失敗した terminal 状態だが、`reset-completion` / `recover-completion` による対応余地があるため `open` に分類する。
-   - `completion.status = uncertain` は復帰配送の成否が不明であるため、安全のため第1行で `uncertain` に分類する。
+   - `completion.status = uncertain` は復帰配送の成否が不明であるため、安全のため第2行で `uncertain` に分類する。
 4. **到達不能な4軸組み合わせ（状態不整合）の判定基準（不変条件リスト）**:
    - **正本と位置付け**: 不変条件の正本は既存の Task Registry 状態遷移仕様（[§6.3](herdr-orchestrator/03-task-registry.md#sec-6-3)）および completion 仕様（[§9.13](herdr-orchestrator/05-completion-and-recovery.md#sec-9-13), [§9.14](herdr-orchestrator/05-completion-and-recovery.md#sec-9-14)）である。本節の不変条件 I1〜I7 は、正本仕様から導出した「診断用派生ルール」であり、独立した新たな状態管理の正本ではない。将来、主設計書の状態遷移仕様が改訂された場合は、本リストおよびテスト判定も合わせて見直し同期する。
    - canonical schema の `validate_loaded_task()` は各軸の Enum 値と `validate_mode_action_consistency` を検査するが、状態遷移マトリクスの全組み合わせ整合までは拘束しない。
@@ -372,15 +373,15 @@ Issue #62 の受け入れ条件「完了済み・未完了・不確定な task �
        - `dispatch.status ∈ {failed, skipped}` ⇒ `task.status = failed` ∧ `result.status = unavailable` ∧ `completion.status ∈ {skipped, not_applicable}`
      - **I6（完了復帰処理と結果終端性）**:
        - `completion.status ∈ {processing, sent, failed, uncertain}` ⇒ `result.status ∈ {succeeded, failed, unavailable}` ∧ `dispatch.status ∈ {sent, uncertain}`
-     - **I7（MVP 未実装状態の検出）**:
-       - `task.status = cancelled` は MVP では遷移イベントが無効（将来拡張用）であるため、検出された場合は warning 対象とする。
+     - **I7（キャンセル終端の整合）**:
+       - `task.status = cancelled` ⇒ `result.status = pending` ∧ `completion.status ∈ {not_applicable, skipped}`（※ [Issue #173](https://github.com/okinawa-systembit/herdr-orchestration/issues/173) の `cancel-task` 有効化に伴い同期）。
      - ※ 本リストは違反時に確実に不整合と言える最小限の条件を定めたものであり、すべての到達不能な組み合わせを網羅的に検出するものではない（warning が付与されないことは 4軸の完全な整合を保証するものではない）。
    - **正当に到達し得るケース（誤判定してはならない正常状態）**:
      - 遅延 result 到達時: `dispatch=uncertain`, `task=succeeded|failed`, `result=succeeded|failed` は I1〜I7 すべてを満たし warning 対象外。
      - worker unavailable: `task=failed`, `dispatch=sent`, `result=unavailable` は I1〜I7 を満たし warning 対象外。
      - completion リセット後: `reset-completion` により `completion.status` が `pending` に戻った状態も I1〜I7 を満たし warning 対象外。
    - **状態分類（`overview.state`）と警告優先の運用方針**:
-     - `overview.state` は既存の 3 分類（`uncertain` / `open` / `closed`）を維持し、判定表の優先順位（1: `uncertain` → 2: `open` → 3: `closed`）に従って機械的に決定する。
+     - `overview.state` は既存の 3 分類（`uncertain` / `open` / `closed`）を維持し、判定表の優先順位（1: `closed`（キャンセル終端）→ 2: `uncertain` → 3: `open` → 4: `closed`）に従って機械的に決定する。
      - **不整合 Task の正常完了扱いの禁止**: `overview.warnings` に `inconsistent_state_combination` が付与された Task は、仮に `overview.state` が `closed` であっても **「正常完了」として扱ってはならない**。Agent は `overview.state` だけでなく必ず `overview.warnings` を確認し、警告がある Task は状態不整合の要確認対象として扱う（[§7.1](#71-想定手順)）。
 5. **注意点**:
    - `closed` は「Orchestrator 上の処理が終わった」ことを示し、タスクの成功を意味しない。また、warnings に状態不整合（`inconsistent_state_combination`）がある場合は正常完了とはみなさない。成否・健全性は `task.status` / `result.status` / `overview.warnings` で確認する。

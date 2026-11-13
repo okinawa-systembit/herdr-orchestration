@@ -54,6 +54,7 @@ Herdr Orchestrator の設計書は、関連するテーマごとに複数のフ�
 - [herdr-orchestrator-task-list.md](docs/herdr-orchestrator-task-list.md): Task 一覧参照コマンド `task-list` 設計書（Issue #62）
 - [herdr-orchestrator-cross-workspace.md](docs/herdr-orchestrator-cross-workspace.md): ワークスペース跨ぎ配送・グローバルロール・日本語ロール名・ペイン自動追従 設計書（Issue #74）
 - [herdr-orchestrator-task-registry-cleanup.md](docs/herdr-orchestrator-task-registry-cleanup.md): Task Registry クリーンアップ機構 設計書（Issue #157）
+- [herdr-orchestrator-task-cancellation.md](docs/herdr-orchestrator-task-cancellation.md): タスクキャンセル（`cancel-task`）および復旧ランブック 設計書（Issue #173）
 
 ### 文書の編集ルール
 
