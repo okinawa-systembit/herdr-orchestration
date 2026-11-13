@@ -29,6 +29,7 @@
 | `task-result <task_id>`                                   | Requester による結果確定データの取得・成果物パス解決                                                                                        | 必須               |
 | `resume-task` / `reset-completion` / `recover-completion` | completion 状態の再試行・復旧                                                                                                               | 必須               |
 | `reconcile-dispatch`                                      | 未確定 dispatch の整合性復旧                                                                                                                | 必須               |
+| `cancel-task <task_id>`                                   | 滞留中のタスク（`in_progress` / `unknown`）を安全にキャンセル（`--reason "<理由>"` 必須）                                                   | 免除（ペイン外可） |
 | `cleanup-registry`                                        | Task Registry の古いタスクと孤立ロックファイルを整理（`--dry-run`, `--json`）                                                               | 免除（ペイン外可） |
 | `update`                                                  | 【未実装・将来仕様】配布環境の最新化（現行版の更新は `install.sh` を再実行。README『アップデート』参照）                                    | 免除（ペイン外可） |
 
@@ -281,6 +282,20 @@ herdr-orchestrator cleanup-registry
 - **`HERDR_ENV=1` 免除**: ローカルファイルシステム上の Task Registry のみを操作するため、Herdr ペイン外（通常のターミナル）からも直接実行可能です。
 - **全リポジトリ共通スコープ**: Task Registry（`~/.local/state/herdr-orchestrator/tasks`）はホスト上の全リポジトリ・全 worktree で共有されているため、どのディレクトリから実行しても Registry 全体が対象となります（出力 JSON に `scope: "global"`, `shared_across_repositories: true` を明示）。
 - **レート制限バイパス**: 手動実行時は 1 日 1 回のレート制限をバイパスして即座にクリーンアップを実行します。
+
+### 5.7 タスクのキャンセル (`cancel-task`)
+
+Worker ペインの喪失や worktree 削除等により復帰不能となった滞留タスク（`task.status ∈ {in_progress, unknown}`）を、`cancelled` 状態へ安全に終端化します（詳細は [タスクキャンセル設計書](../../../docs/herdr-orchestrator-task-cancellation.md) を参照）。
+
+```bash
+herdr-orchestrator cancel-task <task_id> --reason "Worker ペイン喪失のため中断"
+```
+
+- `--reason <text>`（必須）: キャンセル理由の非空文字列（前後空白のみは拒否、最大 2000 文字）。
+- `--json`: JSON 出力を明示（指定の有無に関わらず常に JSON 出力）。
+- **`HERDR_ENV=1` 免除**: ペインや worktree が失われた後でも通常のターミナルから片付けられるよう、`HERDR_ENV=1` なしで実行可能です。
+- **Worker 本人確認の免除**: Worker ペイン喪失時の復旧手段であるため、`verify_worker_submit_context()` は行わず、ベストエフォートで実行者情報（`task.cancelled_by`）を記録します。
+- **対象外**: `created`（`reconcile-dispatch` 対象）、既に終端状態（`succeeded` / `failed` / `cancelled`）、または `completion.status == "processing"` のタスクは `registry_conflict`（終了コード 1）で拒否されます。
 
 ---
 

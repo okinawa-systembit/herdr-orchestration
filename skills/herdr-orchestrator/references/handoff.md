@@ -60,3 +60,18 @@ Herdrのタスク委託を開始できませんでした。
 Git初期化後、タスク委託を再実行してください。
 Gitの初期化は自動実行していません。
 ```
+
+## Recovery Runbook（Worker 途中停止時の復旧手順）
+
+正本: [herdr-orchestrator-task-cancellation.md §6](../../../docs/herdr-orchestrator-task-cancellation.md#sec-6)
+
+`handoff --mode async` 後に完了通知が返らず、Worker の利用枠切れ・クラッシュ・ペイン閉鎖等で未完了のまま滞留している場合は、以下の判断フローで終端化する（Registry JSON の直接編集や `rm` は厳禁）：
+
+1. **残存未完了タスクの確認**:
+   `herdr-orchestrator task-list --status in_progress`（または `unknown`）および `herdr-orchestrator task-status <task_id>` で対象タスクの状態を確認する。
+2. **Worker ペイン・worktree 生存確認**:
+   `herdr pane list` 等で対象 Worker ペイン（`worker.pane_id`）および `context.worktree.path` が生存しているかを確認する。
+3. **分岐 A: Worker ペインが生存（同一 cwd / 同一リポジトリ維持）**:
+   同一ペインでエージェントが再起動・枠回復可能な場合は、その Worker ペインから `herdr-orchestrator result-submit <task_id> --result-status unavailable --summary "<中断理由>"` を提出させて正規に `failed` 終端化する。なお、`worker_context_unverified` 等で `result-submit` が拒否された場合はフォールバックとして分岐 B へ進む。
+4. **分岐 B: Worker ペイン喪失・worktree 削除・別用途転用等で復帰不能**:
+   `herdr-orchestrator cancel-task <task_id> --reason "<中断理由>"` を実行し、`task.status = cancelled`（および必要な場合は `completion.status = skipped`）へ安全に終端化する（30 日経過後に `cleanup-registry` の自動整理対象となる）。

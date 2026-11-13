@@ -84,6 +84,7 @@ PUBLIC_COMMANDS = (
     "role",
     "project",
     "cleanup-registry",
+    "cancel-task",
 )
 
 _COMMAND_HELP: dict[str, str] = {
@@ -101,6 +102,7 @@ _COMMAND_HELP: dict[str, str] = {
     "role": "リポジトリごとの論理ロールと pane_id の紐づけを管理（set, show, clear）",
     "project": "プロジェクトカタログ（projects.json）を管理（register, show, clear）",
     "cleanup-registry": "Task Registry の古いタスクとロックファイルを整理（--dry-run 対応、HERDR_ENV 不要）",
+    "cancel-task": "滞留中のタスクを安全にキャンセル（--reason 必須、HERDR_ENV 不要）",
 }
 
 
@@ -132,6 +134,66 @@ def _cmd_cleanup_registry(ns: argparse.Namespace) -> int:
         "deleted_by_repository": res.get("deleted_by_repository", {}),
         "orphan_locks_deleted": res.get("orphan_locks_deleted", 0),
         "last_cleanup_at": res.get("last_cleanup_at"),
+    }
+    return emit_json(out, exit_code=0)
+
+
+def _resolve_cancelled_by_best_effort() -> dict[str, str | None]:
+    pane_id = os.environ.get("HERDR_PANE_ID") or None
+    role = "unbound"
+    if pane_id and os.environ.get("HERDR_ENV") == "1":
+        try:
+            scope_id = _try_resolve_local_scope_id(Path.cwd())
+            if scope_id:
+                doc = get_role_binding_document(scope_id)
+                for r_name, p_id in doc.get("roles", {}).items():
+                    if p_id == pane_id:
+                        role = r_name
+                        break
+            if role == "unbound":
+                global_doc = get_role_binding_document(GLOBAL_SCOPE_ID)
+                for r_name, p_id in global_doc.get("roles", {}).items():
+                    if p_id == pane_id:
+                        role = r_name
+                        break
+        except Exception:
+            pass
+    return {
+        "role": role,
+        "pane_id": pane_id,
+        "agent_name": None,
+    }
+
+
+def _cmd_cancel_task(ns: argparse.Namespace) -> int:
+    if not ns.task_id:
+        emit_error("invalid_input", retryable=False, message="task.id required")
+    cancelled_by = _resolve_cancelled_by_best_effort()
+    try:
+        updated = registry_ops.cancel_task(
+            ns.task_id,
+            reason=ns.reason,
+            cancelled_by=cancelled_by,
+        )
+    except RegistryError as exc:
+        emit_registry_error(exc)
+
+    out = {
+        "command": "cancel-task",
+        "task_id": updated["task"]["id"],
+        "cancelled": True,
+        "task": {
+            "id": updated["task"]["id"],
+            "status": updated["task"]["status"],
+            "cancel_reason": updated["task"].get("cancel_reason"),
+            "cancelled_by": updated["task"].get("cancelled_by"),
+        },
+        "dispatch": {"status": updated["dispatch"]["status"]},
+        "result": {"status": updated["result"]["status"]},
+        "completion": {
+            "action": updated["completion"]["action"],
+            "status": updated["completion"]["status"],
+        },
     }
     return emit_json(out, exit_code=0)
 
@@ -1060,6 +1122,19 @@ def build_parser() -> argparse.ArgumentParser:
                 default=True,
                 help="JSON 形式で出力（互換性フラグ）",
             )
+        elif name == "cancel-task":
+            p.add_argument("task_id", nargs="?", metavar="task.id", help="対象タスクID")
+            p.add_argument(
+                "--reason",
+                required=True,
+                help="キャンセル理由（非空文字列、最大2000文字）",
+            )
+            p.add_argument(
+                "--json",
+                action="store_true",
+                default=True,
+                help="JSON 形式で出力（互換性フラグ）",
+            )
         elif name == "identity":
             id_sub = p.add_subparsers(dest="identity_action", required=True)
             id_sub.add_parser(
@@ -1195,6 +1270,7 @@ def main(argv: list[str] | None = None) -> int:
         "role": _cmd_role,
         "project": _cmd_project,
         "cleanup-registry": _cmd_cleanup_registry,
+        "cancel-task": _cmd_cancel_task,
     }
     handler = handlers[ns.command]
     return handler(ns)

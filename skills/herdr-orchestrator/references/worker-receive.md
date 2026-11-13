@@ -19,6 +19,7 @@ prompt だけを信頼しない。Registry を正本とする。
    - `failed` / `skipped` → 作業しない（summary / 人間報告）。
    - 4a 上限到達で `pending` のまま → 作業開始しない。`dispatch_pending_timeout` を報告し、`task-status` 監視・reconcile・人間判断を待つ。
 5. `worker.cwd`（または同一 worktree タスクでは `context.worktree.path`）が自分の環境（`foreground_cwd`）と一致（同一 worktree 内サブディレクトリであれば worktree 親和照合）することを確認（不一致なら作業しない）。
+   - `task.status == "cancelled"`（既にキャンセル済み）を観測した場合は作業を開始せず、人間または Requester へ「キャンセル済みタスクであるため作業を中断した」旨を報告して終了する。
 6. 5 まで成功したら `task.instruction`（Registry 正本）に従って作業する。
 
 ## 結果登録
@@ -26,5 +27,6 @@ prompt だけを信頼しない。Registry を正本とする。
 - 成果物ファイルがある場合は worktree に保存し `--result-ref` に相対パスを指定する。別ワークスペースへの調査依頼等で成果物ファイルを作らない場合は `--summary` のみで提出できる（`--result-ref` と `--summary` の少なくとも一方が必須）。
 - `herdr-orchestrator result-submit <task.id> --result-status … [--result-ref …] [--summary …]`（caller は Registry の worker pane、`HERDR_ENV=1`）。
 - `dispatch_not_ready`（retryable）なら **同一 payload** で bounded retry（[§10.2](../../../docs/herdr-orchestrator/06-results-and-workflows.md#sec-10-2)）。
+- `result-submit` が `registry_conflict`（実行中にタスクがキャンセルされた場合等）で拒否された場合は再試行せず、`task-status <task.id>` でキャンセル状態（`cancel_reason` 等）を確認した上で人間または Requester へ報告して終了する。
 
 CLI: **`herdr-orchestrator`** on PATH（`npm run install:orchestrator-dev` 後。開発・配布で同一）。
