@@ -1,7 +1,7 @@
 # Herdr Orchestrator タスクキャンセル（`cancel-task`）および復旧ランブック 設計書
 
 - **対象 Issue**: [Issue #173](https://github.com/okinawa-systembit/herdr-orchestration/issues/173)
-- **ステータス**: 実装完了（PR #177 にてマージ済み）
+- **ステータス**: 実装完了（PR #177 / v0.8.0 にてマージ済み）
 - **関連文書**:
   - [03-task-registry.md](herdr-orchestrator/03-task-registry.md#sec-6-3): Canonical Schema v1・Four-axis State Machine・Mutation Rules・Public CLI Contract（§6.2〜§6.5）
   - [05-completion-and-recovery.md](herdr-orchestrator/05-completion-and-recovery.md#sec-9-13): Completion Eligibility（§9.13）および Completion Reset 受理条件（§9.14）
