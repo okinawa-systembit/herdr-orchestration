@@ -1,7 +1,7 @@
 # Herdr Orchestrator タスクキャンセル（`cancel-task`）および復旧ランブック 設計書
 
 - **対象 Issue**: [Issue #173](https://github.com/okinawa-systembit/herdr-orchestration/issues/173)
-- **ステータス**: 設計中
+- **ステータス**: 設計承認
 - **関連文書**:
   - [03-task-registry.md](herdr-orchestrator/03-task-registry.md#sec-6-3): Canonical Schema v1・Four-axis State Machine・Mutation Rules・Public CLI Contract（§6.2〜§6.5）
   - [05-completion-and-recovery.md](herdr-orchestrator/05-completion-and-recovery.md#sec-9-13): Completion Eligibility（§9.13）および Completion Reset 受理条件（§9.14）
@@ -83,7 +83,7 @@
 | `completion.status` | `completion.action == "resume_requester"` かつ `pending` なら `skipped`；`none` / `sync` は `not_applicable` 維持 | `completion.status == "processing"` の場合は `registry_conflict` で拒否                                                 |
 
 - **`created` タスクを対象外とする理由**:
-  `task.status = created` は Worker へまだ配送完了していない段階（`dispatch.status ∈ {pending, uncertain}`）であり、既存の `reconcile-dispatch`（[03-task-registry.md §6.12](herdr-orchestrator/03-task-registry.md#sec-6-12)）が終端化の責務を持つため、`cancel-task` では受理しない。
+  `task.status = created` は Worker へまだ配送完了していない段階（`dispatch.status = pending`）であり、既存の `reconcile-dispatch`（[03-task-registry.md §6.12](herdr-orchestrator/03-task-registry.md#sec-6-12)）が終端化の責務を持つため、`cancel-task` では受理しない。
 - **キャンセル後の遅れた `result-submit` の拒否**:
   `update-result` は `task.status ∈ {in_progress, unknown}` のみを受理するため、`cancelled` 遷移後に Worker から遅れて `result-submit` が実行されても既存の Mutation Rules により `registry_conflict` で自然に拒否される。
 - **sync handoff 待機中のキャンセル検知**:
@@ -295,4 +295,7 @@ herdr-orchestrator cancel-task <task_id> --reason "<理由>" [--json]
 
 ### 7.3 実機確認項目
 
-実装完了後の実機検証フェーズ（[docs/herdr-orchestrator-verification-log.md](herdr-orchestrator-verification-log.md)）において、疑似的な Worker ペイン閉鎖・worktree 削除を伴う `cancel-task` の実行、および `task-list` 上での `overview.state = closed` 表示を確認・記録する。
+実装完了後の実機検証フェーズ（[docs/herdr-orchestrator-verification-log.md](herdr-orchestrator-verification-log.md)）において、以下の 2 点を確認・記録する。
+
+1. **分岐 A（Worker ペイン生存）**: 同一ペインで再起動・回復した Worker エージェントから `result-submit --result-status unavailable` により正規に `failed` 終端化できること。
+2. **分岐 B（Worker ペイン喪失・worktree 削除）**: 疑似的な Worker ペイン閉鎖・worktree 削除を伴う状態で `cancel-task` を実行し、`task-list` 上で `overview.state = closed` として表示されること。
