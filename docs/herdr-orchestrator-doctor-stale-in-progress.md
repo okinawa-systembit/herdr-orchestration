@@ -1,7 +1,7 @@
 # Herdr Orchestrator `doctor` での stale `in_progress` タスク検出・要確認一覧（`await_human`）設計書
 
 - **対象 Issue**: [Issue #174](https://github.com/okinawa-systembit/herdr-orchestration/issues/174)
-- **ステータス**: 設計中
+- **ステータス**: 設計承認
 - **関連文書**:
   - [03-task-registry.md](herdr-orchestrator/03-task-registry.md#sec-6-5): Public CLI Contract（`doctor`）および `stale_dispatch` 診断（§6.5 / §6.12）
   - [herdr-orchestrator-task-cancellation.md](herdr-orchestrator-task-cancellation.md): タスクキャンセル（`cancel-task`）および復旧ランブック（Issue #173）
@@ -98,7 +98,7 @@
   - `run_doctor()` は `live_agent.list_live_panes_with_ui()`（内部で `pane list` / `workspace list` / `tab list` をタスク数に依存しない固定回数・最大 3 回のみ呼び出す既存ヘルパー）を呼び出し、その戻り値 `list[dict[str, Any]] | None` を `find_stale_in_progress_candidates()` へ渡す（タスクごとの N+1 呼び出しを行わない）。
   - 照合キーは原則 `worker.pane_id` とし、`live_pane.get("pane_id") == worker_pane_id` で検索する。後方互換のため `worker.pane_id` が未設定で `worker.agent_name` がペイン ID 形式（`^w[0-9A-Za-z]+:p[0-9A-Za-z]+$`）の場合はそれを `pane_id` として照合し、それ以外の旧形式名（Pattern A 等）は `live_pane.get("name") == worker_agent_name` で照合する。
   - **偽陽性防止（`live_panes is None` の扱い）**: `HERDR_ENV != "1"` または `herdr pane list` 非対応環境で `live_panes is None` の場合は、ペイン生存確認を実行せず `worker_pane_status = "unavailable"` と記録する（ペイン不在と誤認しない）。
-  - **サブディレクトリ移動の許容**: `worker_pane_context_changed` の判定では `is_path_within_worktree(live_cwd, Path(target_worker_path).resolve())`（既存ヘルパー）を併用し、Worker の作業ルート（`worker.cwd` 優先、未設定時 `context.worktree.path`）配下のサブディレクトリへの移動は転用とみなさない。
+  - **サブディレクトリ・worktree 内移動の許容**: `worker_pane_context_changed` の判定では `is_path_within_worktree(live_cwd, Path(target_worker_path).resolve())`（既存ヘルパー）を併用し、`target_worker_path` 配下のサブディレクトリへの移動は転用とみなさない。さらに、`worker.cwd` と `context.worktree.path` の双方が設定されており、かつ `is_path_within_worktree(Path(worker.cwd).resolve(), Path(context.worktree.path).resolve())` が真（＝同一 worktree 内の配送）である場合は、`worker.cwd` がサブディレクトリであっても `is_path_within_worktree(live_cwd, Path(context.worktree.path).resolve())` が真であれば worktree ルート等への移動を転用とみなさない（跨ぎ配送で Worker が誤って Requester 側 worktree へ移動した場合は転用として検出する）。
 
 #### B. 弱い信号（参考: `signal_strength = "weak"`）
 
@@ -114,7 +114,7 @@
 
 - 定数: `DEFAULT_STALE_IN_PROGRESS_SEC = 86400.0`（24 時間）
 - 関数: `stale_in_progress_threshold_sec() -> float`
-- 環境変数: `HERDR_ORCHESTRATOR_STALE_IN_PROGRESS_SEC`（未設定・空文字時は `DEFAULT_STALE_IN_PROGRESS_SEC` を返す。非数値や負数が指定された場合は `stale_dispatch_threshold_sec()` と同様に黙って握りつぶさず `ValueError` とする（指針 10））
+- 環境変数: `HERDR_ORCHESTRATOR_STALE_IN_PROGRESS_SEC`（未設定・空文字時は `DEFAULT_STALE_IN_PROGRESS_SEC` を返す。非数値・`NaN`/`inf`・負数が指定された場合は `stderr` へ警告を出力し、`DEFAULT_STALE_IN_PROGRESS_SEC` へフォールバックする（終了コード非影響かつ黙って失敗しない原則の維持））
 
 ---
 
@@ -236,7 +236,7 @@
 | テスト ID | 検証項目                                            | テスト内容と期待される結果                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | --------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **DT-01** | `worktree_missing`・跨ぎ配送誤検知防止              | `task.status ∈ {in_progress, unknown}` かつ `result.status = pending` で `worker.cwd`（未設定時 `context.worktree.path`）が存在しない場合、経過時間に関わらず `signal_strength = "strong"`（`worktree_missing`、`suggested_action = "cancel-task"`）で検出されること。また跨ぎ配送（`worker.cwd != context.worktree.path`）で Requester 側 `context.worktree.path` のみが不在でも `worker.cwd` が存在すれば `worktree_missing` と誤検知しないこと |
-| **DT-02** | Worker ペイン非生存・跨ぎ配送サブディレクトリ許容   | `HERDR_ENV=1` 下で fake `herdr pane list` を用い、ペイン不在（`worker_pane_missing`）、エージェント未起動（`worker_agent_not_running`）、別ディレクトリ転用（`worker_pane_context_changed`）をそれぞれ検出し、跨ぎ配送で Worker が `worker.cwd` 配下のサブディレクトリへ移動している場合は `worker_pane_context_changed` と誤検知しないこと                                                                                                       |
+| **DT-02** | Worker ペイン非生存・跨ぎ/同一 worktree 移動許容    | `HERDR_ENV=1` 下で fake `herdr pane list` を用い、ペイン不在（`worker_pane_missing`）、エージェント未起動（`worker_agent_not_running`）、別ディレクトリ転用（`worker_pane_context_changed`）をそれぞれ検出し、跨ぎ配送で `worker.cwd` 配下サブディレクトリへ移動した場合や同一 worktree 内配送で `worker.cwd`（サブディレクトリ）から worktree ルートへ移動した場合は `worker_pane_context_changed` と誤検知しないこと                            |
 | **DT-03** | `HERDR_ENV != 1` / `pane list` 非対応フォールバック | `pane_check_available = false` かつ `worker_pane_status = "unavailable"` となり、ペイン不在を誤って `worker_pane_missing` と判定しないこと（`worktree_missing` 等は引き続き検出）                                                                                                                                                                                                                                                                 |
 | **DT-04** | 閾値境界値・環境変数上書き                          | `HERDR_ORCHESTRATOR_STALE_IN_PROGRESS_SEC` 設定時、`age_sec < threshold` は非検出、`age_sec >= threshold` は `signal_strength = "weak"`, `reasons = ["updated_at_stale"]` として検出されること                                                                                                                                                                                                                                                    |
 | **DT-05** | 正常長時間タスクの非誤検知                          | `age_sec` が長時間（例: 1 時間、既定 24 時間未満）であっても、`worker.cwd` 存在かつ Worker ペインが live であれば `stale_in_progress.candidates` に含まれないこと                                                                                                                                                                                                                                                                                 |
