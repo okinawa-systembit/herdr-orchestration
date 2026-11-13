@@ -18,7 +18,7 @@ from orchestrator.registry.schema import (
     validate_create_payload,
     validate_loaded_task,
 )
-from orchestrator.registry.task_id import generate_task_id
+from orchestrator.registry.task_id import generate_task_id, validate_task_id
 
 _RETENTION_DAYS = 30
 
@@ -418,6 +418,12 @@ def finish_completion(
 
 def reset_completion(task_id: str) -> dict[str, Any]:
     def mutator(doc: dict[str, Any]) -> dict[str, Any]:
+        if doc["task"]["status"] == "cancelled":
+            raise RegistryError(
+                "registry_conflict",
+                task_id=task_id,
+                message="cannot reset completion of cancelled task",
+            )
         completion = doc["completion"]
         if completion["status"] not in ("processing", "failed", "uncertain", "skipped"):
             raise RegistryError("registry_conflict", task_id=task_id)
@@ -426,6 +432,65 @@ def reset_completion(task_id: str) -> dict[str, Any]:
         out = copy.deepcopy(doc)
         out["completion"]["status"] = "pending"
         out["completion"]["recovery_count"] = int(completion.get("recovery_count") or 0) + 1
+        return out
+
+    return io.mutate_task(task_id, mutator)
+
+
+def cancel_task(
+    task_id: str,
+    *,
+    reason: str,
+    cancelled_by: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Transition an in_progress or unknown task to cancelled (Issue #173)."""
+    validate_task_id(task_id)
+    if not isinstance(reason, str):
+        raise RegistryError("invalid_input", message="--reason must be a string")
+    clean_reason = reason.strip()
+    if not clean_reason:
+        raise RegistryError("invalid_input", message="--reason must not be empty")
+    if len(clean_reason) > 2000:
+        raise RegistryError("invalid_input", message="--reason exceeds 2000 characters")
+
+    if cancelled_by is not None:
+        role_val = cancelled_by.get("role")
+        actor = {
+            "role": str(role_val).strip() if isinstance(role_val, str) and role_val.strip() else "unbound",
+            "pane_id": cancelled_by.get("pane_id") if isinstance(cancelled_by.get("pane_id"), str) else None,
+            "agent_name": cancelled_by.get("agent_name") if isinstance(cancelled_by.get("agent_name"), str) else None,
+        }
+    else:
+        actor = {"role": "unbound", "pane_id": None, "agent_name": None}
+
+    def mutator(doc: dict[str, Any]) -> dict[str, Any]:
+        task_status = doc["task"]["status"]
+        if task_status == "created":
+            raise RegistryError(
+                "registry_conflict",
+                task_id=task_id,
+                message="cannot cancel task in 'created' status; use reconcile-dispatch instead",
+            )
+        if task_status not in ("in_progress", "unknown"):
+            raise RegistryError(
+                "registry_conflict",
+                task_id=task_id,
+                message=f"cannot cancel task in terminal status {task_status!r}",
+            )
+        completion = doc["completion"]
+        if completion["status"] == "processing":
+            raise RegistryError(
+                "registry_conflict",
+                task_id=task_id,
+                message="cannot cancel task while completion.status is 'processing'",
+            )
+
+        out = copy.deepcopy(doc)
+        out["task"]["status"] = "cancelled"
+        out["task"]["cancel_reason"] = clean_reason
+        out["task"]["cancelled_by"] = copy.deepcopy(actor)
+        if completion["action"] == "resume_requester" and completion["status"] == "pending":
+            out["completion"]["status"] = "skipped"
         return out
 
     return io.mutate_task(task_id, mutator)

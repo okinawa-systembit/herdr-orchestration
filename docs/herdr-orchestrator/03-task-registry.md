@@ -155,9 +155,6 @@ ${XDG_STATE_HOME:-$HOME/.local/state}/herdr-orchestrator/tasks/
 | completion intentionally not sent                        | 維持          | 維持              | 維持            | `pending / processing -> skipped`                                                                          |
 | explicit task cancellation before terminal result        | `cancelled`   | 現在値を保持      | 現在値を保持    | `resume_requester` で `pending` なら `skipped`; `none` / sync は `not_applicable`（`processing` 中は拒否） |
 
-> [!NOTE]
-> `explicit task cancellation before terminal result`（`cancel-task` 公開 CLI）は**未実装**（詳細は [Issue #173](https://github.com/okinawa-systembit/herdr-orchestration/issues/173) / [タスクキャンセル設計書](../herdr-orchestrator-task-cancellation.md) を参照。ステータスは同設計書ヘッダーを正本とする）である。
-
 `completion.action=resume_requester` の初回 dispatch が `failed` / `skipped` で worker が task を受け取っていないことが確定している場合、`completion.status` を `pending` のまま残さず `skipped` に確定する。この terminal パターンは [§9.13](05-completion-and-recovery.md#sec-9-13) claim および [§9.14](05-completion-and-recovery.md#sec-9-14) reset の対象外とする。`completion.action=none` は async でも `not_applicable` を維持する。人間起点の handoff では requester チャットへ配送不能を報告する。
 
 `dispatch.status = uncertain` 後に worker から canonical result が届いた場合は、`dispatch.status = uncertain` を履歴として保持したまま `task.status` を確定する。

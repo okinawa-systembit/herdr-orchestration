@@ -67,9 +67,10 @@ def _check_inconsistent_state_combination(doc: dict[str, Any]) -> bool:
         if not (res_st in {"succeeded", "failed", "unavailable"} and disp_st in {"sent", "uncertain"}):
             return True
 
-    # I7: task.status = cancelled is inactive in MVP
+    # I7: task.status = cancelled => result.status = pending and completion.status in {not_applicable, skipped}
     if task_st == "cancelled":
-        return True
+        if not (res_st == "pending" and comp_st in {"not_applicable", "skipped"}):
+            return True
 
     return False
 
@@ -77,6 +78,7 @@ def _check_inconsistent_state_combination(doc: dict[str, Any]) -> bool:
 def _calculate_overview_state(doc: dict[str, Any]) -> str:
     """
     Deterministically derive overview.state from 4 status axes in priority order per §4.4:
+    0: closed (cancelled): task_st == "cancelled" and res_st == "pending" and comp_st in {not_applicable, skipped}
     1: uncertain: (disp_st == "uncertain" and res_st == "pending") or comp_st == "uncertain" or task_st == "unknown"
     2: open: task_st in {created, in_progress} or res_st == "pending" or comp_st in {pending, processing, failed}
     3: closed: task_st in {succeeded, failed, cancelled} and res_st in {succeeded, failed, unavailable} and comp_st in {not_applicable, sent, skipped}
@@ -85,6 +87,10 @@ def _calculate_overview_state(doc: dict[str, Any]) -> str:
     disp_st = doc["dispatch"]["status"]
     res_st = doc["result"]["status"]
     comp_st = doc["completion"]["status"]
+
+    # Priority 0: cancelled closed state
+    if task_st == "cancelled" and res_st == "pending" and comp_st in {"not_applicable", "skipped"}:
+        return "closed"
 
     # Priority 1: uncertain
     if (

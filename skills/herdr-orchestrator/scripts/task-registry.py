@@ -32,6 +32,7 @@ INTERNAL_OPS = (
     "finish-completion",
     "inspect-completion",
     "reset-completion",
+    "cancel",
     "cleanup",
 )
 
@@ -183,6 +184,15 @@ def _cmd_cleanup(_: argparse.Namespace) -> int:
     return _emit_ok({"result": info})
 
 
+def _cmd_cancel(ns: argparse.Namespace) -> int:
+    try:
+        validate_task_id(ns.task_id)
+        doc = registry_ops.cancel_task(ns.task_id, reason=ns.reason)
+    except RegistryError as exc:
+        return _emit_registry_error(exc)
+    return _emit_ok({"task": doc})
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="task-registry.py", description="Internal registry writer")
     sub = parser.add_subparsers(dest="operation", required=True)
@@ -223,6 +233,10 @@ def build_parser() -> argparse.ArgumentParser:
     rec_p.add_argument("--dispatch-outcome", choices=("uncertain", "failed"))
     rec_p.add_argument("--dispatch-reason")
 
+    cancel_p = sub.add_parser("cancel")
+    cancel_p.add_argument("task_id", metavar="task.id")
+    cancel_p.add_argument("--reason", required=True)
+
     return parser
 
 
@@ -241,6 +255,7 @@ def main(argv: list[str] | None = None) -> int:
         "inspect-completion": _cmd_inspect_completion,
         "reset-completion": _cmd_reset_completion,
         "reconcile-dispatch": _cmd_reconcile_dispatch,
+        "cancel": _cmd_cancel,
         "cleanup": _cmd_cleanup,
     }
     return handlers[ns.operation](ns)

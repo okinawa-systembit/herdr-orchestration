@@ -1045,6 +1045,15 @@ def _wait_for_result_terminal(task_id: str, *, timeout_sec: int) -> dict[str, An
     deadline = time.monotonic() + timeout_sec
     while time.monotonic() < deadline:
         doc = registry_ops.get_task(task_id)
+        if doc["task"]["status"] == "cancelled":
+            reason = doc["task"].get("cancel_reason")
+            msg = f"task was cancelled: {reason}" if reason else "task was cancelled"
+            raise HandoffCommandError(
+                "task_cancelled",
+                retryable=False,
+                task_id=task_id,
+                message=msg,
+            )
         if doc["result"]["status"] in TERMINAL_RESULTS:
             return doc
         if doc["dispatch"]["status"] == "pending":

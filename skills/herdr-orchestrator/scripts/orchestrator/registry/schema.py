@@ -134,6 +134,15 @@ def validate_loaded_task(doc: dict[str, Any]) -> None:
     _require_str(task.get("instruction"), label="task.instruction")
     if task.get("status") not in TASK_STATUSES:
         raise RegistryError("invalid_schema", message="invalid task.status")
+    if "cancel_reason" in task and task["cancel_reason"] is not None:
+        cr = _require_str(task["cancel_reason"], label="task.cancel_reason")
+        if len(cr.strip()) > 2000:
+            raise RegistryError("invalid_schema", message="task.cancel_reason exceeds 2000 characters")
+    if "cancelled_by" in task and task["cancelled_by"] is not None:
+        cb = _require_dict(task["cancelled_by"], label="task.cancelled_by")
+        _require_str(cb.get("role"), label="task.cancelled_by.role")
+        _optional_str_or_null(cb.get("pane_id"), label="task.cancelled_by.pane_id")
+        _optional_str_or_null(cb.get("agent_name"), label="task.cancelled_by.agent_name")
 
     _validate_context(doc.get("context"))
     _validate_party(doc.get("requester"), label="requester")

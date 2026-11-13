@@ -159,6 +159,7 @@ claim-completion <task.id>
 finish-completion <task.id> <sent|failed|uncertain|skipped>
 inspect-completion <task.id>
 reset-completion <task.id>
+cancel <task.id>
 cleanup
 ```
 

@@ -62,7 +62,7 @@ install 後は PATH 上の **`herdr-orchestrator`**（`~/.local/bin` → `~/.age
 - タスク委託・提出: `handoff`、`result-submit`（完了時に 1 日 1 回の lazy cleanup を best-effort 実行）
 - 識別子・ロール管理（`HERDR_ENV` 不要）: `identity`（init/show）、`role`（set/show/clear）、`project`（register/show/clear）
 - レジストリ整理（`HERDR_ENV` 不要）: `cleanup-registry`（`--dry-run`, `--json`。完了後 30 日経過タスク・孤立ロックの整理）
-- 復旧・再開: `reconcile-dispatch`、`resume-task`、`reset-completion`、`recover-completion`
+- 復旧・再開: `reconcile-dispatch`、`resume-task`、`reset-completion`、`recover-completion`、`cancel-task`（`HERDR_ENV` 不要）
 
 コマンド一覧およびクラッシュ再起動後のタスク状態確認手順: [references/public-cli.md](references/public-cli.md)（正本は設計 [§6.5](../../docs/herdr-orchestrator/03-task-registry.md#sec-6-5)）。
 

@@ -1,7 +1,7 @@
 # Herdr Orchestrator タスクキャンセル（`cancel-task`）および復旧ランブック 設計書
 
 - **対象 Issue**: [Issue #173](https://github.com/okinawa-systembit/herdr-orchestration/issues/173)
-- **ステータス**: 設計承認
+- **ステータス**: 実装完了（PR #177 にてマージ済み）
 - **関連文書**:
   - [03-task-registry.md](herdr-orchestrator/03-task-registry.md#sec-6-3): Canonical Schema v1・Four-axis State Machine・Mutation Rules・Public CLI Contract（§6.2〜§6.5）
   - [05-completion-and-recovery.md](herdr-orchestrator/05-completion-and-recovery.md#sec-9-13): Completion Eligibility（§9.13）および Completion Reset 受理条件（§9.14）
@@ -174,7 +174,8 @@ herdr-orchestrator cancel-task <task_id> --reason "<理由>" [--json]
 
 | 検証条件                                                               | エラーコード        | 終了コード                                | 説明                                                                           |
 | ---------------------------------------------------------------------- | ------------------- | ----------------------------------------- | ------------------------------------------------------------------------------ |
-| `task_id` 形式不正、`--reason` 空文字・空白のみ・2000 文字超過         | `invalid_input`     | `1`（構文欠落時は `argparse` により `2`） | Registry を変更せず拒否                                                        |
+| `task_id` 形式不正                                                     | `invalid_task_id`   | `1`                                       | Registry を変更せず拒否                                                        |
+| `--reason` 空文字・空白のみ・2000 文字超過                             | `invalid_input`     | `1`（構文欠落時は `argparse` により `2`） | Registry を変更せず拒否                                                        |
 | 対象タスク JSON が存在しない                                           | `task_not_found`    | `1`                                       | Registry を変更せず拒否                                                        |
 | `task.status ∉ {in_progress, unknown}`（`created` または既に終端状態） | `registry_conflict` | `1`                                       | `created` は `reconcile-dispatch` を案内。終端状態は再遷移・二重キャンセル不可 |
 | `completion.status == "processing"`                                    | `registry_conflict` | `1`                                       | 進行中の completion との競合を防止                                             |
