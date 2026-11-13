@@ -29,6 +29,7 @@
 - [ワークスペース跨ぎ配送・グローバルロール・日本語ロール名・ペイン自動追従 設計書 (Issue #74, #151)](herdr-orchestrator-cross-workspace.md): 別ワークスペース専任エージェント連携、Non-Git 対応、日本語ロール名、ペイン自動追従、プロジェクトカタログと `--project` によるプロジェクト跨ぎ配送、人間向け UI 識別表示
 - [Task Registry クリーンアップ機構 設計書 (Issue #157)](herdr-orchestrator-task-registry-cleanup.md): `result-submit` からの lazy cleanup 自動接続、`doctor` による蓄積状況の可視化、手動管理 CLI `cleanup-registry`、2 段階判定とロックファイル残存解消、および 30 日保護ガードレール
 - [タスクキャンセル（`cancel-task`）および復旧ランブック 設計書 (Issue #173)](herdr-orchestrator-task-cancellation.md): 予約済み `cancelled` 状態を有効化する `cancel-task` 公開 CLI、監査フィールド（`cancel_reason` / `cancelled_by`）、および Worker 途中停止時の Requester 向け復旧ランブック
+- [`doctor` での stale `in_progress` タスク検出・要確認一覧（`await_human`）設計書 (Issue #174)](herdr-orchestrator-doctor-stale-in-progress.md): 強い信号（worktree 不在・Worker ペイン非生存）と弱い信号（経過時間閾値）による読み取り専用の `stale_in_progress` 診断出力および `cancel-task` 連携
 
 ## 基本方針
 
