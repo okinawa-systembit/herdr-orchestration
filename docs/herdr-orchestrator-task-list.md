@@ -332,7 +332,7 @@ canonical schema v1 から次のキーだけを射影する。キーが Registry
 | `timestamps.created_at` / `timestamps.updated_at`                       |                                               |
 | `overview.state` / `overview.warnings`                                  | 派生値（[§4.4](#44-派生分類-overviewstate)）  |
 
-`dispatch.reason` / `completion.reason` は自由記述を含み得るため一覧には含めない。`handoff_execution` は診断用 best-effort 記録（[§6.2](herdr-orchestrator/03-task-registry.md#sec-6-2)）であり、一覧には含めない。
+`dispatch.reason` / `completion.reason` は自由記述を含み得るため一覧には含めない（`list_format_version: 1` の後方互換性を維持し、詳細な `completion.reason` の確認は `task-status` または `doctor` の `skipped_completion` で行う）。`handoff_execution` は診断用 best-effort 記録（[§6.2](herdr-orchestrator/03-task-registry.md#sec-6-2)）であり、一覧には含めない。
 
 ### 4.4 派生分類 `overview.state`
 
@@ -388,10 +388,11 @@ Issue #62 の受け入れ条件「完了済み・未完了・不確定な task �
    - `open` であっても worker が現在稼働中とは限らない。`task.status=in_progress` のまま worker が失われている可能性がある（[§7](#7-クラッシュ後の利用シナリオ)）。
    - 分類規則を変更する場合は `list_format_version` を上げる。
 
-`overview.warnings` は task 単位の注意事項を列挙する。MVP で定義する値は次の2点とする。
+`overview.warnings` は task 単位の注意事項を列挙する。定義する値は次の 3 点とする。
 
 - `created_at_unparseable`: `timestamps.created_at` を ISO 8601 時刻として解析できなかった場合。
-- `inconsistent_state_combination`: 4軸状態の組み合わせが不変条件 I1〜I7 のいずれかに違反している場合。
+- `inconsistent_state_combination`: 4軸状態の組み合わせが不変条件 I1〜I7 のいずれかに違反している場合（構造不整合であり、正常完了扱いを禁止する）。
+- `completion_skipped`: 回復可能な `completion.status = "skipped"`（`is_recoverable_skipped_completion` が真、詳細: [completion.status=skipped 可視化設計書](herdr-orchestrator-skipped-completion.md)）。タスク自体は終端化しており 4 軸の構造不整合ではないため `overview.state` は `closed` を維持するが、Requester への通知が未達である要確認状態を示す。
 
 ---
 
