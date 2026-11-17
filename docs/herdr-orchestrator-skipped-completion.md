@@ -1,7 +1,7 @@
 # Herdr Orchestrator `completion.status=skipped` 可視化（`doctor` / `task-list` / `result-submit`）設計書
 
 - **対象 Issue**: [Issue #183](https://github.com/okinawa-systembit/herdr-orchestration/issues/183)
-- **ステータス**: 設計中
+- **ステータス**: 設計承認
 - **関連文書**:
   - [05-completion-and-recovery.md](herdr-orchestrator/05-completion-and-recovery.md#sec-9-4): Requester 状態による `completion.status=skipped` 遷移（§9.4）および復旧設計（§9.5, §9.13, §9.14）
   - [herdr-orchestrator-task-list.md](herdr-orchestrator-task-list.md#43-task-要素のフィールド): `task-list` 射影仕様（§4.3）および `overview.warnings`（§4.4）
@@ -130,6 +130,8 @@ completion.action == "resume_requester"
         "result_ref": "docs/reviews/internal/inst_xxx/RV100.md",
         "completion_reason": "requester_working",
         "recovery_count": 0,
+        "repository_identity": "4f1c2d3e-5a6b-4c7d-8e9f-0a1b2c3d4e5f",
+        "worktree_path": "/home/user/Gitrepo/other-repo",
         "requester_role": "メイン",
         "requester_agent_name": "w16:p1",
         "updated_at": "2026-11-17T01:00:00+00:00",
@@ -138,7 +140,7 @@ completion.action == "resume_requester"
     ],
     "guidance": [
       "まず `herdr-orchestrator task-result <task_id>` で結果を確認し、Requester 側で別経路（チャット等）により既に処理済みであれば何もしないでください（30 日経過後に自動整理されます）。",
-      "未処理かつ Requester ペインが idle / done になっている場合は、人間が `herdr-orchestrator recover-completion <task_id>` を実行してください（Requester / Worker 自身のターン内実行は再び skipped になります）。"
+      "未処理かつ Requester ペインが idle / done になっている場合は、人間が Requester 以外の `HERDR_ENV=1` が有効な Herdr ペインから `herdr-orchestrator recover-completion <task_id>` を実行してください（Requester / Worker 自身のターン内実行は再び skipped になり、HERDR_ENV≠1 環境ではエラーになります）。"
     ]
   },
   "outdated_role_bindings": [],
@@ -156,6 +158,8 @@ completion.action == "resume_requester"
 | `result_ref`           | `string` \| `null` | `result.ref`                                     |
 | `completion_reason`    | `string` \| `null` | `completion.reason`（例: `"requester_working"`） |
 | `recovery_count`       | `integer`          | `completion.recovery_count`                      |
+| `repository_identity`  | `string`           | `context.repository.identity`                    |
+| `worktree_path`        | `string` \| `null` | `context.worktree.path`                          |
 | `requester_role`       | `string` \| `null` | `requester.role`                                 |
 | `requester_agent_name` | `string` \| `null` | `requester.agent_name`                           |
 | `updated_at`           | `string`           | `timestamps.updated_at`（ISO 8601）              |
