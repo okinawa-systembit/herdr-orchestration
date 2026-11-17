@@ -468,6 +468,13 @@ def result_submit(
         chain = best_effort_completion_after_result(task_id)
         if chain.get("attempted"):
             payload["completion_chain"] = chain
+        if chain.get("completion", {}).get("status") == "skipped":
+            reason = chain.get("completion", {}).get("reason") or "unknown"
+            print(
+                f"[herdr-orchestrator] warning: completion skipped ({reason}); "
+                f"requester was not notified. Human: run 'recover-completion {task_id}' after requester becomes idle.",
+                file=sys.stderr,
+            )
         try:
             registry_ops.cleanup_tasks(nonblocking=True, ignore_rate_limit=False)
         except Exception as exc:
