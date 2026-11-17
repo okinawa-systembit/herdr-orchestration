@@ -222,7 +222,7 @@ herdr-orchestrator task-list --worktree "$(git rev-parse --show-toplevel)"
 1. `herdr-orchestrator task-list --worktree "$(git rev-parse --show-toplevel)"` を実行する（`HERDR_ENV=1` ペイン内）。
 2. `exit = 0` かつ `complete=true` で正常取得。`exit = 3` の場合は一部ファイルが破損（`anomalies` を人間に報告）。
 3. `truncated=true` の場合は最大件数で切り詰められているため、対象タスクが見当たらない場合でも `truncated=false` でない限り不存在と断定せず、`--limit` を増やすかフィルタ条件（`--status` 等）で絞り込んで再実行する。
-4. 各タスクの `overview.warnings` を必ず確認。`inconsistent_state_combination` が付与されている場合は、`overview.state` が `closed` であっても正常完了とみなさず、状態不整合として人間に報告する。なお、`completion_skipped` は状態不整合ではなく「タスク自体は終端化しており、Requester への完了通知だけがスキップされた要確認状態」を示す。
+4. 各タスクの `overview.warnings` を必ず確認。`inconsistent_state_combination` が付与されている場合は、`overview.state` が `closed` であっても正常完了とみなさず、状態不整合として人間に報告する。なお、`completion_skipped` は状態不整合ではなく「タスク自体は終端化しており、Requester への完了通知だけがスキップされた要確認状態」を示す（Requester / Worker Agent 自身による `recover-completion` 実行は禁止し、人間による確認または Requester 側での `task-result` 参照へ誘導する）。
 5. `open` / `uncertain` や警告ありのタスクは `task-status <task-id>` で詳細を確認し、次の操作を判断する。
 
 ### 5.3 結果の提出 (`result-submit`)
