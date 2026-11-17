@@ -50,6 +50,7 @@ herdr-orchestrator doctor
 正常時は終了コード 0 で診断 JSON が出力されます。セッション外で実行した場合は `herdr_env: false` となり終了コード 1 が返ります。
 診断 JSON の `registry_cleanup` フィールドには、全リポジトリ共有の Task Registry における総タスク数（`total_tasks`）、完了から 30 日以上経過して削除対象となるタスク件数（`eligible_count`）およびリポジトリ別内訳（`eligible_by_repository`）、孤立ロックファイル数（`orphan_lock_files_count`）、前回クリーンアップ日時（`last_cleanup_at`）が含まれます。
 また、`stale_in_progress` フィールド（`action: "await_human"`）には `task.status ∈ {in_progress, unknown}` かつ `result.status == "pending"` のうち、worktree 不在や Worker ペイン非生存・別用途転用などの強い信号（`signal_strength: "strong"`）または経過時間超過の弱い信号（`signal_strength: "weak"`、既定 86400 秒、環境変数 `HERDR_ORCHESTRATOR_STALE_IN_PROGRESS_SEC` で上書き可）に該当する要確認候補が読み取り専用で報告されます（候補の有無は終了コードに影響しません）。
+さらに、`skipped_completion` フィールド（`action: "await_human"`）には、タスク自体は終端化しているものの Requester 状態等により完了通知がスキップされた回復対象タスク（`completion.action == "resume_requester"` かつ `completion.status == "skipped"`、初回配送失敗による終端を除く）が `updated_at` 降順で報告されます（[Issue #183 設計書](../../../docs/herdr-orchestrator-skipped-completion.md)）。
 
 ### 2.2 リポジトリ識別子の初期化 (`identity init` / `identity show`)
 
@@ -221,7 +222,7 @@ herdr-orchestrator task-list --worktree "$(git rev-parse --show-toplevel)"
 1. `herdr-orchestrator task-list --worktree "$(git rev-parse --show-toplevel)"` を実行する（`HERDR_ENV=1` ペイン内）。
 2. `exit = 0` かつ `complete=true` で正常取得。`exit = 3` の場合は一部ファイルが破損（`anomalies` を人間に報告）。
 3. `truncated=true` の場合は最大件数で切り詰められているため、対象タスクが見当たらない場合でも `truncated=false` でない限り不存在と断定せず、`--limit` を増やすかフィルタ条件（`--status` 等）で絞り込んで再実行する。
-4. 各タスクの `overview.warnings` を必ず確認。`inconsistent_state_combination` が付与されている場合は、`overview.state` が `closed` であっても正常完了とみなさず、状態不整合として人間に報告する。
+4. 各タスクの `overview.warnings` を必ず確認。`inconsistent_state_combination` が付与されている場合は、`overview.state` が `closed` であっても正常完了とみなさず、状態不整合として人間に報告する。なお、`completion_skipped` は状態不整合ではなく「タスク自体は終端化しており、Requester への完了通知だけがスキップされた要確認状態」を示す。
 5. `open` / `uncertain` や警告ありのタスクは `task-status <task-id>` で詳細を確認し、次の操作を判断する。
 
 ### 5.3 結果の提出 (`result-submit`)
@@ -242,6 +243,7 @@ herdr-orchestrator result-submit <task_id> \
 ```
 
 - **自動 lazy cleanup**: `result-submit` 完了時、バックグラウンドで 1 日 1 回、完了後 30 日以上経過した古いタスクおよび孤立ロックファイルの非ブロッキングクリーンアップ（[§6.8](../../../docs/herdr-orchestrator/03-task-registry.md#sec-6-8)）が best-effort で実行されます。クリーンアップが失敗した場合でも警告を標準エラー出力するのみで、結果提出自体の成功は維持されます。
+- **完了通知スキップ時の標準エラー警告**: `result-submit` 内の best-effort completion で `completion_chain.completion.status == "skipped"` となった場合、標準出力 JSON は変更せず `stderr` へ `[herdr-orchestrator] warning: completion skipped (<reason>); requester was not notified. ...` の 1 行警告を出力します。
 
 ### 5.4 結果の読み取り (`task-result`)
 

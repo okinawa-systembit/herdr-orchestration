@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from orchestrator.errors import emit_error
+from orchestrator.registry import operations as registry_ops
 from orchestrator.registry.errors import RegistryError
 from orchestrator.registry.listing import read_task_candidates
 
@@ -237,6 +238,9 @@ def run_task_list(
 
         if _check_inconsistent_state_combination(doc):
             warnings.append("inconsistent_state_combination")
+
+        if registry_ops.is_recoverable_skipped_completion(doc):
+            warnings.append("completion_skipped")
 
         overview_state = _calculate_overview_state(doc)
         projected = _project_task(doc, overview_state=overview_state, warnings=warnings)

@@ -85,6 +85,7 @@ def run_doctor() -> tuple[dict[str, Any], int]:
     weak_count = sum(
         1 for c in in_progress_candidates if c.get("signal_strength") == "weak"
     )
+    skipped_candidates = registry_ops.find_skipped_completion_candidates()
 
     try:
         cleanup_status = registry_ops.inspect_cleanup_status()
@@ -112,6 +113,17 @@ def run_doctor() -> tuple[dict[str, Any], int]:
             "guidance": [
                 "strong_signal のタスクは Worker ペインまたは worktree が失われているため、事実確認の上で `herdr-orchestrator cancel-task <task_id> --reason \"<理由>\"` による終端化、または同一ペイン生存時は `result-submit --result-status unavailable` を検討してください（Issue #173）。",
                 "weak_signal のみのタスクは正常な長時間実行の可能性があるため、自動キャンセルせず `herdr-orchestrator task-status <task_id>` や対象ペインの状態を確認してください。",
+            ],
+        },
+        "skipped_completion": {
+            "action": "await_human",
+            "summary": {
+                "total_candidates": len(skipped_candidates),
+            },
+            "candidates": skipped_candidates,
+            "guidance": [
+                "まず `herdr-orchestrator task-result <task_id>` で結果を確認し、Requester 側で別経路（チャット等）により既に処理済みであれば何もしないでください（30 日経過後に自動整理されます）。",
+                "未処理かつ Requester ペインが idle / done になっている場合は、人間が Requester 以外の `HERDR_ENV=1` が有効な Herdr ペインから `herdr-orchestrator recover-completion <task_id>` を実行してください（Requester / Worker 自身のターン内実行は再び skipped になり、HERDR_ENV≠1 環境ではエラーになります）。",
             ],
         },
         "outdated_role_bindings": _find_outdated_role_bindings(),

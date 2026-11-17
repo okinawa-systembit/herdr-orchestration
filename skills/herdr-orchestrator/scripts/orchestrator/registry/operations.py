@@ -363,6 +363,86 @@ def find_stale_in_progress_candidates(
     return candidates
 
 
+def is_recoverable_skipped_completion(doc: Any) -> bool:
+    """
+    Single source-of-truth predicate for recoverable completion.status == "skipped" (Issue #183).
+    Distinguishes notification-skipped terminal tasks from initial dispatch failures.
+    """
+    if not isinstance(doc, dict):
+        return False
+    task = doc.get("task")
+    dispatch = doc.get("dispatch")
+    result = doc.get("result")
+    completion = doc.get("completion")
+    if not (
+        isinstance(task, dict)
+        and isinstance(dispatch, dict)
+        and isinstance(result, dict)
+        and isinstance(completion, dict)
+    ):
+        return False
+    if _is_initial_dispatch_failure_terminal(doc):
+        return False
+    return (
+        completion.get("action") == "resume_requester"
+        and completion.get("status") == "skipped"
+        and dispatch.get("status") in ("sent", "uncertain")
+        and task.get("status") in ("succeeded", "failed")
+        and result.get("status") in ("succeeded", "failed", "unavailable")
+    )
+
+
+def find_skipped_completion_candidates(*, now: datetime | None = None) -> list[dict[str, Any]]:
+    """
+    List recoverable completion.status == "skipped" tasks for doctor (Issue #183).
+    Completely read-only, sorted by timestamps.updated_at descending, and uses no external CLI.
+    """
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+
+    root = tasks_dir()
+    if not root.exists() or not root.is_dir():
+        return []
+
+    matched: list[tuple[datetime, str, dict[str, Any]]] = []
+    for path in sorted(root.glob("task_*.json")):
+        if path.name.endswith(".json.lock"):
+            continue
+        try:
+            doc = io.read_task_document(path.stem)
+            if not is_recoverable_skipped_completion(doc):
+                continue
+            updated_at_raw = doc["timestamps"]["updated_at"]
+            updated = _parse_registry_timestamp(updated_at_raw)
+        except Exception:
+            continue
+
+        task_id = doc["task"]["id"]
+        age_sec = (current - updated).total_seconds()
+        candidate = {
+            "task_id": task_id,
+            "task_type": doc["task"]["type"],
+            "task_mode": doc["task"]["mode"],
+            "task_status": doc["task"]["status"],
+            "result_status": doc["result"]["status"],
+            "result_ref": doc["result"].get("ref"),
+            "completion_reason": doc["completion"].get("reason"),
+            "recovery_count": doc["completion"].get("recovery_count", 0),
+            "repository_identity": doc["context"]["repository"]["identity"],
+            "worktree_path": doc["context"]["worktree"].get("path"),
+            "requester_role": doc["requester"].get("role"),
+            "requester_agent_name": doc["requester"].get("agent_name"),
+            "updated_at": updated_at_raw,
+            "age_sec": round(age_sec, 3),
+        }
+        matched.append((updated, task_id, candidate))
+
+    matched.sort(key=lambda item: item[1])
+    matched.sort(key=lambda item: item[0], reverse=True)
+    return [item[2] for item in matched]
+
+
 def repair_missing_prompt_started_at(task_id: str) -> dict[str, Any]:
     """§6.13 B': record herdr_prompt_started_at under Registry lock when worker trace exists."""
 
