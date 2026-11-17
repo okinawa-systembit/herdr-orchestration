@@ -177,7 +177,7 @@ completion.action=resume_requester なら
 
 completion は結果そのものではない。
 
-初回 completion の起動責任は worker ではなく `herdr-orchestrator` が担う。`completion.action=none` / `not_applicable`、worker 未受領で `completion.status=skipped` 確定済みの task では completion を起動しない（[§9.13](#sec-9-13)・[§9.14](#sec-9-14)）。`resume-task` は **durable result 確定後**の連鎖失敗・completion `failed` / `uncertain` / requester 状態による `skipped` の明示再試行用とする。初回 `dispatch=failed|skipped` から `reset-completion` で completion だけ `pending` に戻して requester へ送る経路は **許可しない**。
+初回 completion の起動責任は worker ではなく `herdr-orchestrator` が担う。`completion.action=none` / `not_applicable`、worker 未受領で `completion.status=skipped` 確定済みの task では completion を起動しない（[§9.13](#sec-9-13)・[§9.14](#sec-9-14)）。`resume-task` は **durable result 確定後**かつ `completion.status = pending` のタスクに対する明示再試行用とする。completion `failed` / `uncertain` や requester 状態による `skipped` に対して直接 `resume-task` は実行できないため、`recover-completion`（または `reset-completion` → `resume-task`）を使用する（[§9.14](#sec-9-14)）。初回 `dispatch=failed|skipped` から `reset-completion` で completion だけ `pending` に戻して requester へ送る経路は **許可しない**。
 
 `result-submit` が dispatch 未確定で拒否された場合、completion は起動しない。dispatch 確定後に result が Registry へ登録されて初めて completion 連鎖の対象になる（早着 result の再登録は [§10.2](06-results-and-workflows.md#sec-10-2)）。
 
