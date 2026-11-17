@@ -1,7 +1,7 @@
 # Herdr Orchestrator `completion.status=skipped` 可視化（`doctor` / `task-list` / `result-submit`）設計書
 
 - **対象 Issue**: [Issue #183](https://github.com/okinawa-systembit/herdr-orchestration/issues/183)
-- **ステータス**: 実装中
+- **ステータス**: 実装完了（PR #187 にてマージ済み）
 - **関連文書**:
   - [05-completion-and-recovery.md](herdr-orchestrator/05-completion-and-recovery.md#sec-9-4): Requester 状態による `completion.status=skipped` 遷移（§9.4）および復旧設計（§9.5, §9.13, §9.14）
   - [herdr-orchestrator-task-list.md](herdr-orchestrator-task-list.md#43-task-要素のフィールド): `task-list` 射影仕様（§4.3）および `overview.warnings`（§4.4）
