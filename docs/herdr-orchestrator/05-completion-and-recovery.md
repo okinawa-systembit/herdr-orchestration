@@ -150,7 +150,7 @@ completion.status = skipped
 `skipped` は必ずしも task failure を意味せず、安全上 completion action を実行しなかったことを意味する。理由は `completion.reason` に記録する。
 
 async review の `resume_requester` が `skipped` になった場合も durable result を保持する。
-人間は Herdr の Space / Agent state marker または repository 固有 workflow のチャット出力から状態を確認する。
+人間は Herdr の Space / Agent state marker、`herdr-orchestrator doctor`（`skipped_completion` 一覧）、`herdr-orchestrator task-list`（`overview.warnings` の `completion_skipped`）、または repository 固有 workflow のチャット出力から状態を確認する（詳細設計および lazy 自動再配送・`result-submit` 内リトライ等の P1 案を不採用とした理由は [completion.status=skipped 可視化設計書](../herdr-orchestrator-skipped-completion.md#sec-2-2) を参照）。
 
 ---
 

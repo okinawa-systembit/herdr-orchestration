@@ -332,7 +332,7 @@ canonical schema v1 から次のキーだけを射影する。キーが Registry
 | `timestamps.created_at` / `timestamps.updated_at`                       |                                               |
 | `overview.state` / `overview.warnings`                                  | 派生値（[§4.4](#44-派生分類-overviewstate)）  |
 
-`dispatch.reason` / `completion.reason` は自由記述を含み得るため一覧には含めない。`handoff_execution` は診断用 best-effort 記録（[§6.2](herdr-orchestrator/03-task-registry.md#sec-6-2)）であり、一覧には含めない。
+`dispatch.reason` / `completion.reason` は自由記述を含み得るため一覧には含めない（`list_format_version: 1` の後方互換性を維持し、詳細な `completion.reason` の確認は `task-status` または `doctor` の `skipped_completion` で行う）。`handoff_execution` は診断用 best-effort 記録（[§6.2](herdr-orchestrator/03-task-registry.md#sec-6-2)）であり、一覧には含めない。
 
 ### 4.4 派生分類 `overview.state`
 
@@ -388,10 +388,11 @@ Issue #62 の受け入れ条件「完了済み・未完了・不確定な task �
    - `open` であっても worker が現在稼働中とは限らない。`task.status=in_progress` のまま worker が失われている可能性がある（[§7](#7-クラッシュ後の利用シナリオ)）。
    - 分類規則を変更する場合は `list_format_version` を上げる。
 
-`overview.warnings` は task 単位の注意事項を列挙する。MVP で定義する値は次の2点とする。
+`overview.warnings` は task 単位の注意事項を列挙する。定義する値は次の 3 点とする。
 
 - `created_at_unparseable`: `timestamps.created_at` を ISO 8601 時刻として解析できなかった場合。
-- `inconsistent_state_combination`: 4軸状態の組み合わせが不変条件 I1〜I7 のいずれかに違反している場合。
+- `inconsistent_state_combination`: 4軸状態の組み合わせが不変条件 I1〜I7 のいずれかに違反している場合（構造不整合であり、正常完了扱いを禁止する）。
+- `completion_skipped`: 回復可能な `completion.status = "skipped"`（`is_recoverable_skipped_completion` が真、詳細: [completion.status=skipped 可視化設計書](herdr-orchestrator-skipped-completion.md)）。タスク自体は終端化しており 4 軸の構造不整合ではないため `overview.state` は `closed` を維持するが、Requester への通知が未達である要確認状態を示す。
 
 ---
 
@@ -602,20 +603,21 @@ Registry 外の主体が非 atomic に直接書き込んだ途中のファイル
    - 各 task について `overview.warnings` を必ず確認する。`inconsistent_state_combination` の警告が付与された task は、`overview.state` が `closed` であっても **正常完了とみなしてはならない**。`created_at_unparseable` のみを持つ task は、状態遷移自体に問題はないがソート順が不確定な旨を把握しておく。
    - `overview.state` が `open` / `uncertain` の task、および `overview.warnings` が空でない task について `task-status <task-id>` / `task-result <task-id>` で詳細を確認する。
 9. **報告と判断**:
-   - 確定済み（`inconsistent_state_combination` 警告なしの `closed`。`created_at_unparseable` がある場合はソート順不確かの注記を添える）・未完了（`open`）・不確定（`uncertain`）・状態不整合（`inconsistent_state_combination` 警告あり）の各 task を利用者へ報告する。
-   - 利用者の判断または既存の運用ルールに従い、継続（`result-submit` 待ち・`recover-completion` 等）・放棄・新規 handoff を選ぶ。
+   - 確定済み（`inconsistent_state_combination` 警告なしの `closed`。`created_at_unparseable` がある場合はソート順不確かの注記を添える）・未完了（`open`）・不確定（`uncertain`）・状態不整合（`inconsistent_state_combination` 警告あり）・通知スキップ（`completion_skipped` 警告あり）の各 task を利用者へ報告する。
+   - 利用者の判断または既存の運用ルールに従い、継続（`result-submit` 待ち・`recover-completion` 等）・放棄・新規 handoff を選ぶ（ただし `completion_skipped` 警告の task に対しては、Agent 自身は `recover-completion` を実行せず §7.2 に従う）。
 
 ### 7.2 分類ごとの読み方
 
-| 典型的な状態                                                                  | `overview.state`                    | 次の確認・操作（すべて人間または明示的な判断を経る）                                                                                 |
-| ----------------------------------------------------------------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `task=created`, `dispatch=pending`                                            | `open`                              | `doctor` の stale dispatch 候補と照合し、[§6.12](herdr-orchestrator/03-task-registry.md#sec-6-12) の `reconcile-dispatch` を検討     |
-| `task=in_progress`, `dispatch=sent`, `result=pending`                         | `open`                              | worker の生存・成果物を確認。worker 消失時は [§10.2](herdr-orchestrator/06-results-and-workflows.md#sec-10-2) の再登録または人間判断 |
-| `task=unknown`, `dispatch=uncertain`                                          | `uncertain`                         | blind resend しない。worker 側の痕跡・成果物を確認                                                                                   |
-| `task=succeeded`, `completion=pending` / `processing` / `failed`              | `open`                              | `recover-completion` / `resume-task` を検討（[§9](herdr-orchestrator/05-completion-and-recovery.md#sec-9)）                          |
-| `completion=uncertain`                                                        | `uncertain`                         | requester への到達を確認してから `reset-completion` を検討                                                                           |
-| `task=succeeded/failed`, `completion=not_applicable/sent/skipped`（警告なし） | `closed`                            | 処理完結済み。必要なら `task-result` で成果物を確認                                                                                  |
-| `overview.warnings` に `inconsistent_state_combination` あり                  | 判定表どおり（`closed` もあり得る） | **正常完了とみなさない**。`task-status` 等で詳細を確認し、人間へ状態不整合を報告して手動判断・再実行を仰ぐ                           |
+| 典型的な状態                                                                                              | `overview.state`                    | 次の確認・操作（すべて人間または明示的な判断を経る）                                                                                                                                                                                                                                 |
+| --------------------------------------------------------------------------------------------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `task=created`, `dispatch=pending`                                                                        | `open`                              | `doctor` の stale dispatch 候補と照合し、[§6.12](herdr-orchestrator/03-task-registry.md#sec-6-12) の `reconcile-dispatch` を検討                                                                                                                                                     |
+| `task=in_progress`, `dispatch=sent`, `result=pending`                                                     | `open`                              | worker の生存・成果物を確認。worker 消失時は [§10.2](herdr-orchestrator/06-results-and-workflows.md#sec-10-2) の再登録または人間判断                                                                                                                                                 |
+| `task=unknown`, `dispatch=uncertain`                                                                      | `uncertain`                         | blind resend しない。worker 側の痕跡・成果物を確認                                                                                                                                                                                                                                   |
+| `task=succeeded`, `completion=pending` / `processing` / `failed`                                          | `open`                              | `recover-completion` / `resume-task` を検討（[§9](herdr-orchestrator/05-completion-and-recovery.md#sec-9)）                                                                                                                                                                          |
+| `completion=uncertain`                                                                                    | `uncertain`                         | requester への到達を確認してから `reset-completion` を検討                                                                                                                                                                                                                           |
+| `task=succeeded/failed`, `completion=not_applicable/sent/skipped`（警告なし: 初回配送失敗・キャンセル等） | `closed`                            | 処理完結済み。必要なら `task-result` で成果物を確認                                                                                                                                                                                                                                  |
+| `overview.warnings` に `completion_skipped` あり                                                          | `closed`                            | `task-result` で結果を確認する。Requester が未処理なら人間へ報告する（または Requester が自分で結果を読む）。**Agent 自身は `recover-completion` を実行しない**（回復は人間が Requester の idle/done 確認後に実行。[設計書 §4.1](herdr-orchestrator-skipped-completion.md#sec-4-1)） |
+| `overview.warnings` に `inconsistent_state_combination` あり                                              | 判定表どおり（`closed` もあり得る） | **正常完了とみなさない**。`task-status` 等で詳細を確認し、人間へ状態不整合を報告して手動判断・再実行を仰ぐ                                                                                                                                                                           |
 
 ### 7.3 重要な制約
 
