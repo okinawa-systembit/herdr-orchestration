@@ -116,6 +116,7 @@ rm -f .input/tmp/pr-body.md
    - 実行前に `herdr-orchestrator role show` で登録ロール名を確認し、`--to <role>`（または `--worker-role <role>`）に指定する。
    - **設計・実装の依頼**: 所要時間が既定の sync 待機時間（1800 秒 / 30 分）を超えうるため、`--mode async` を基本とする。
    - **ローカルレビュー（[repo-review](../repo-review/SKILL.md)、レビュースキル自体の改修検証時は [review-skill-audit](../review-skill-audit/SKILL.md)）・相談（[#discussion](#discussion)）**: `--mode sync` を使用する。
+   - **1:N の相談・ローカルレビュー（複数依頼先への同時配送）**: 1:N の場合に限り `--mode async` で全件配送し、回収は [requester-receive.md（1:N 非同期回収手順）](../../../skills/herdr-orchestrator/references/requester-receive.md#1n-非同期回収手順限定例外) に従う（1:1 は `--mode sync` を維持）。
    - ※ CLI が `git_repository_not_initialized` を返した場合は、自動で `git init` せず [handoff.md](../../../skills/herdr-orchestrator/references/handoff.md) のテンプレートに従いチャットで人間に報告する。
 3. **設計から実装への引き継ぎ（ブランチ積み重ね防止）と PR 最終判定依頼**:
    - PR（設計 PR または実装 PR）が作成された後、PR 上に最終判定コメントを記録する場合は、他のロールがブランチ作業中でない（作業ツリーが `main` で clean である）ことを確認してから `レビュワー` に最終判定コメント投稿を依頼する。
