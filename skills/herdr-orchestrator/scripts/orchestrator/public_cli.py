@@ -90,7 +90,7 @@ PUBLIC_COMMANDS = (
 _COMMAND_HELP: dict[str, str] = {
     "doctor": "環境診断を実行（JSON を標準出力に出力。HERDR_ENV≠1 の場合は終了コード 1）",
     "handoff": "Worker エージェントへタスクを委託（同期または非同期）",
-    "result-submit": "Worker がタスク結果を Registry に提出",
+    "result-submit": "Worker がタスク結果を Registry に提出（--result-ref はローカルの Task Registry に worktree 相対パスを記録するのみで、ファイル内容の読み込み・外部送信は行わない）",
     "task-status": "Task Registry のスナップショットを取得",
     "task-result": "タスクの結果フィールドを取得",
     "task-list": "Task Registry のタスクを一覧取得（読み取り専用）",
@@ -1068,7 +1068,7 @@ def build_parser() -> argparse.ArgumentParser:
             p.add_argument(
                 "--result-ref",
                 default=None,
-                help="成果物への参照パスまたは URI",
+                help="成果物への参照パス（worktree 相対パス文字列をローカル Registry に記録するのみで、内容の読み込みや外部送信は行わない）",
             )
             p.add_argument(
                 "--summary",

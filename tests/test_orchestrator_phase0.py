@@ -114,6 +114,7 @@ class Phase0EnvGuardTests(unittest.TestCase):
 
         submit_help = run_cli("result-submit", "--help", env=self.env_without_herdr()).stdout
         self.assertIn("Worker がタスク結果を Registry に提出", submit_help)
+        self.assertIn("外部送信は行わない", submit_help)
         self.assertIn("対象タスクID", submit_help)
         self.assertIn("タスク結果ステータス", submit_help)
 

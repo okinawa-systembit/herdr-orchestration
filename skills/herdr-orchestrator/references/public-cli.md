@@ -244,6 +244,7 @@ herdr-orchestrator result-submit <task_id> \
 
 - **自動 lazy cleanup**: `result-submit` 完了時、バックグラウンドで 1 日 1 回、完了後 30 日以上経過した古いタスクおよび孤立ロックファイルの非ブロッキングクリーンアップ（[§6.8](../../../docs/herdr-orchestrator/03-task-registry.md#sec-6-8)）が best-effort で実行されます。クリーンアップが失敗した場合でも警告を標準エラー出力するのみで、結果提出自体の成功は維持されます。
 - **完了通知スキップ時の標準エラー警告**: `result-submit` 内の best-effort completion で `completion_chain.completion.status == "skipped"` となった場合、標準出力 JSON は変更せず `stderr` へ `[herdr-orchestrator] warning: completion skipped (<reason>); requester was not notified. ...` の 1 行警告を出力します。
+- **`--result-ref` の扱い（外部送信なし）**: `--result-ref` はローカルの Task Registry に worktree 相対パス文字列を記録するのみで、ファイル内容の読み込みや外部送信は一切行いません。実行環境の安全判定でブロックされた場合は引数を言い換えて回避せず、人間に承認を求めてください。
 
 ### 5.4 結果の読み取り (`task-result`)
 
