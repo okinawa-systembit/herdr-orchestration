@@ -30,5 +30,6 @@ prompt だけを信頼しない。Registry を正本とする。
 - `result-submit` が `registry_conflict`（実行中にタスクがキャンセルされた場合等）で拒否された場合は再試行せず、`task-status <task.id>` でキャンセル状態（`cancel_reason` 等）を確認した上で人間または Requester へ報告して終了する。
 - 手順 6 で作業を開始した後、エラーや入力の不足などで作業を完了せずに中断すると判断した場合は、黙って終了せず理由を `--summary` に書いて提出する（成果物ファイルを worktree に残した場合は `--result-status failed --result-ref <path>`、残していない場合は `--result-status unavailable`）。手順 3〜5 で作業しないと決めた場合はこの対象外とし、既存の手順に従う。
 - `result-submit` 返却 JSON の `completion_chain.completion.status` が `skipped` だった場合、追加のコマンド実行や自力での `recover-completion` 実行（再 `skipped` となるため）は行わず、人間への報告に「completion 通知がスキップされた（`task.id` / 理由: `completion_chain.completion.reason` / Requester に未通知）」旨を 1 行添える（詳細仕様は [§9.4](../../../docs/herdr-orchestrator/05-completion-and-recovery.md#sec-9-4)）。
+- 実行環境の安全判定（例: Cursor の Auto-review）で `result-submit` がブロックされた場合は、引数を言い換えて再試行せず、人間に承認を求める（承認カード等）。人間が `--result-ref` を使わないよう指示した場合に限り、`--summary` 単独（成果物の worktree 相対パスを含める）で提出してよい（[§10](../../../docs/herdr-orchestrator/06-results-and-workflows.md#sec-10) で許容されている提出形）。
 
 CLI: **`herdr-orchestrator`** on PATH（`npm run install:orchestrator-dev` 後。開発・配布で同一）。
