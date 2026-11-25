@@ -60,6 +60,8 @@
   - ローカルとグローバルを兼任するペインで片側を `role clear` した場合、他スコープの残存ロール表示名を維持・再同期し、誤消去を防止（CW-22）。
   - `sync_herdr_pane_label` の実行結果を辞書（`synced`, `action`, `label`, `error`）として返却し、`role set` / `role clear` の JSON 出力で連動状況を可視化。
   - 残存ロール検索時は、未初期化 Git リポジトリからの `role clear --global` 実行時でもクラッシュしないよう例外を安全に捕捉し（CW-23 / RV048 B-1）、解除対象ロールの登録時ディレクトリ（`target_meta.cwd`）を優先してローカルスコープを解決（RV048 P2-1）。
+- **`foreground_cwd` 不在時の `cwd` 挙動確認（[Issue #194 設計書 §9.3](herdr-orchestrator-foreground-cwd-fallback.md#sec-9-3)）**:
+  - 2026-11-25 時点の実装環境（Herdr 0.9.5）では各ペインから `foreground_cwd` が取得できるため、`foreground_cwd` が恒常的に欠落する環境における項目 1（`cwd` 一致確認）および項目 2（エージェント再起動・`cd` 後の `cwd` 追随確認）は**未実施（環境なし）**。対象環境での実機検証時に追記する。
 
 ## 移行（§19）
 

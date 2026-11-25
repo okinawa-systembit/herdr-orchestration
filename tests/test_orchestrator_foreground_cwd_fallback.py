@@ -388,6 +388,12 @@ class ForegroundCwdFallbackTests(unittest.TestCase):
         self.assertEqual(r_h_strict.returncode, 1)
         self.assertEqual(json.loads(r_h_strict.stdout)["error"], "handoff_not_continuable")
         self.assertEqual(self._read_prompt_log(), [])
+        created_tasks = list(self._tasks_dir().glob("task_*.json"))
+        self.assertEqual(len(created_tasks), 1)
+        self.assertEqual(
+            json.loads(created_tasks[0].read_text(encoding="utf-8"))["task"]["status"],
+            "created",
+        )
 
         # 3. Handoff under default mode, then task-status & result-submit under strict mode
         r_h_ok = self._run_cli("handoff", "--mode", "async", "--to", "レビュワー", "--instruction", "work")
