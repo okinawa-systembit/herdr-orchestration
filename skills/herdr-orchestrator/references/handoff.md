@@ -75,3 +75,23 @@ Gitの初期化は自動実行していません。
    同一ペインでエージェントが再起動・枠回復可能な場合は、その Worker ペインから `herdr-orchestrator result-submit <task_id> --result-status unavailable --summary "<中断理由>"` を提出させて正規に `failed` 終端化する。なお、`worker_context_unverified` 等で `result-submit` が拒否された場合はフォールバックとして分岐 B へ進む。
 4. **分岐 B: Worker ペイン喪失・worktree 削除・別用途転用等で復帰不能**:
    `herdr-orchestrator cancel-task <task_id> --reason "<中断理由>"` を実行し、`task.status = cancelled`（および必要な場合は `completion.status = skipped`）へ安全に終端化する（30 日経過後に `cleanup-registry` の自動整理対象となる）。
+
+## Orchestrator が使えないときの迂回（縮退）手順
+
+Recovery Runbook は Worker が途中停止した場合の復旧手順であり、本節は Orchestrator 自体のコマンドが使えない場合の迂回手順です。
+
+1. **前提（黙って迂回しない）**: Orchestrator のコマンドが止まったら、まず原因（エラーコード等）を人間にチャットで報告する。人間が了承した場合に限り、Herdr 公式 CLI を使う。
+2. **使うコマンド**: `herdr agent list` / `herdr agent get <pane_id>`（宛先の確認）、`herdr agent prompt <target> "<依頼文>"`（送信）、`herdr agent read <target>`（画面を読む）。
+3. **細部の調べ方**: オプションや挙動の細部は Herdr のバージョンに依存するため、次の公式情報源から確認する（公式 Skill を互換レイヤーとはみなさない。設計 [§20](../../../docs/herdr-orchestrator/09-maintenance-and-roadmap.md#sec-20)）。
+   - `herdr agent --help` / `herdr agent prompt --help`
+   - `herdr --skill`（現在の Herdr release に対応する公式 Skill。`HERDR_ENV=1` が前提）
+   - [https://herdr.dev/llms.txt](https://herdr.dev/llms.txt)
+4. **固有の運用方針（バージョン非依存）**:
+   - **送る前に宛先を確認する**: 宛先の `pane_id` とリポジトリが正しいこと、および**宛先が `idle` / `done` であること**を `herdr agent get` で自ら確認する。`working` / `blocked` / `unknown` の場合は送らず、待つか人間に報告する（設計 [§11.3](../../../docs/herdr-orchestrator/06-results-and-workflows.md#sec-11-3)・[§11.4](../../../docs/herdr-orchestrator/06-results-and-workflows.md#sec-11-4)）。宛先と同じロールを担えそうな別のペインへ、勝手に切り替えない。
+   - **結果の確認**: 結果は通常の成果物や会話（人間の仲介）で確認する。Herdr の `settled`（`idle` / `done`）はタスク完了の根拠にしない（設計 [§7.1](../../../docs/herdr-orchestrator/04-handoff-and-requester.md#sec-7-1)）。
+   - **二重送信の防止**: 送信がタイムアウトや失敗になっても、入力が送られていないとは限らない。再送の前に必ず `herdr agent read` で状態を確認する。
+   - **迂回時の制約**: この迂回では、Task Registry による追跡、sync の結果待ち、`doctor` の検出、および配送前の安全確認（宛先の状態・`pane_id`・リポジトリの検証）が**効かない**。
+5. **依頼先（受け取る側）の扱い**:
+   - 依頼元は、依頼文の先頭に「Orchestrator 迂回依頼（task.id なし）」と明記する。
+   - 依頼先は `task.id` の無い迂回依頼を [worker-receive.md](worker-receive.md) の手順の対象外として扱い、`task-status` / `result-submit` は実行しない。
+   - 依頼先は作業の前に、自分のリポジトリ・作業ディレクトリが依頼文の想定と合っているかを自ら確かめ、合わない場合は作業せず人間に報告する（結果も自分のチャット画面または依頼内容として指定された通常の成果物で報告する）。

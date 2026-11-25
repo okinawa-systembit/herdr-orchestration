@@ -4,6 +4,8 @@
 
 prompt だけを信頼しない。Registry を正本とする。
 
+- ※ `task.id` の無い迂回依頼は本手順の対象外（扱いは [handoff.md（迂回手順）](handoff.md#orchestrator-が使えないときの迂回縮退手順) を参照）。
+
 ## 手順
 
 1. 最小 Task Envelope から `task.id` を取り出す。
