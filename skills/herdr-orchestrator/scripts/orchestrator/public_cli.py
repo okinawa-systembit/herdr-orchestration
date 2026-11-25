@@ -40,6 +40,7 @@ from orchestrator.live_agent import (
     format_pane_display_summary,
     inspect_pane_for_role_set,
     list_live_panes_with_ui,
+    require_foreground_cwd,
     sync_herdr_pane_label,
     verify_live_agent_context,
 )
@@ -89,10 +90,10 @@ PUBLIC_COMMANDS = (
 
 _COMMAND_HELP: dict[str, str] = {
     "doctor": "環境診断を実行（JSON を標準出力に出力。HERDR_ENV≠1 の場合は終了コード 1）",
-    "handoff": "Worker エージェントへタスクを委託（同期または非同期）",
+    "handoff": "Worker エージェントへタスクを委託（同期または非同期。出力に cwd_sources を含む）",
     "result-submit": "Worker がタスク結果を Registry に提出（--result-ref はローカルの Task Registry に worktree 相対パスを記録するのみで、ファイル内容の読み込み・外部送信は行わない）",
-    "task-status": "Task Registry のスナップショットを取得",
-    "task-result": "タスクの結果フィールドを取得",
+    "task-status": "Task Registry のスナップショットを取得（actual_caller.cwd_source を含む）",
+    "task-result": "タスクの結果フィールドを取得（actual_caller.cwd_source を含む）",
     "task-list": "Task Registry のタスクを一覧取得（読み取り専用）",
     "resume-task": "結果確認後、Requester の completion を再開してプロンプト",
     "reset-completion": "再試行のために completion 状態をリセット",
@@ -670,6 +671,16 @@ def _cmd_role(ns: argparse.Namespace) -> int:
 
         # cwd_source は Role Binding JSON には保存せず、CLI 出力および警告にのみ使用する
         cwd_source = target_meta.pop("cwd_source", None)
+        if cwd_source == "pane_cwd" and require_foreground_cwd():
+            emit_command_error(
+                "role_target_foreground_cwd_required",
+                retryable=False,
+                message=(
+                    f"ペイン {valid_pane!r} から foreground_cwd を取得できませんでした"
+                    "（HERDR_ORCHESTRATOR_REQUIRE_FOREGROUND_CWD により厳格モードのため登録を拒否しました）。"
+                ),
+                exit_code=1,
+            )
 
         if is_implicit_pane:
             pane_target_cwd = target_meta.get("cwd") or ""

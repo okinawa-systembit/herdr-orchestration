@@ -35,11 +35,14 @@ class LiveAgentError(Exception):
 
 @dataclass(frozen=True)
 class LiveAgentSnapshot:
+    """Live snapshot of a Herdr pane/agent. `foreground_cwd` holds the observed cwd selected via `cwd_source`."""
+
     name: str
     agent_status: str
     foreground_cwd: Path
     pane_id: str | None
     raw: dict[str, Any]
+    cwd_source: str = "foreground"
     agent: str | None = None
     terminal_id: str | None = None
     agent_session_id: str | None = None
@@ -83,15 +86,64 @@ def _require_dict(value: Any, *, label: str) -> dict[str, Any]:
     return value
 
 
+_WARNED_PANE_CWD_PANES: set[str] = set()
+
+
+def require_foreground_cwd() -> bool:
+    """
+    Read HERDR_ORCHESTRATOR_REQUIRE_FOREGROUND_CWD on every call (not cached).
+    Unset / empty / "0" -> False (fallback allowed).
+    "1" -> True (strict).
+    Any other value -> warn on stderr and treat as strict (True).
+    """
+    raw = os.environ.get("HERDR_ORCHESTRATOR_REQUIRE_FOREGROUND_CWD")
+    if raw is None or raw == "" or raw == "0":
+        return False
+    if raw == "1":
+        return True
+    sys.stderr.write(
+        f"[herdr-orchestrator] warning: invalid HERDR_ORCHESTRATOR_REQUIRE_FOREGROUND_CWD={raw!r}; "
+        "treating as strict (require foreground_cwd).\n"
+    )
+    return True
+
+
+def warn_if_pane_cwd_used(snap: LiveAgentSnapshot) -> None:
+    """Emit a once-per-process-per-pane stderr warning when verification uses cwd_source='pane_cwd'."""
+    if snap.cwd_source != "pane_cwd":
+        return
+    pane_key = (snap.pane_id or snap.name or str(snap.foreground_cwd)).strip()
+    if pane_key in _WARNED_PANE_CWD_PANES:
+        return
+    _WARNED_PANE_CWD_PANES.add(pane_key)
+    sys.stderr.write(
+        f"[herdr-orchestrator] warning: foreground_cwd unavailable for pane {pane_key}; "
+        f"verified with pane cwd {snap.foreground_cwd.resolve()} (cwd_source=pane_cwd).\n"
+    )
+
+
+def resolve_observed_cwd(raw: dict[str, Any]) -> tuple[Path, str]:
+    """
+    Single source of truth for resolving observed cwd and cwd_source from a Herdr pane/agent object.
+    Returns (Path, "foreground" | "pane_cwd").
+    """
+    fg = raw.get("foreground_cwd")
+    if isinstance(fg, str) and fg.strip():
+        path = Path(fg.strip())
+        if not path.is_absolute():
+            raise LiveAgentError("live agent foreground_cwd must be an absolute path")
+        return path, "foreground"
+    pc = raw.get("cwd")
+    if isinstance(pc, str) and pc.strip():
+        path = Path(pc.strip())
+        if not path.is_absolute():
+            raise LiveAgentError("live agent cwd must be an absolute path")
+        return path, "pane_cwd"
+    raise LiveAgentError("live agent cwd unavailable")
+
+
 def _parse_foreground_cwd(agent: dict[str, Any]) -> Path:
-    fg = agent.get("foreground_cwd")
-    if fg is None or (isinstance(fg, str) and not fg.strip()):
-        raise LiveAgentError("live agent foreground_cwd unavailable")
-    if not isinstance(fg, str):
-        raise LiveAgentError("live agent foreground_cwd has invalid type")
-    path = Path(fg)
-    if not path.is_absolute():
-        raise LiveAgentError("live agent foreground_cwd must be an absolute path")
+    path, _ = resolve_observed_cwd(agent)
     return path
 
 
@@ -113,22 +165,27 @@ def _agent_from_herdr_payload(payload: dict[str, Any]) -> LiveAgentSnapshot:
         name = pane_id.strip()
     else:
         raise LiveAgentError("live agent has no name")
-    fg_path = _parse_foreground_cwd(agent)
+    fg_path, cwd_source = resolve_observed_cwd(agent)
+    if cwd_source == "pane_cwd" and require_foreground_cwd():
+        raise LiveAgentError("live agent foreground_cwd unavailable")
     status = agent.get("agent_status")
     if not isinstance(status, str) or not status:
         status = "unknown"
-    return LiveAgentSnapshot(
+    snap = LiveAgentSnapshot(
         name=name,
         agent_status=status,
         foreground_cwd=fg_path,
         pane_id=pane_id,
         raw=agent,
+        cwd_source=cwd_source,
         agent=_extract_optional_str(agent, "agent"),
         terminal_id=_extract_optional_str(agent, "terminal_id"),
         agent_session_id=_extract_session_id(agent),
         workspace_id=_extract_optional_str(agent, "workspace_id"),
         tab_id=_extract_optional_str(agent, "tab_id"),
     )
+    warn_if_pane_cwd_used(snap)
+    return snap
 
 
 def get_caller_live_agent() -> LiveAgentSnapshot:
@@ -592,13 +649,13 @@ def list_live_panes_with_ui() -> list[dict[str, Any]] | None:
         pid = _extract_optional_str(raw_p, "pane_id")
         if not pid:
             continue
-        fg_only = _extract_optional_str(raw_p, "foreground_cwd")
-        pane_cwd_only = _extract_optional_str(raw_p, "cwd")
-        fg_raw = fg_only or pane_cwd_only
-        cwd_source: str | None = (
-            "foreground" if fg_only else ("pane_cwd" if pane_cwd_only else None)
-        )
-        cwd_resolved = str(Path(fg_raw).resolve()) if fg_raw and Path(fg_raw).is_absolute() else fg_raw
+        try:
+            obs_cwd, cwd_source_val = resolve_observed_cwd(raw_p)
+            cwd_resolved: str | None = str(obs_cwd.resolve())
+            cwd_source: str | None = cwd_source_val
+        except LiveAgentError:
+            cwd_resolved = None
+            cwd_source = None
         ws_id = _extract_optional_str(raw_p, "workspace_id")
         tb_id = _extract_optional_str(raw_p, "tab_id")
         ws_info = ws_map.get(ws_id or "", {})
@@ -766,7 +823,7 @@ def inspect_pane_for_role_set(pane_id: str, *, display_name: str, bound_at: str)
         "tab_id": snap.tab_id,
         "tab_number": snap.tab_number,
         "bound_at": bound_at,
-        "cwd_source": "foreground",
+        "cwd_source": snap.cwd_source,
     }
 
 

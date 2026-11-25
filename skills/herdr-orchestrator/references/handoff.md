@@ -17,6 +17,11 @@
 2. **セルフ作業の禁止**:
    - ユーザーから「依頼をして」「委託して」と指示されたタスクについて、依頼元（Requester）ペイン自身で作業（コードレビューや調査・ファイル編集など）を直接セルフ実行してはならない。必ず `handoff` を用いて委託すること。
 
+## 委託後の手順（`foreground_cwd` 不在ペインでの代用報告）
+
+- `handoff` の出力 JSON の `warnings` に `foreground_cwd_unavailable` が含まれている場合、**同じ会話の中で初回だけ**人間に次をチャットで報告する（2 回目以降は報告しない）：
+  - 「`<display_summary>` は `foreground_cwd` が取れないため、pane の `cwd`（`<cwd>`）で代用して配送した」
+
 ## クロスワークスペース配送・スコープ重複・ペイン状態変更時の対応
 
 正本: [herdr-orchestrator-cross-workspace.md](../../../docs/herdr-orchestrator-cross-workspace.md)

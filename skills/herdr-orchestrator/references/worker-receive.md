@@ -23,6 +23,7 @@ prompt だけを信頼しない。Registry を正本とする。
 5. `worker.cwd`（または同一 worktree タスクでは `context.worktree.path`）が自分の環境（`foreground_cwd`）と一致（同一 worktree 内サブディレクトリであれば worktree 親和照合）することを確認（不一致なら作業しない）。
    - `task.status == "cancelled"`（既にキャンセル済み）を観測した場合は作業を開始せず、人間または Requester へ「キャンセル済みタスクであるため作業を中断した」旨を報告して終了する。
 6. 5 まで成功したら `task.instruction`（Registry 正本）に従って作業する。
+   - `foreground_cwd` を返さないペインで実行した場合、標準エラー出力に `cwd_source=pane_cwd` の警告が出ることがあるが、この警告だけを理由に作業を止めず、`recipient_verification.verified` の判定に従う（チャットでの報告も不要）。
 
 ## 結果登録
 

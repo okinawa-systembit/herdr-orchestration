@@ -33,7 +33,7 @@ class LiveAgentTests(unittest.TestCase):
         self.assertEqual(snap.name, "reviewer")
         self.assertEqual(snap.foreground_cwd, Path("/tmp/repo"))
 
-    def test_rejects_cwd_without_foreground_cwd(self) -> None:
+    def test_falls_back_to_cwd_and_rejects_in_strict_mode(self) -> None:
         payload = {
             "result": {
                 "agent": {
@@ -43,8 +43,15 @@ class LiveAgentTests(unittest.TestCase):
                 }
             }
         }
-        with self.assertRaises(LiveAgentError) as ctx:
-            _agent_from_herdr_payload(payload)
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("HERDR_ORCHESTRATOR_REQUIRE_FOREGROUND_CWD", None)
+            snap = _agent_from_herdr_payload(payload)
+        self.assertEqual(snap.foreground_cwd, Path("/tmp/repo"))
+        self.assertEqual(snap.cwd_source, "pane_cwd")
+
+        with patch.dict(os.environ, {"HERDR_ORCHESTRATOR_REQUIRE_FOREGROUND_CWD": "1"}):
+            with self.assertRaises(LiveAgentError) as ctx:
+                _agent_from_herdr_payload(payload)
         self.assertIn("foreground_cwd", str(ctx.exception).lower())
 
     def test_rejects_non_absolute_foreground_cwd(self) -> None:
