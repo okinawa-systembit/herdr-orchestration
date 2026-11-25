@@ -87,7 +87,7 @@ herdr-orchestrator role set 調査担当 --pane w16:p1 --label "調査担当" --
 - `--pane <pane_id>`: 対象ペイン ID（位置引数 `<pane_id>` でも可）。人間が手動実行する場合は省略（環境変数 `HERDR_PANE_ID` を使用）も可能ですが、エージェントが自動実行する場合は常駐プロセス再利用等による環境変数残留を防ぐため、`herdr pane list` で自ペイン（`agent_session` や CWD + agent 種別）を一意に特定し、必ず `--pane` を明示すること（SKILL.md で義務化されています）。一意に定まらない場合は推測せず人間に確認してください。なお、万が一ペイン引数が省略されて環境変数 `HERDR_PANE_ID` から暗黙解決された場合、対象ペインの作業ディレクトリと実行時カレントディレクトリが照合され、不一致時はセーフガード（`env_pane_cwd_mismatch`）により安全停止します（※ ただし本セーフガードが検出できるのは**別ディレクトリや別リポジトリ**のペイン ID が残っている場合のみであり、同一 worktree 内で隣のペインの ID が残っている場合は作業ディレクトリが一致するため CLI 単体では検出できません。そのためエージェントによる自ペイン特定と `--pane` 明示手順が主要な防御となります）。
 - `--global`: 全ワークスペース・全リポジトリ共通のロールとして登録します（`~/.local/state/herdr-orchestrator/roles/global.json` に保存）。
 - `--label <display_name>`: Herdr UI のペイン表示名（タブ上のラベル）を個別に指定します（先頭の `--` は自動除去されます）。
-- 出力 JSON には `label_sync`（同期成否・アクション）、`target.label_synced`（同期成功フラグ）、および `cwd_source`（`"foreground"` または `"pane_cwd"`。Role Binding JSON には保存されない）が含まれます。`foreground_cwd` を取得できずペインの `cwd` を代用して登録した場合は、標準エラー出力に確認を促す警告が出力されます（終了コードは `0` のまま）。
+- 出力 JSON には `label_sync`（同期成否・アクション）、`target.label_synced`（同期成功フラグ）、および `cwd_source`（`"foreground"` または `"pane_cwd"`。Role Binding JSON には保存されない）が含まれます。`foreground_cwd` を取得できずペインの `cwd` を代用して登録した場合は、標準エラー出力に確認を促す警告が出力されます（終了コードは `0` のまま）。厳格モード（`HERDR_ORCHESTRATOR_REQUIRE_FOREGROUND_CWD=1`）有効時は `role_target_foreground_cwd_required` で拒否され、Role Binding は保存されません。
 
 ### 3.2 登録内容とライブ状態の確認 (`role show`)
 
@@ -190,6 +190,8 @@ herdr-orchestrator handoff \
 - `--scope local|global`: ローカルとグローバルで同名ロールが重複している場合にスコープを限定。
 - `--instruction <text>`: Worker Agent への指示本文。
 - `--result-wait-timeout-sec <seconds>`: 同期（`--mode sync`）実行時の完了待機タイムアウト秒数（既定値: 1800 秒 / 30分）。
+- **観測 cwd の出力と警告（`cwd_sources` / `warnings`）**: 出力 JSON には `cwd_sources: {"requester": "foreground" | "pane_cwd", "worker": "foreground" | "pane_cwd"}` が含まれます。`foreground_cwd` が取得できずペインの `cwd`（`pane_cwd`）で代用検証した場合は、1 プロセス・1 ペインにつき 1 回標準エラーに `[herdr-orchestrator] warning: foreground_cwd unavailable for pane <pane_id>; verified with pane cwd <path> (cwd_source=pane_cwd).` が出力され、出力 JSON の `warnings` に `{"code": "foreground_cwd_unavailable", "party": ..., "pane_id": ..., "cwd": ...}` が追加されます。なお、Role Binding なしの Pattern A 依頼先選定では `pane_cwd` を許可せず `worker_unavailable`（`details.reason = "foreground_cwd_required"`）で拒否します。
+- **厳格モード切替（`HERDR_ORCHESTRATOR_REQUIRE_FOREGROUND_CWD`）**: 環境変数 `HERDR_ORCHESTRATOR_REQUIRE_FOREGROUND_CWD` を `1` に設定すると、検証の層および `role set` で `pane_cwd` を一括拒否して従来どおり `foreground_cwd` 必須に戻せます（未設定・空文字・`0` は既定の代用あり）。なお、`HERDR_ORCHESTRATOR_STALE_*` は不正な値を既定値へフォールバックするのに対し、本変数は安全上の切り替えであるため `1` / `0` 以外の不正な値が指定された場合は標準エラーに警告を出力した上で**厳格として扱います**（[設計書 §6](../../../docs/herdr-orchestrator-foreground-cwd-fallback.md#sec-6)）。
 
 ---
 
@@ -201,7 +203,7 @@ herdr-orchestrator handoff \
 herdr-orchestrator task-status <task_id>
 ````
 
-出力 JSON の `recipient_verification` には、現在の呼び出し元ペインが対象タスクの正当な受信者（Worker / Requester）かどうかの照合結果が含まれます。`verified: false` の場合は誤配送防止のため作業を着手してはなりません。
+出力 JSON の `recipient_verification` には、現在の呼び出し元ペインが対象タスクの正当な受信者（Worker / Requester）かどうかの照合結果が含まれ、`actual_caller.cwd_source`（`"foreground"` または `"pane_cwd"`。`task-result` も同様）が出力されます。`pane_cwd` で検証された場合は標準エラーに 1 行警告が出ます。`verified: false` の場合は誤配送防止のため作業を着手してはなりません。
 
 ### 5.2 タスク一覧の参照とクラッシュ再起動後の状態確認手順 (`task-list`)
 

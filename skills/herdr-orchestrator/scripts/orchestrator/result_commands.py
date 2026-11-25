@@ -200,6 +200,7 @@ def build_recipient_verification(doc: dict[str, Any], *, command: str = "task-st
                 "bound_role": worker_role if (worker_role and bound_roles and worker_role in bound_roles.values()) else (bound_role or worker_role),
                 "pane_id": caller_pane,
                 "cwd": str(caller_cwd),
+                "cwd_source": caller.cwd_source,
             }
             if bound_roles:
                 caller_payload["bound_roles"] = bound_roles
@@ -221,6 +222,7 @@ def build_recipient_verification(doc: dict[str, Any], *, command: str = "task-st
                     "bound_roles": bound_roles,
                     "pane_id": caller_pane,
                     "cwd": str(caller_cwd),
+                    "cwd_source": caller.cwd_source,
                 },
                 "message": "このタスクの宛先情報と現在のペインの状態が一致しません。作業を一切行わず、人間へチャットで報告して停止してください。",
             }
@@ -245,6 +247,7 @@ def build_recipient_verification(doc: dict[str, Any], *, command: str = "task-st
                     "bound_role": bound_role or requester_role,
                     "pane_id": caller_pane,
                     "cwd": str(caller_cwd),
+                    "cwd_source": caller.cwd_source,
                 },
             }
         else:
@@ -262,6 +265,7 @@ def build_recipient_verification(doc: dict[str, Any], *, command: str = "task-st
                     "bound_role": bound_role,
                     "pane_id": caller_pane,
                     "cwd": str(caller_cwd),
+                    "cwd_source": caller.cwd_source,
                 },
                 "message": "このタスクの依頼元情報と現在のペインの状態が一致しません。作業を行わず人間へチャットで報告して停止してください。",
             }
@@ -277,6 +281,7 @@ def build_recipient_verification(doc: dict[str, Any], *, command: str = "task-st
                 "bound_role": bound_role,
                 "pane_id": caller_pane,
                 "cwd": str(caller_cwd),
+                "cwd_source": caller.cwd_source,
             },
             "message": "このペインは当タスクの宛先（Worker）でも依頼元（Requester）でもありません。誤配送の可能性があるため、作業を一切行わず人間へチャットで報告して停止してください。",
         }

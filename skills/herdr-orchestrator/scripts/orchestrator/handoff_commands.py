@@ -31,6 +31,7 @@ from orchestrator.live_agent import (
     list_live_panes_with_ui,
     sync_herdr_pane_label,
     verify_live_agent_context,
+    warn_if_pane_cwd_used,
 )
 from orchestrator.naming import derive_requester_role, expected_agent_name
 from orchestrator.role_bindings import (
@@ -148,6 +149,7 @@ def _snapshot_from_pane_dict(p: dict[str, Any]) -> LiveAgentSnapshot:
         foreground_cwd=Path(p["cwd"]).resolve(),
         pane_id=pane_id,
         raw=p.get("raw") or p,
+        cwd_source=p.get("cwd_source") or "foreground",
         agent=p.get("agent"),
         terminal_id=p.get("terminal_id"),
         agent_session_id=p.get("agent_session_id"),
@@ -831,6 +833,7 @@ def _resolve_parties(
         )
         _require_live_pane_id(requester, party="requester")
         wrk_pane = _require_live_pane_id(worker, party="worker")
+        warn_if_pane_cwd_used(worker)
         worker = replace(worker, name=wrk_pane)
         return requester, worker, worktree, identity, requester_role, canonical_worker_role, warnings
 
@@ -936,6 +939,7 @@ def _resolve_parties(
         )
         _require_live_pane_id(requester, party="requester")
         wrk_pane = _require_live_pane_id(worker, party="worker")
+        warn_if_pane_cwd_used(worker)
         worker = replace(worker, name=wrk_pane)
         return requester, worker, worktree, identity, requester_role, canonical_worker_role, warnings
 
@@ -973,6 +977,15 @@ def _resolve_parties(
             message=str(exc),
             details=available_roles_detail,
         ) from exc
+    if worker.cwd_source != "foreground":
+        raise HandoffCommandError(
+            "worker_unavailable",
+            message=(
+                f"Pattern A の依頼先ペイン {worker.pane_id or worker.name!r} から "
+                "foreground_cwd を取得できないため配送できません。"
+            ),
+            details={**available_roles_detail, "reason": "foreground_cwd_required"},
+        )
     _require_live_pane_id(requester, party="requester")
     _require_live_pane_id(worker, party="worker")
     return requester, worker, worktree, identity, requester_role, canonical_worker_role, warnings
@@ -1153,11 +1166,33 @@ def run_handoff(handoff: HandoffInput) -> dict[str, Any]:
         "task_id": task_id,
         "mode": handoff.mode,
         "prompt_sent": prompt_sent,
+        "cwd_sources": {
+            "requester": requester.cwd_source,
+            "worker": worker.cwd_source,
+        },
         "task": copy.deepcopy(doc["task"]),
         "dispatch": copy.deepcopy(doc["dispatch"]),
         "result": copy.deepcopy(doc["result"]),
         "completion": copy.deepcopy(doc["completion"]),
     }
+    if requester.cwd_source == "pane_cwd":
+        warnings.append(
+            {
+                "code": "foreground_cwd_unavailable",
+                "party": "requester",
+                "pane_id": requester.pane_id,
+                "cwd": str(requester.foreground_cwd.resolve()),
+            }
+        )
+    if worker.cwd_source == "pane_cwd":
+        warnings.append(
+            {
+                "code": "foreground_cwd_unavailable",
+                "party": "worker",
+                "pane_id": worker.pane_id,
+                "cwd": str(worker.foreground_cwd.resolve()),
+            }
+        )
     if warnings:
         out["warnings"] = warnings
     if result_wait is not None:

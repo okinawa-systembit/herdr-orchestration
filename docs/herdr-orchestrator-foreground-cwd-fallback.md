@@ -1,7 +1,7 @@
 # Herdr Orchestrator `foreground_cwd` 不在時の `cwd` フォールバック検証 設計書
 
 - **対象 Issue**: [Issue #194](https://github.com/okinawa-systembit/herdr-orchestration/issues/194)（前段: [Issue #193](https://github.com/okinawa-systembit/herdr-orchestration/issues/193)）
-- **ステータス**: 設計承認
+- **ステータス**: 実装中
 - **関連文書**:
   - [06-results-and-workflows.md §11.0](herdr-orchestrator/06-results-and-workflows.md#sec-11-0): Worktree Root 解決（本設計で手順 1 を改訂）
   - [06-results-and-workflows.md §11.1](herdr-orchestrator/06-results-and-workflows.md#sec-11-1): `result-submit` の submit 元照合（本設計で `foreground_cwd` 不在時の扱いを改訂）

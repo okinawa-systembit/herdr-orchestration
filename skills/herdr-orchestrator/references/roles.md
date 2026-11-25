@@ -61,7 +61,7 @@ herdr-orchestrator role show --global
 ```
 
 - 対象ペインでエージェントが起動していない場合は `role_target_agent_not_running` で拒否される。
-- **暫定運用（`foreground_cwd` 不在ペインの扱い）**: `herdr agent get <pane_id>` の応答に `foreground_cwd` が含まれないペインは、`role set` でペインの `cwd` を代用して登録自体は成功するものの（標準エラーに警告、出力 JSON に `cwd_source: "pane_cwd"`）、`cwd` による検証が導入されるまで `handoff` では配送できない。該当する場合は `role clear` で登録を解除し、配送前に止まって `created` のまま残ったタスクは `reconcile-dispatch --dispatch-outcome failed` で終端化すること。
+- **既定と厳格モード（`foreground_cwd` 不在ペインの扱い）**: `foreground_cwd` を返さないペインは、既定ではペインの `cwd` で代用して登録・配送・検証される（`cwd_source: "pane_cwd"`、標準エラー警告および `handoff` 出力の `warnings` で可視化。ただし Role Binding なしの Pattern A 配送では拒否される）。厳格モード（環境変数 `HERDR_ORCHESTRATOR_REQUIRE_FOREGROUND_CWD=1`）を有効にすると、`role set`（`role_target_foreground_cwd_required`）および検証の層で `pane_cwd` を拒否して従来どおりの挙動に戻せる。
 - 旧バージョン（v0.3.1 以前）の `targets` 指紋を持たない Role Binding はサポートされず、`handoff` 実行時に配送前エラー `role_binding_outdated` で停止する（`role show` や `doctor` でも `outdated` として検出される）。対象ペインで再登録（`herdr-orchestrator role set <role> --pane <pane_id> --label "<表示名>"`）を実行すること。
 - Role Binding が未設定の標準4ロール（`design`, `reviewer`, `implementer`, `orchestrator`）では、同一 Git worktree 内の Pattern A 命名（`r-<hash16>-<role>`）による解決へフォールバックする。
 
