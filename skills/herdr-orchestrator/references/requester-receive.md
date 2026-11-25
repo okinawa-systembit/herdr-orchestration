@@ -22,6 +22,7 @@ Orchestrator 側の再開は `resume-task` / `recover-completion` / `result-subm
 - **禁止事項**:
   - Requester 自身のターン内で `recover-completion` を実行しない（実行時点で自分が `working` のため再び `skipped` になる）。回復実行は人間または第三者が Requester の `idle` / `done` 状態を確認してから行う。
   - 下記の 1:N 回収の限定例外を除き、毎ターン終了時の `task-list` 全体走査や定期的なポーリングは行わない。
+- ※ Orchestrator のコマンド自体が使えない場合は [handoff.md（迂回手順）](handoff.md#orchestrator-が使えないときの迂回縮退手順) を参照。
 
 ### 1:N 非同期回収手順（限定例外）
 

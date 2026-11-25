@@ -118,6 +118,7 @@ rm -f .input/tmp/pr-body.md
    - **ローカルレビュー（[repo-review](../repo-review/SKILL.md)、レビュースキル自体の改修検証時は [review-skill-audit](../review-skill-audit/SKILL.md)）・相談（[#discussion](#discussion)）**: `--mode sync` を使用する。
    - **1:N の相談・ローカルレビュー（複数依頼先への同時配送）**: 1:N の場合に限り `--mode async` で全件配送し、回収は [requester-receive.md（1:N 非同期回収手順）](../../../skills/herdr-orchestrator/references/requester-receive.md#1n-非同期回収手順限定例外) に従う（1:1 は `--mode sync` を維持）。
    - ※ CLI が `git_repository_not_initialized` を返した場合は、自動で `git init` せず [handoff.md](../../../skills/herdr-orchestrator/references/handoff.md) のテンプレートに従いチャットで人間に報告する。
+   - ※ Orchestrator のコマンド自体が使えない場合は、まず原因を人間に報告し、了承を得た場合に限り [handoff.md（迂回手順）](../../../skills/herdr-orchestrator/references/handoff.md#orchestrator-が使えないときの迂回縮退手順) に従う。
 3. **設計から実装への引き継ぎ（ブランチ積み重ね防止）と PR 最終判定依頼**:
    - PR（設計 PR または実装 PR）が作成された後、PR 上に最終判定コメントを記録する場合は、他のロールがブランチ作業中でない（作業ツリーが `main` で clean である）ことを確認してから `レビュワー` に最終判定コメント投稿を依頼する。
    - `設計担当` から返却された実装依頼書の下書き（`.input/inbox/implementation-request-issue-<N>.md`）を確認する。
