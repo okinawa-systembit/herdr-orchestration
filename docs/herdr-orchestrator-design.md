@@ -31,7 +31,7 @@
 - [タスクキャンセル（`cancel-task`）および復旧ランブック 設計書 (Issue #173)](herdr-orchestrator-task-cancellation.md): 予約済み `cancelled` 状態を有効化する `cancel-task` 公開 CLI、監査フィールド（`cancel_reason` / `cancelled_by`）、および Worker 途中停止時の Requester 向け復旧ランブック
 - [`doctor` での stale `in_progress` タスク検出・要確認一覧（`await_human`）設計書 (Issue #174)](herdr-orchestrator-doctor-stale-in-progress.md): 強い信号（worktree 不在・Worker ペイン非生存）と弱い信号（経過時間閾値）による読み取り専用の `stale_in_progress` 診断出力および `cancel-task` 連携
 - [`completion.status=skipped` 可視化（`doctor` / `task-list` / `result-submit`）設計書 (Issue #183)](herdr-orchestrator-skipped-completion.md): `is_recoverable_skipped_completion` 単一述語に基づく `doctor` の `skipped_completion`、`task-list` の `completion_skipped` 警告、`result-submit` の stderr 警告および P1 不採用理由
-- [`foreground_cwd` 不在時の `cwd` フォールバック検証と `role set` 登録時の人間確認 設計書 (Issue #194)](herdr-orchestrator-foreground-cwd-fallback.md): 取得元を決める単一関数と `cwd_source`、`pane_cwd` を受け入れる信頼規則（Role Binding・登録 `cwd`・プロセス cwd）、経路別の扱い、`role set --confirm-pane-cwd`、厳格モードの環境変数
+- [`foreground_cwd` 不在時の `cwd` フォールバック検証 設計書 (Issue #194)](herdr-orchestrator-foreground-cwd-fallback.md): 取得元を決める単一関数と `cwd_source`、経路別の扱い（照合は既存のまま、Pattern A のみ拒否）、stderr 警告と出力、厳格モードの環境変数
 
 ## 基本方針
 

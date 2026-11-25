@@ -332,7 +332,6 @@ herdr-orchestrator handoff
 - 任意の `agent send-keys`
 - blocked Agent への承認・質問応答を自動化する操作
 - preview channel への変更や Herdr 自動更新
-- `role set --confirm-pane-cwd`（`foreground_cwd` が無いペインの登録パスを人間が確認したことを示す操作。[foreground_cwd フォールバック設計書 §5](../herdr-orchestrator-foreground-cwd-fallback.md#sec-5)）
 
 <a id="sec-15-5"></a>
 
