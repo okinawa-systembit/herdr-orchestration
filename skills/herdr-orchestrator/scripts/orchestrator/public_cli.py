@@ -670,12 +670,6 @@ def _cmd_role(ns: argparse.Namespace) -> int:
 
         # cwd_source は Role Binding JSON には保存せず、CLI 出力および警告にのみ使用する
         cwd_source = target_meta.pop("cwd_source", None)
-        if cwd_source == "pane_cwd":
-            print(
-                f"[herdr-orchestrator] warning: ペイン {valid_pane!r} から foreground_cwd を取得できなかったため、"
-                f"pane の cwd ({target_meta['cwd']}) で登録しました。表示したパスが実際の作業場所か確認してください。",
-                file=sys.stderr,
-            )
 
         if is_implicit_pane:
             pane_target_cwd = target_meta.get("cwd") or ""
@@ -770,6 +764,12 @@ def _cmd_role(ns: argparse.Namespace) -> int:
             "label_sync": label_sync,
             "roles": roles,
         }
+        if cwd_source == "pane_cwd":
+            print(
+                f"[herdr-orchestrator] warning: ペイン {valid_pane!r} から foreground_cwd を取得できなかったため、"
+                f"pane の cwd ({target_meta['cwd']}) で登録しました。表示したパスが実際の作業場所か確認してください。",
+                file=sys.stderr,
+            )
         return emit_json(out_payload)
     elif action == "show":
         scope_id = _resolve_role_scope_id(cwd, is_global=is_global, create_if_missing=False)
