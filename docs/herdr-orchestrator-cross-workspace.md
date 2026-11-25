@@ -220,20 +220,20 @@ Role Binding は `${XDG_STATE_HOME:-~/.local/state}/herdr-orchestrator/roles/` �
 }
 ```
 
-| フィールド         | 用途区分             | 内容                                                                                                                                                                    |
-| ------------------ | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pane_id`          | **ルーティング正本** | 登録されたペイン ID（例: `w16:p1`）                                                                                                                                     |
-| `cwd`              | **照合・追従指紋**   | 登録時のペインのディレクトリ絶対パス（`foreground_cwd` または `cwd` を `resolve()` したパス）                                                                           |
-| `agent`            | **照合・追従指紋**   | 登録時に稼働していたエージェント種別（`claude`, `agy`, `codex`, `cursor` 等。`HERDR_ENV=1` での `role set` 時は対象ペインでエージェントが起動していることを必須とする） |
-| `terminal_id`      | **照合補助指紋**     | 登録時の `terminal_id`（例: `term_65eef3948ae924`）。※ routing key ではなく「同じターミナル内でエージェントを再起動したか」を判別する指紋                               |
-| `agent_session_id` | **照合・追従指紋**   | 登録時の `agent_session.value`（セッション ID。取得不可時は `null`）。※ routing key ではなくセッション同一性確認の補助指紋                                              |
-| `display_name`     | **人間表示専用**     | Herdr UI ペインラベルおよびチャット報告に表示する人間向け名称（例: `チケット管理`, `ログ調査`, `レビュワー`）                                                           |
-| `workspace_id`     | **人間表示専用**     | Herdr の `workspace_id`（例: `w16`）                                                                                                                                    |
-| `workspace_label`  | **人間表示専用**     | Herdr UI 左サイドバーに表示されるワークスペース名（例: `staff-portal-system`）                                                                                          |
-| `workspace_number` | **人間表示専用**     | Herdr UI 左サイドバーのワークスペース番号（並び順で変化するため照合には使わず表示のみに使用）                                                                           |
-| `tab_id`           | **人間表示専用**     | Herdr の `tab_id`（例: `w16:t1`）                                                                                                                                       |
-| `tab_number`       | **人間表示専用**     | Herdr UI のタブ番号（表示のみに使用）                                                                                                                                   |
-| `bound_at`         | **監査記録用**       | 登録日時（ISO 8601 UTC）                                                                                                                                                |
+| フィールド         | 用途区分             | 内容                                                                                                                                                                                                                                                                                                                                                       |
+| ------------------ | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pane_id`          | **ルーティング正本** | 登録されたペイン ID（例: `w16:p1`）                                                                                                                                                                                                                                                                                                                        |
+| `cwd`              | **照合・追従指紋**   | 登録時のペインのディレクトリ絶対パス（`foreground_cwd` または `cwd` を `resolve()` したパス）。`foreground_cwd` が無く `cwd` で登録する場合（`cwd_source = pane_cwd`）は、`role set --confirm-pane-cwd <path>` で人間が登録パスを確認したときだけ保存する（[foreground_cwd フォールバック設計書 §5](herdr-orchestrator-foreground-cwd-fallback.md#sec-5)） |
+| `agent`            | **照合・追従指紋**   | 登録時に稼働していたエージェント種別（`claude`, `agy`, `codex`, `cursor` 等。`HERDR_ENV=1` での `role set` 時は対象ペインでエージェントが起動していることを必須とする）                                                                                                                                                                                    |
+| `terminal_id`      | **照合補助指紋**     | 登録時の `terminal_id`（例: `term_65eef3948ae924`）。※ routing key ではなく「同じターミナル内でエージェントを再起動したか」を判別する指紋                                                                                                                                                                                                                  |
+| `agent_session_id` | **照合・追従指紋**   | 登録時の `agent_session.value`（セッション ID。取得不可時は `null`）。※ routing key ではなくセッション同一性確認の補助指紋                                                                                                                                                                                                                                 |
+| `display_name`     | **人間表示専用**     | Herdr UI ペインラベルおよびチャット報告に表示する人間向け名称（例: `チケット管理`, `ログ調査`, `レビュワー`）                                                                                                                                                                                                                                              |
+| `workspace_id`     | **人間表示専用**     | Herdr の `workspace_id`（例: `w16`）                                                                                                                                                                                                                                                                                                                       |
+| `workspace_label`  | **人間表示専用**     | Herdr UI 左サイドバーに表示されるワークスペース名（例: `staff-portal-system`）                                                                                                                                                                                                                                                                             |
+| `workspace_number` | **人間表示専用**     | Herdr UI 左サイドバーのワークスペース番号（並び順で変化するため照合には使わず表示のみに使用）                                                                                                                                                                                                                                                              |
+| `tab_id`           | **人間表示専用**     | Herdr の `tab_id`（例: `w16:t1`）                                                                                                                                                                                                                                                                                                                          |
+| `tab_number`       | **人間表示専用**     | Herdr UI のタブ番号（表示のみに使用）                                                                                                                                                                                                                                                                                                                      |
+| `bound_at`         | **監査記録用**       | 登録日時（ISO 8601 UTC）                                                                                                                                                                                                                                                                                                                                   |
 
 > [!NOTE]
 > `terminal_id` および `agent_session_id` は、`herdr agent prompt` の宛先（routing target）としては一切使用せず、`pane_id` で特定されたペインが「同じターミナルのままエージェントを再起動したのか、それともサーバー再起動等で別ペインと入れ替わったのか」を検査する**照合補助指紋**としてのみ使用する（[02-roles-and-task-contract.md §4.2](herdr-orchestrator/02-roles-and-task-contract.md#sec-4-2) の「`agent_session_id` や `terminal_id` を routing identity に転用しない」原則と整合）。
@@ -698,7 +698,8 @@ Requester の `context.worktree.path` と Worker の `worker.cwd` は異なっ�
     "actual_caller": {
       "bound_role": "implementer",
       "pane_id": "w15:p2",
-      "cwd": "/home/kadena/Gitrepo/project-b"
+      "cwd": "/home/kadena/Gitrepo/project-b",
+      "cwd_source": "foreground"
     },
     "message": "このタスクの宛先情報と現在のペインの状態が一致しません。作業を一切行わず、人間へチャットで報告して停止してください。"
   },
@@ -706,7 +707,9 @@ Requester の `context.worktree.path` と Worker の `worker.cwd` は異なっ�
 }
 ```
 
+- **`actual_caller.cwd_source`**: 呼び出し元の cwd の取得元（`"foreground"` = `foreground_cwd`、`"pane_cwd"` = pane の `cwd` で代用）。`pane_cwd` を受け入れる条件は [foreground_cwd フォールバック設計書 §3.3](herdr-orchestrator-foreground-cwd-fallback.md#sec-3-3) を正本とする。
 - **`recipient_verification.reason` の理由コード一覧**:
+  - `caller_cwd_unconfirmed`: 呼び出し元ペインの `foreground_cwd` が無く、pane の `cwd` での検証条件（Role Binding の存在・登録 `cwd` との一致・プロセス cwd との整合）を満たさない。`HERDR_ORCHESTRATOR_REQUIRE_FOREGROUND_CWD=1` の厳格モードでは、従来どおり `caller_live_agent_unavailable` になる（[foreground_cwd フォールバック設計書 §4](herdr-orchestrator-foreground-cwd-fallback.md#sec-4)）。
   - `recipient_role_or_cwd_mismatch`: 対象タスクの `worker` として照合されたが、現在の `cwd` またはロール名がタスク記録と不一致（同一 worktree 親和照合も不一致）。
   - `caller_not_task_participant`: 呼び出し元ペインが当タスクの `worker` でも `requester` でもない無関係なペイン（`caller_role_in_task = "other"`）。
   - `caller_live_agent_unavailable`: Herdr 環境外での実行、または呼び出し元ペインでエージェント情報（`cwd` 等）が取得できない。

@@ -57,6 +57,7 @@ Herdr Orchestrator の設計書は、関連するテーマごとに複数のフ�
 - [herdr-orchestrator-task-cancellation.md](docs/herdr-orchestrator-task-cancellation.md): タスクキャンセル（`cancel-task`）および復旧ランブック 設計書（Issue #173）
 - [herdr-orchestrator-doctor-stale-in-progress.md](docs/herdr-orchestrator-doctor-stale-in-progress.md): `doctor` での stale `in_progress` タスク検出・要確認一覧（`await_human`）設計書（Issue #174）
 - [herdr-orchestrator-skipped-completion.md](docs/herdr-orchestrator-skipped-completion.md): `completion.status=skipped` 可視化（`doctor` / `task-list` / `result-submit`）設計書（Issue #183）
+- [herdr-orchestrator-foreground-cwd-fallback.md](docs/herdr-orchestrator-foreground-cwd-fallback.md): `foreground_cwd` 不在時の `cwd` フォールバック検証と `role set` 登録時の人間確認 設計書（Issue #194）
 
 ### 文書の編集ルール
 
