@@ -668,6 +668,9 @@ def _cmd_role(ns: argparse.Namespace) -> int:
                 exit_code=1,
             )
 
+        # cwd_source は Role Binding JSON には保存せず、CLI 出力および警告にのみ使用する
+        cwd_source = target_meta.pop("cwd_source", None)
+
         if is_implicit_pane:
             pane_target_cwd = target_meta.get("cwd") or ""
             if not check_cwd_affinity(pane_target_cwd, cwd):
@@ -756,10 +759,17 @@ def _cmd_role(ns: argparse.Namespace) -> int:
             "role": canonical_role,
             "display_name": display_name,
             "pane_id": roles[canonical_role],
+            "cwd_source": cwd_source,
             "target": target_with_summary,
             "label_sync": label_sync,
             "roles": roles,
         }
+        if cwd_source == "pane_cwd":
+            print(
+                f"[herdr-orchestrator] warning: ペイン {valid_pane!r} から foreground_cwd を取得できなかったため、"
+                f"pane の cwd ({target_meta['cwd']}) で登録しました。表示したパスが実際の作業場所か確認してください。",
+                file=sys.stderr,
+            )
         return emit_json(out_payload)
     elif action == "show":
         scope_id = _resolve_role_scope_id(cwd, is_global=is_global, create_if_missing=False)
@@ -1152,7 +1162,7 @@ def build_parser() -> argparse.ArgumentParser:
             role_set = role_sub.add_parser(
                 "set",
                 help="論理ロールと pane_id を紐づけて保存（UIラベルも自動同期）",
-                description="論理ロールと pane_id を紐づけて保存（UIラベルも自動同期）",
+                description="論理ロールと pane_id を紐づけて保存（UIラベルも自動同期。出力 JSON に cwd_source を含む）",
             )
             role_set.add_argument(
                 "role",
@@ -1183,7 +1193,7 @@ def build_parser() -> argparse.ArgumentParser:
             role_show = role_sub.add_parser(
                 "show",
                 help="ロールと pane_id の紐づけ一覧を表示",
-                description="ロールと pane_id の紐づけ一覧を表示",
+                description="ロールと pane_id の紐づけ一覧および live_status（cwd_source を含む）を表示",
             )
             role_show.add_argument(
                 "--global",

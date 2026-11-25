@@ -592,7 +592,12 @@ def list_live_panes_with_ui() -> list[dict[str, Any]] | None:
         pid = _extract_optional_str(raw_p, "pane_id")
         if not pid:
             continue
-        fg_raw = _extract_optional_str(raw_p, "foreground_cwd") or _extract_optional_str(raw_p, "cwd")
+        fg_only = _extract_optional_str(raw_p, "foreground_cwd")
+        pane_cwd_only = _extract_optional_str(raw_p, "cwd")
+        fg_raw = fg_only or pane_cwd_only
+        cwd_source: str | None = (
+            "foreground" if fg_only else ("pane_cwd" if pane_cwd_only else None)
+        )
         cwd_resolved = str(Path(fg_raw).resolve()) if fg_raw and Path(fg_raw).is_absolute() else fg_raw
         ws_id = _extract_optional_str(raw_p, "workspace_id")
         tb_id = _extract_optional_str(raw_p, "tab_id")
@@ -605,6 +610,7 @@ def list_live_panes_with_ui() -> list[dict[str, Any]] | None:
                 "pane_id": pid,
                 "name": _extract_optional_str(raw_p, "name") or pid,
                 "cwd": cwd_resolved,
+                "cwd_source": cwd_source,
                 "agent": agent_code,
                 "agent_label": agent_human_label(agent_code),
                 "agent_status": agent_status,
@@ -733,6 +739,7 @@ def inspect_pane_for_role_set(pane_id: str, *, display_name: str, bound_at: str)
             "tab_id": p.get("tab_id"),
             "tab_number": p.get("tab_number"),
             "bound_at": bound_at,
+            "cwd_source": p.get("cwd_source"),
         }
 
     # Fallback when `herdr pane list` is not supported by minimal fake herdr in tests
@@ -759,6 +766,7 @@ def inspect_pane_for_role_set(pane_id: str, *, display_name: str, bound_at: str)
         "tab_id": snap.tab_id,
         "tab_number": snap.tab_number,
         "bound_at": bound_at,
+        "cwd_source": "foreground",
     }
 
 
@@ -851,6 +859,7 @@ def evaluate_role_target_live_status(
         return {
             "status": "pane_mismatch",
             "agent_status": None,
+            "cwd_source": None,
             "reason": "outdated_metadata",
             "hint": (
                 "ペインの状態が登録時と一致しません（別ペインへの ID 再利用またはディレクトリ移動）。"
@@ -866,6 +875,7 @@ def evaluate_role_target_live_status(
         return {
             "status": "unknown",
             "agent_status": None,
+            "cwd_source": None,
             "reason": reason,
             "hint": "Herdr 実機のペイン一覧を取得できないため状態を判定できません（設定を削除しないでください）。",
         }
@@ -876,6 +886,7 @@ def evaluate_role_target_live_status(
         return {
             "status": "pane_missing",
             "agent_status": None,
+            "cwd_source": None,
             "reason": "pane_not_found",
             "hint": (
                 "指定されたペインが実機上に存在しません。Herdr 再起動後の場合は次回 handoff 時に自動追従を試みます。"
@@ -886,12 +897,14 @@ def evaluate_role_target_live_status(
     live_pane = matched[0]
     live_agent = live_pane.get("agent")
     live_agent_status = live_pane.get("agent_status")
+    live_cwd_source = live_pane.get("cwd_source")
 
     # 4. シェル待機チェック（エージェント未起動）
     if not live_agent or live_agent_status == "none":
         return {
             "status": "live",
             "agent_status": live_agent_status,
+            "cwd_source": live_cwd_source,
             "reason": "agent_not_running",
             "hint": (
                 "ペインは存在しますが現在エージェントが未起動（シェル状態）です。"
@@ -929,6 +942,7 @@ def evaluate_role_target_live_status(
         return {
             "status": "live",
             "agent_status": live_agent_status,
+            "cwd_source": live_cwd_source,
             "reason": None,
             "hint": None,
         }
@@ -936,6 +950,7 @@ def evaluate_role_target_live_status(
     return {
         "status": "pane_mismatch",
         "agent_status": live_agent_status,
+        "cwd_source": live_cwd_source,
         "reason": "context_changed",
         "hint": (
             "ペインの状態が登録時と一致しません（別ペインへの ID 再利用またはディレクトリ移動）。"
