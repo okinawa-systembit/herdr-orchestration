@@ -2379,6 +2379,65 @@ raise SystemExit(99)
         content_after = binding_file_b.read_text(encoding="utf-8")
         self.assertEqual(content_before, content_after)
 
+    def test_issue193_role_set_and_show_cwd_source_visibility(self) -> None:
+        # Issue #193: role set warns on stderr and emits cwd_source="pane_cwd" when foreground_cwd is absent,
+        # emits cwd_source="foreground" without warning when present, never persists cwd_source in role binding JSON,
+        # and role show includes cwd_source in live_status.
+        state = json.loads(self.herdr_state_file.read_text(encoding="utf-8"))
+        state["panes"].extend([
+            {
+                "pane_id": "w15:p7",
+                "workspace_id": "w15",
+                "tab_id": "w15:t1",
+                "terminal_id": "term_15_7",
+                "agent": "codex",
+                "agent_status": "idle",
+                "agent_session": {"value": "sess_fg_present"},
+                "foreground_cwd": str(self.repo_a.resolve()),
+                "cwd": str(self.repo_a.resolve()),
+            },
+            {
+                "pane_id": "w15:p8",
+                "workspace_id": "w15",
+                "tab_id": "w15:t1",
+                "terminal_id": "term_15_8",
+                "agent": "codex",
+                "agent_status": "idle",
+                "agent_session": {"value": "sess_fg_missing"},
+                "cwd": str(self.repo_a.resolve()),
+            },
+        ])
+        self._update_panes(state["panes"])
+
+        # 1. foreground_cwd present -> no warning, cwd_source == "foreground"
+        r_fg = _run_cli("role", "set", "調査fg", "--pane", "w15:p7", env=self.env, cwd=self.repo_a)
+        self.assertEqual(r_fg.returncode, 0, r_fg.stderr + r_fg.stdout)
+        self.assertNotIn("foreground_cwd", r_fg.stderr)
+        d_fg = json.loads(r_fg.stdout)
+        self.assertEqual(d_fg["cwd_source"], "foreground")
+
+        # 2. foreground_cwd absent -> stderr warning, cwd_source == "pane_cwd"
+        r_pane = _run_cli("role", "set", "調査pane", "--pane", "w15:p8", env=self.env, cwd=self.repo_a)
+        self.assertEqual(r_pane.returncode, 0, r_pane.stderr + r_pane.stdout)
+        self.assertIn("foreground_cwd", r_pane.stderr)
+        self.assertIn("cwd", r_pane.stderr)
+        d_pane = json.loads(r_pane.stdout)
+        self.assertEqual(d_pane["cwd_source"], "pane_cwd")
+
+        # 3. Role Binding JSON MUST NOT persist cwd_source
+        repo_id = get_repository_identity(self.repo_a)
+        binding_path = Path(self.env["XDG_STATE_HOME"]) / "herdr-orchestrator" / "roles" / f"{repo_id}.json"
+        binding_raw = json.loads(binding_path.read_text(encoding="utf-8"))
+        self.assertNotIn("cwd_source", binding_raw["targets"]["調査fg"])
+        self.assertNotIn("cwd_source", binding_raw["targets"]["調査pane"])
+
+        # 4. role show includes cwd_source in live_status for each role
+        r_show = _run_cli("role", "show", env=self.env, cwd=self.repo_a)
+        self.assertEqual(r_show.returncode, 0, r_show.stderr + r_show.stdout)
+        d_show = json.loads(r_show.stdout)
+        self.assertEqual(d_show["targets"]["調査fg"]["live_status"]["cwd_source"], "foreground")
+        self.assertEqual(d_show["targets"]["調査pane"]["live_status"]["cwd_source"], "pane_cwd")
+
 
 if __name__ == "__main__":
     unittest.main()
