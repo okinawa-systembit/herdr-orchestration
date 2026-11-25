@@ -127,7 +127,7 @@ submit 時に Orchestrator は `HERDR_ENV=1` 下で caller（`HERDR_PANE_ID`）�
 
 submit 元 context は [§11.0](#sec-11-0) に従って導出する（`handoff` worker 選定と同一規則）。取得不能・曖昧・矛盾がある場合は **拒否**する（`error: worker_context_unverified`、原則 **retryable: false**）。
 
-Herdr が `foreground_cwd` を返さない場合、または §11.0 の Git 解決が失敗する場合も安全側で **拒否**する。
+§11.0 の Git 解決が失敗する場合は安全側で **拒否**する。Herdr が `foreground_cwd` を返さない場合は、pane の `cwd` で代用して同じ照合を行い、stderr に警告を出す（[foreground_cwd フォールバック設計書 §4](../herdr-orchestrator-foreground-cwd-fallback.md#sec-4)）。`HERDR_ORCHESTRATOR_REQUIRE_FOREGROUND_CWD=1` のときは、従来どおり拒否する（[同 §6](../herdr-orchestrator-foreground-cwd-fallback.md#sec-6)）。
 
 同じ locator で解決された live Agent が別 repository / worktree にいる場合、2 または 3 の不一致で拒否する。また、in-flight task の途中で `role set` により別 pane が `reviewer` 等に再バインドされた場合でも、Registry の保存済み `worker.agent_name` と一致しない新 pane からの submit は `worker_agent_mismatch` で拒否する。同一ペイン（または同一 Pattern A 名）上での別 Agent 個体への worker 交代は、**Registry の保存済み `worker.agent_name` かつ Registry context と一致する live Agent** からの submit を許可する。
 
@@ -150,9 +150,12 @@ Herdr の `foreground_cwd` は **foreground process の cwd** であり、Regist
 Orchestrator は次の手順で **resolved worktree root** を求め、Registry と照合する。`handoff`（worker 選定）と `result-submit`（§10.3）は **同一手順**を用いる。
 
 ```text
-1. foreground_cwd を Herdr CLI/API から取得し、絶対 path に正規化
-   - 取得不能・空 → 拒否（配送不可 / worker_context_unverified）
-2. resolved_worktree := git -C <foreground_cwd> rev-parse --show-toplevel
+1. 検証用の cwd を Herdr CLI/API から取得し、絶対 path に正規化
+   - foreground_cwd があればそれを使う（cwd_source = foreground）
+   - 無ければ pane の cwd を使う（cwd_source = pane_cwd。stderr に警告。
+     Pattern A の worker 選定と厳格モードでは拒否する）
+   - どちらも取得不能・空 → 拒否（配送不可 / worker_context_unverified）
+2. resolved_worktree := git -C <検証用の cwd> rev-parse --show-toplevel
    - 非ゼロ終了、空出力、Git 管理外 → 拒否
    - stdout を絶対 path に正規化（realpath 相当）
 3. resolved_worktree == context.worktree.path（正規化後の一致）
@@ -161,7 +164,7 @@ Orchestrator は次の手順で **resolved worktree root** を求め、Registry 
 5. 導出した repository identity == context.repository.identity
 ```
 
-`foreground_cwd` を worktree root の代用にしない。pane ID / terminal ID も代用にしない。
+検証用の cwd（`foreground_cwd` または pane の `cwd`）を worktree root の代用にしない。pane ID / terminal ID も代用にしない。検証用の cwd の取得元（`cwd_source`）と、経路ごとの扱いの正本は [foreground_cwd フォールバック設計書 §3・§4](../herdr-orchestrator-foreground-cwd-fallback.md#sec-3) とする。
 
 #### repository identity の正規化（handoff / submit 共通）
 
@@ -307,7 +310,7 @@ Herdr の `agent prompt` は **確認と送信を一体の条件付き操作に�
 
 #### Orchestrator（handoff）
 
-`assert-handoff-continuable`（[§6.6](03-task-registry.md#sec-6-6)）は flock 保持下、`agent prompt` の **直前**に Registry **と** live Herdr 観測を再検証する（現在の Role Binding は参照せず、Registry 保存済みの `worker.agent_name` を使用する）。
+`assert-handoff-continuable`（[§6.6](03-task-registry.md#sec-6-6)）は flock 保持下、`agent prompt` の **直前**に Registry **と** live Herdr 観測を再検証する（現在の Role Binding は参照せず、Registry 保存済みの `worker.agent_name` を使用する）。`foreground_cwd` が無い場合の送信直前再確認・受信側検証の扱いは、[foreground_cwd フォールバック設計書 §4](../herdr-orchestrator-foreground-cwd-fallback.md#sec-4) の経路別の表に従う。
 
 ```text
 1. Registry lock 下: task.status=created, dispatch.status=pending, herdr_prompt_started_at 整合
