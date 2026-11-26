@@ -18,6 +18,7 @@
   - `SKILL.md` (Skill 定義正本)
   - `scripts/` (`herdr-orchestrator`, `task-registry.py`, 内部 Python モジュール群)
   - `references/` (エージェント参照用リファレンス群)
+  - `LICENSE` (MIT ライセンス全文)
 
 ※ テスト（`tests/`）、リポジトリ設計書（`docs/`）、CI 設定、開発用スクリプトはパッケージに含めない。
 ※ アーカイブ内には通常ファイルおよびディレクトリのみを含め、シンボリックリンク、ハードリンク、特殊デバイスファイル等は含めない。
@@ -27,10 +28,11 @@
 ```bash
 tar -czf "herdr-orchestration-${VERSION}.tar.gz" \
     -C skills/herdr-orchestrator \
-    SKILL.md scripts references
+    SKILL.md scripts references \
+    -C ../.. LICENSE
 ```
 
-展開先で直下に `SKILL.md` / `scripts` / `references` が配置されるルート構成とする。
+展開先で直下に `SKILL.md` / `scripts` / `references` / `LICENSE` が配置されるルート構成とする。
 
 ### 1.3 完全性と真正性の保証方針
 
