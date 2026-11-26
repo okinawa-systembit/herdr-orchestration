@@ -32,7 +32,7 @@ tar -czf "herdr-orchestration-${VERSION}.tar.gz" \
     -C ../.. LICENSE
 ```
 
-展開先で直下に `SKILL.md` / `scripts` / `references` / `LICENSE` が配置されるルート構成とする。
+展開先で直下に `SKILL.md` / `scripts` / `references` / `LICENSE` が配置されるルート構成とする（リポジトリ直下の `setup.sh` 経由の導入では `SKILL.md` / `scripts` / `references` のみをコピーするため `LICENSE` は配置されない）。
 
 ### 1.3 完全性と真正性の保証方針
 

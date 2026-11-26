@@ -152,6 +152,15 @@ jobs:
           "${TEST_DIR}/scripts/herdr-orchestrator" --help > /dev/null
           # チェックサム検証確認
           sha256sum -c "${ARCHIVE_NAME}.sha256"
+          # install.sh による実インストール検証
+          TEST_INSTALL_DEST="${TEST_DIR}/install_dest"
+          TEST_BIN_DIR="${TEST_DIR}/install_bin"
+          HERDR_INSTALL_LOCAL_TARBALL="${ARCHIVE_NAME}" \
+          HERDR_INSTALL_LOCAL_CHECKSUM="${ARCHIVE_NAME}.sha256" \
+            bash ./install.sh --dest "${TEST_INSTALL_DEST}" --bin-dir "${TEST_BIN_DIR}"
+          test -f "${TEST_INSTALL_DEST}/SKILL.md"
+          test -f "${TEST_INSTALL_DEST}/LICENSE"
+          "${TEST_BIN_DIR}/herdr-orchestrator" --help > /dev/null
           rm -rf "${TEST_DIR}"
           echo "Smoke test passed successfully."
 
