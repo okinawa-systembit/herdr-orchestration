@@ -423,6 +423,12 @@ validate_archive_security() {
     local root_element="${path%%/*}"
     case "$root_element" in
       SKILL.md | scripts | references) ;;
+      LICENSE)
+        if [[ "$path" != "LICENSE" ]]; then
+          echo "Security Error: Archive contains unexpected entry: $path" >&2
+          exit 1
+        fi
+        ;;
       *)
         echo "Security Error: Archive contains unexpected entry: $path" >&2
         exit 1

@@ -341,4 +341,4 @@ curl -fsSL 'https://raw.githubusercontent.com/okinawa-systembit/herdr-orchestrat
 
 - **不具合報告・フィードバック**: [GitHub Issues](https://github.com/okinawa-systembit/herdr-orchestration/issues)
 - **リリース情報**: [GitHub Releases](https://github.com/okinawa-systembit/herdr-orchestration/releases)
-- **ライセンス**: リポジトリ管理者まで直接お問い合わせください。
+- **ライセンス**: MIT License（[LICENSE](LICENSE)）

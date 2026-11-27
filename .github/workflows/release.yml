@@ -115,6 +115,10 @@ jobs:
               exit 1
             fi
           done
+          if [ ! -f "LICENSE" ]; then
+            echo "Error: Missing required package item: LICENSE" >&2
+            exit 1
+          fi
 
       - name: 4. Ensure executable permissions & build distribution tarball
         run: |
@@ -123,7 +127,8 @@ jobs:
                    skills/herdr-orchestrator/scripts/task-registry.py
           tar -czf "herdr-orchestration-${VERSION}.tar.gz" \
               -C skills/herdr-orchestrator \
-              SKILL.md scripts references
+              SKILL.md scripts references \
+              -C ../.. LICENSE
 
       - name: 5. Generate SHA256 checksum
         run: |
@@ -140,12 +145,22 @@ jobs:
           tar -xzf "${ARCHIVE_NAME}" -C "${TEST_DIR}"
           # 必須ファイルの存在確認
           test -f "${TEST_DIR}/SKILL.md"
+          test -f "${TEST_DIR}/LICENSE"
           test -x "${TEST_DIR}/scripts/herdr-orchestrator"
           test -x "${TEST_DIR}/scripts/task-registry.py"
           # CLI ヘルプ実行確認
           "${TEST_DIR}/scripts/herdr-orchestrator" --help > /dev/null
           # チェックサム検証確認
           sha256sum -c "${ARCHIVE_NAME}.sha256"
+          # install.sh による実インストール検証
+          TEST_INSTALL_DEST="${TEST_DIR}/install_dest"
+          TEST_BIN_DIR="${TEST_DIR}/install_bin"
+          HERDR_INSTALL_LOCAL_TARBALL="${ARCHIVE_NAME}" \
+          HERDR_INSTALL_LOCAL_CHECKSUM="${ARCHIVE_NAME}.sha256" \
+            bash ./install.sh --dest "${TEST_INSTALL_DEST}" --bin-dir "${TEST_BIN_DIR}"
+          test -f "${TEST_INSTALL_DEST}/SKILL.md"
+          test -f "${TEST_INSTALL_DEST}/LICENSE"
+          "${TEST_BIN_DIR}/herdr-orchestrator" --help > /dev/null
           rm -rf "${TEST_DIR}"
           echo "Smoke test passed successfully."
 

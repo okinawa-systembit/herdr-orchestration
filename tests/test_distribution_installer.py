@@ -33,6 +33,10 @@ def create_sample_tarball(target_path: Path, *, extra_files: dict[str, str] | No
         ref_dir = SKILL_ROOT / "references"
         tar.add(ref_dir, arcname="references")
 
+        # Add LICENSE at archive root
+        license_file = REPO_ROOT / "LICENSE"
+        tar.add(license_file, arcname="LICENSE")
+
         if extra_files:
             for arcname, content in extra_files.items():
                 import io
@@ -138,6 +142,7 @@ class DistributionInstallerTests(unittest.TestCase):
 
             # Verify files installed
             self.assertTrue((dest / "SKILL.md").is_file())
+            self.assertTrue((dest / "LICENSE").is_file())
             self.assertTrue((dest / "scripts" / "herdr-orchestrator").is_file())
             self.assertTrue((dest / "scripts" / "task-registry.py").is_file())
             self.assertTrue(os.access(dest / "scripts" / "herdr-orchestrator", os.X_OK))
